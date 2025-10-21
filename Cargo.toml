@@ -16,3 +16,7 @@ uuid = { version = "1.4", features = ["serde", "v4"] }
 [dev-dependencies]
 assert_fs = "1.1"
 tempfile = "3.8"
+
+[[bin]]
+name = "budget_core_cli"
+path = "src/cli.rs"
