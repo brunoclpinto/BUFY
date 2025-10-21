@@ -26,6 +26,10 @@ The ledger module owns the domain entities required for bookkeeping:
 
 The simulation module currently provides lightweight summaries (`SimulationSummary`) of ledger activity. Future iterations will deliver forward-looking projections, Monte Carlo models, and scenario testing. The intent is to keep simulation read-only, consuming ledger data via well-defined APIs.
 
+### `cli`
+
+Phase 3 introduces an interactive `rustyline`-powered shell that wraps the ledger APIs with contextual menus and command dispatch. Users can create or load ledgers, add accounts/categories/transactions, list data, and save progress without leaving the prompt. Script mode (enabled via the `BUDGET_CORE_CLI_SCRIPT` env var) keeps pipelines testable for CI and automated workflows.
+
 ### `utils`
 
 Utility helpers house cross-cutting concerns. Phase 0 ships the tracing bootstrapper (`init_tracing`) that configures an env-filtered subscriber with the crate defaulting to `info` level. Phase 2 introduces JSON persistence helpers that stage atomic writes and make loading/saving ledgers trivial for the CLI and future services.

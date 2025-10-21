@@ -23,10 +23,15 @@ Budget Core provides a reusable Rust toolkit for building budgeting workflows, s
    cargo audit
    ```
 
-3. Launch the CLI harness:
+3. Launch the CLI harness (interactive shell):
 
    ```sh
-   cargo run --bin budget_core_cli -- new "Demo Ledger"
+   cargo run --bin budget_core_cli
+   ```
+
+   Script mode remains available for quick pipelines:
+
+   ```sh
    cargo run --bin budget_core_cli -- new "Demo Ledger" | cargo run --bin budget_core_cli -- save demo-ledger.json
    cargo run --bin budget_core_cli -- load demo-ledger.json
    ```
