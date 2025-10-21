@@ -3,6 +3,7 @@
 //! Budget Core offers foundational ledger, budgeting, and simulation primitives
 //! that power higher level budgeting workflows and CLIs.
 
+pub mod cli;
 pub mod errors;
 pub mod ledger;
 pub mod simulation;
