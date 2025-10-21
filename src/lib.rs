@@ -4,6 +4,8 @@
 //! that power higher level budgeting workflows and CLIs.
 
 pub mod errors;
+pub mod ledger;
+pub mod simulation;
 pub mod utils;
 
 use std::sync::Once;
