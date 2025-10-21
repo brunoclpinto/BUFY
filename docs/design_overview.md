@@ -18,8 +18,9 @@ The ledger module owns the domain entities required for bookkeeping:
 - `Account` represents asset or liability containers and tracks balances in integer cents.
 - `Category` labels transactions for budgeting and reporting.
 - `Budget` stores spending guardrails per category and period.
-- `Transaction` captures discrete financial movements against accounts. In later phases, validation and balance adjustments will live here.
-- `Ledger` aggregates the above entities, offering storing and lookup helpers that surface structured `LedgerError` values.
+- `TimeInterval` and `TimeUnit` express common recurrence windows that power budgets and transactions alike.
+- `Transaction` captures discrete financial movements against accounts and encodes recurrence policies.
+- `Ledger` aggregates the above entities, offering storing and lookup helpers that surface structured `LedgerError` values. The structure is serde-friendly for JSON imports/exports while maintaining timestamps and schema versions for migrations.
 
 ### `simulation`
 
@@ -27,7 +28,7 @@ The simulation module currently provides lightweight summaries (`SimulationSumma
 
 ### `utils`
 
-Utility helpers house cross-cutting concerns. Phase 0 ships the tracing bootstrapper (`init_tracing`) that configures an env-filtered subscriber with the crate defaulting to `info` level. Additional helpers (configuration loading, file IO, etc.) will land here in subsequent phases.
+Utility helpers house cross-cutting concerns. Phase 0 ships the tracing bootstrapper (`init_tracing`) that configures an env-filtered subscriber with the crate defaulting to `info` level. Phase 2 introduces JSON persistence helpers that stage atomic writes and make loading/saving ledgers trivial for the CLI and future services.
 
 ### `errors`
 
