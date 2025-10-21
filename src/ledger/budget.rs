@@ -1,30 +1,25 @@
+use super::time_interval::TimeInterval;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// A spending guardrail for a specific category.
+/// Describes an envelope of planned spending for a category.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Budget {
     pub id: Uuid,
     pub category_id: Uuid,
-    pub limit_cents: i64,
-    pub period: BudgetPeriod,
+    pub limit_amount: f64,
+    pub recurrence: TimeInterval,
+    pub is_active: bool,
 }
 
 impl Budget {
-    pub fn new(category_id: Uuid, limit_cents: i64, period: BudgetPeriod) -> Self {
+    pub fn new(category_id: Uuid, limit_amount: f64, recurrence: TimeInterval) -> Self {
         Self {
             id: Uuid::new_v4(),
             category_id,
-            limit_cents,
-            period,
+            limit_amount,
+            recurrence,
+            is_active: true,
         }
     }
-}
-
-/// Enumeration of budgeting periods.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum BudgetPeriod {
-    Monthly,
-    Quarterly,
-    Yearly,
 }
