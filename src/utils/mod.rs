@@ -1,6 +1,6 @@
 pub mod persistence;
 
-use std::sync::Once;
+use std::{io, sync::Once};
 
 static TRACING_INIT: Once = Once::new();
 
@@ -12,6 +12,6 @@ pub fn init_tracing() {
         let filter =
             EnvFilter::from_default_env().add_directive("budget_core=info".parse().unwrap());
 
-        fmt().with_env_filter(filter).init();
+        fmt().with_env_filter(filter).with_writer(io::stderr).init();
     });
 }
