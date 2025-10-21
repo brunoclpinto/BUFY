@@ -1,3 +1,5 @@
+pub mod persistence;
+
 use std::sync::Once;
 
 static TRACING_INIT: Once = Once::new();
