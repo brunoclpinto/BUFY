@@ -29,12 +29,16 @@ Budget Core provides a reusable Rust toolkit for building budgeting workflows, s
    cargo run --bin budget_core_cli
    ```
 
+   Inside the REPL use `help` to list available commands (`help add`, `help list`, etc.). The prompt reflects the active ledger (for example, `ledger(home) ⮞`), and commands such as `new-ledger`, `load`, `save`, `add`, `list`, and `summary` operate on the in-memory ledger state. Arrow keys navigate history, and contextual menus appear for commands that require additional input.
+
    Script mode remains available for quick pipelines:
 
    ```sh
    cargo run --bin budget_core_cli -- new "Demo Ledger" | cargo run --bin budget_core_cli -- save demo-ledger.json
    cargo run --bin budget_core_cli -- load demo-ledger.json
    ```
+
+   For more detail on the command set and how it ties back to the ledger model, check `docs/design_overview.md`.
 
 Additional architectural notes are captured in `docs/design_overview.md`.
 
