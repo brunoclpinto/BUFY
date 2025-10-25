@@ -941,10 +941,7 @@ impl CliApp {
             if let Some(hint) = self.transaction_recurrence_hint(txn) {
                 println!("        {}", hint.bright_black());
             } else if txn.recurrence_series_id.is_some() {
-                println!(
-                    "{}",
-                    "        scheduled instance from recurrence".bright_black()
-                );
+                println!("{}", "[instance] scheduled entry from recurrence".bright_black());
             }
         }
         Ok(())
@@ -1313,9 +1310,9 @@ impl CliApp {
 
     fn transaction_recurrence_hint(&self, txn: &Transaction) -> Option<String> {
         let rule = txn.recurrence.as_ref()?;
-        let mut parts = vec![format!("Recurring {}", rule.interval.label())];
+        let mut parts = vec![String::from("[recurring]"), rule.interval.label()];
         match rule.status {
-            RecurrenceStatus::Active => {}
+            RecurrenceStatus::Active => parts.push("active".into()),
             RecurrenceStatus::Paused => parts.push("paused".into()),
             RecurrenceStatus::Completed => parts.push("completed".into()),
         }
