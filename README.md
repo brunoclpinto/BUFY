@@ -38,6 +38,8 @@ Budget Core provides a reusable Rust toolkit for building budgeting workflows, s
    cargo run --bin budget_core_cli -- load demo-ledger.json
    ```
 
+   Named simulations persist alongside the ledger. Use `create-simulation`, `enter-simulation`, `simulation add/modify/exclude`, `list-simulations`, `summary <simulation>`, `apply-simulation`, and `discard-simulation` to manage and compare "what-if" scenarios without mutating the base data.
+
    For more detail on the command set and how it ties back to the ledger model, check `docs/design_overview.md`.
 
 Additional architectural notes are captured in `docs/design_overview.md`.

@@ -30,6 +30,16 @@ The simulation module currently provides lightweight summaries (`SimulationSumma
 
 Phase 3 introduces an interactive `rustyline`-powered shell that wraps the ledger APIs with contextual menus and command dispatch. Users can create or load ledgers, add accounts/categories/transactions, list data, and save progress without leaving the prompt. Time-based fields use a `TimeInterval` editor that supports arbitrary “repeat every N <unit>” entries for budgets and recurrences. Script mode (enabled via the `BUDGET_CORE_CLI_SCRIPT` env var) keeps pipelines testable for CI and automated workflows. The `summary` command delegates directly to the ledger’s budgeting APIs so the shell remains a thin presentation layer.
 
+### Simulations (Phase 5)
+
+Simulations are persisted, name-addressable overlays that store only the delta relative to the authoritative ledger. Each simulation carries metadata (name, notes, timestamps, status) and a list of changes:
+
+- `AddTransaction` — staged hypothetical entries.
+- `ModifyTransaction` — partial patches against existing transactions.
+- `ExcludeTransaction` — temporarily ignore a real transaction.
+
+Ledger JSON now includes a `simulations` array so scenarios survive reloads and version bumps. The ledger exposes APIs to create, list, summarize, apply, and discard simulations, and budget summaries can optionally include a simulation overlay to show base/simulated totals plus deltas. The CLI surfaces this lifecycle via commands such as `create-simulation`, `enter-simulation`, `simulation add/modify/exclude`, `list-simulations`, `summary <simulation>`, `apply-simulation`, and `discard-simulation` while the prompt indicates when the user is editing a simulation.
+
 ### `utils`
 
 Utility helpers house cross-cutting concerns. Phase 0 ships the tracing bootstrapper (`init_tracing`) that configures an env-filtered subscriber with the crate defaulting to `info` level. Phase 2 introduces JSON persistence helpers that stage atomic writes and make loading/saving ledgers trivial for the CLI and future services.
