@@ -6,7 +6,7 @@ use tempfile::NamedTempFile;
 fn script_mode_runs_basic_flow() {
     let tmp = NamedTempFile::new().unwrap();
     let input = format!(
-        "new-ledger Demo monthly\nsave {}\nexit\n",
+        "new-ledger Demo every 6 weeks\nsave {}\nexit\n",
         tmp.path().display()
     );
 

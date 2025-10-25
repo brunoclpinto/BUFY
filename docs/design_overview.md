@@ -28,7 +28,7 @@ The simulation module currently provides lightweight summaries (`SimulationSumma
 
 ### `cli`
 
-Phase 3 introduces an interactive `rustyline`-powered shell that wraps the ledger APIs with contextual menus and command dispatch. Users can create or load ledgers, add accounts/categories/transactions, list data, and save progress without leaving the prompt. Script mode (enabled via the `BUDGET_CORE_CLI_SCRIPT` env var) keeps pipelines testable for CI and automated workflows.
+Phase 3 introduces an interactive `rustyline`-powered shell that wraps the ledger APIs with contextual menus and command dispatch. Users can create or load ledgers, add accounts/categories/transactions, list data, and save progress without leaving the prompt. Time-based fields use a `TimeInterval` editor that supports arbitrary “repeat every N <unit>” entries for budgets and recurrences. Script mode (enabled via the `BUDGET_CORE_CLI_SCRIPT` env var) keeps pipelines testable for CI and automated workflows.
 
 ### `utils`
 

@@ -340,28 +340,58 @@ impl CliApp {
             .interact()
             .map_err(CommandError::from)?;
 
-        Ok(match options[selection].to_lowercase().as_str() {
-            "daily" => TimeInterval {
-                every: 1,
-                unit: TimeUnit::Day,
-            },
-            "weekly" => TimeInterval {
-                every: 1,
-                unit: TimeUnit::Week,
-            },
-            "monthly" => TimeInterval {
-                every: 1,
-                unit: TimeUnit::Month,
-            },
-            "yearly" => TimeInterval {
-                every: 1,
-                unit: TimeUnit::Year,
-            },
-            _ => TimeInterval {
-                every: 1,
-                unit: TimeUnit::Month,
-            },
-        })
+        if selection == options.len() - 1 {
+            let every: u32 = Input::<u32>::with_theme(&self.theme)
+                .with_prompt("Repeat every (number)")
+                .validate_with(|value: &u32| -> Result<(), &str> {
+                    if *value == 0 {
+                        Err("Value must be greater than 0")
+                    } else {
+                        Ok(())
+                    }
+                })
+                .interact_text()
+                .map_err(CommandError::from)?;
+
+            let units = ["Day", "Week", "Month", "Year"];
+            let unit_selection = Select::with_theme(&self.theme)
+                .with_prompt("Time unit")
+                .items(&units)
+                .default(2)
+                .interact()
+                .map_err(CommandError::from)?;
+            let unit = match unit_selection {
+                0 => TimeUnit::Day,
+                1 => TimeUnit::Week,
+                2 => TimeUnit::Month,
+                _ => TimeUnit::Year,
+            };
+
+            Ok(TimeInterval { every, unit })
+        } else {
+            Ok(match options[selection].to_lowercase().as_str() {
+                "daily" => TimeInterval {
+                    every: 1,
+                    unit: TimeUnit::Day,
+                },
+                "weekly" => TimeInterval {
+                    every: 1,
+                    unit: TimeUnit::Week,
+                },
+                "monthly" => TimeInterval {
+                    every: 1,
+                    unit: TimeUnit::Month,
+                },
+                "yearly" => TimeInterval {
+                    every: 1,
+                    unit: TimeUnit::Year,
+                },
+                _ => TimeInterval {
+                    every: 1,
+                    unit: TimeUnit::Month,
+                },
+            })
+        }
     }
 
     fn run_new_ledger_script(&mut self, args: &[&str]) -> CommandResult {
@@ -372,8 +402,12 @@ impl CliApp {
         }
 
         let name = args[0].to_string();
-        let period_str = args.get(1).copied().unwrap_or("monthly");
-        let period = parse_period(period_str)?;
+        let period_str = if args.len() > 1 {
+            args[1..].join(" ")
+        } else {
+            "monthly".to_string()
+        };
+        let period = parse_period(&period_str)?;
         let ledger = Ledger::new(name, period);
         self.set_ledger(ledger, None);
         println!("{}", "New ledger created".bright_green());
@@ -645,14 +679,10 @@ impl CliApp {
         } else {
             println!("{}", "Transactions".bright_white().bold());
             for (idx, txn) in ledger.transactions.iter().enumerate() {
-            println!(
-                "  [{}] {} -> {} | {} | {:.2}",
-                idx,
-                txn.from_account,
-                txn.to_account,
-                txn.scheduled_date,
-                txn.budgeted_amount
-            );
+                println!(
+                    "  [{}] {} -> {} | {} | {:.2}",
+                    idx, txn.from_account, txn.to_account, txn.scheduled_date, txn.budgeted_amount
+                );
             }
         }
         Ok(())
@@ -850,36 +880,74 @@ fn parse_command_line(line: &str) -> Result<Vec<String>, ParseError> {
 }
 
 fn parse_period(input: &str) -> Result<BudgetPeriod, CommandError> {
-    let clean = input.to_lowercase();
-    let interval = match clean.as_str() {
-        "daily" => TimeInterval {
-            every: 1,
-            unit: TimeUnit::Day,
-        },
-        "weekly" => TimeInterval {
-            every: 1,
-            unit: TimeUnit::Week,
-        },
-        "monthly" => TimeInterval {
-            every: 1,
-            unit: TimeUnit::Month,
-        },
-        "yearly" => TimeInterval {
-            every: 1,
-            unit: TimeUnit::Year,
-        },
-        other => {
-            return Err(CommandError::InvalidArguments(format!(
-                "unsupported period `{}`",
-                other
-            )))
-        }
-    };
-    Ok(BudgetPeriod(interval))
+    Ok(BudgetPeriod(parse_time_interval_str(input)?))
 }
 
 fn interval_options() -> &'static [&'static str] {
-    &["Monthly", "Weekly", "Daily", "Yearly"]
+    &["Monthly", "Weekly", "Daily", "Yearly", "Custom..."]
+}
+
+fn parse_time_interval_str(input: &str) -> Result<TimeInterval, CommandError> {
+    let normalized = input.trim().to_lowercase();
+    if normalized.is_empty() {
+        return Err(CommandError::InvalidArguments(
+            "interval description cannot be empty".into(),
+        ));
+    }
+
+    let direct = match normalized.as_str() {
+        "daily" => Some(TimeInterval {
+            every: 1,
+            unit: TimeUnit::Day,
+        }),
+        "weekly" => Some(TimeInterval {
+            every: 1,
+            unit: TimeUnit::Week,
+        }),
+        "monthly" => Some(TimeInterval {
+            every: 1,
+            unit: TimeUnit::Month,
+        }),
+        "yearly" => Some(TimeInterval {
+            every: 1,
+            unit: TimeUnit::Year,
+        }),
+        _ => None,
+    };
+    if let Some(interval) = direct {
+        return Ok(interval);
+    }
+
+    let cleaned = normalized.replace(['-', '_'], " ");
+    let mut parts: Vec<&str> = cleaned.split_whitespace().collect();
+    if parts.first().copied() == Some("every") {
+        parts.remove(0);
+    }
+
+    let (number_str, unit_str) = if parts.len() >= 2 {
+        (parts[0], parts[1])
+    } else if parts.len() == 1 {
+        split_numeric_unit(parts[0]).ok_or_else(|| {
+            CommandError::InvalidArguments(format!("unable to parse interval `{}`", input))
+        })?
+    } else {
+        return Err(CommandError::InvalidArguments(format!(
+            "unable to parse interval `{}`",
+            input
+        )));
+    };
+
+    let every: u32 = number_str.parse().map_err(|_| {
+        CommandError::InvalidArguments(format!("invalid interval count `{}`", number_str))
+    })?;
+    if every == 0 {
+        return Err(CommandError::InvalidArguments(
+            "interval count must be greater than zero".into(),
+        ));
+    }
+
+    let unit = parse_time_unit(unit_str)?;
+    Ok(TimeInterval { every, unit })
 }
 
 fn account_kind_options() -> &'static [&'static str] {
@@ -919,6 +987,29 @@ fn parse_category_kind(input: &str) -> Result<CategoryKind, CommandError> {
         "transfer" => Ok(CategoryKind::Transfer),
         other => Err(CommandError::InvalidArguments(format!(
             "unknown category kind `{}`",
+            other
+        ))),
+    }
+}
+
+fn split_numeric_unit(token: &str) -> Option<(&str, &str)> {
+    let pos = token.find(|c: char| !c.is_ascii_digit())?;
+    let (number, rest) = token.split_at(pos);
+    if number.is_empty() || rest.is_empty() {
+        None
+    } else {
+        Some((number, rest))
+    }
+}
+
+fn parse_time_unit(token: &str) -> Result<TimeUnit, CommandError> {
+    match token.trim_matches('s') {
+        "day" | "d" => Ok(TimeUnit::Day),
+        "week" | "w" => Ok(TimeUnit::Week),
+        "month" | "mo" | "m" => Ok(TimeUnit::Month),
+        "year" | "yr" | "y" => Ok(TimeUnit::Year),
+        other => Err(CommandError::InvalidArguments(format!(
+            "unknown time unit `{}`",
             other
         ))),
     }
@@ -1005,9 +1096,11 @@ mod tests {
 
     #[test]
     fn script_runner_creates_ledger() {
-        let state = process_script(&["new-ledger Demo monthly", "exit"]).unwrap();
+        let state = process_script(&["new-ledger Demo 3 months", "exit"]).unwrap();
         let ledger = state.ledger().expect("ledger present");
         assert_eq!(ledger.name, "Demo");
+        assert_eq!(ledger.budget_period.0.every, 3);
+        assert_eq!(ledger.budget_period.0.unit, TimeUnit::Month);
     }
 
     #[test]
@@ -1016,7 +1109,7 @@ mod tests {
         let path = tmp.path().to_path_buf();
 
         let setup_cmds: Vec<String> = vec![
-            "new-ledger Testing monthly".into(),
+            "new-ledger Testing every 2 weeks".into(),
             format!("save {}", path.display()),
             "exit".into(),
         ];
@@ -1035,5 +1128,27 @@ mod tests {
         let state = process_script(&load_refs).unwrap();
         let ledger = state.ledger().expect("ledger present");
         assert_eq!(ledger.name, "Testing");
+        assert_eq!(ledger.budget_period.0.every, 2);
+        assert_eq!(ledger.budget_period.0.unit, TimeUnit::Week);
+    }
+
+    #[test]
+    fn parse_interval_accepts_every_keyword() {
+        let interval = super::parse_time_interval_str("every 6 weeks").unwrap();
+        assert_eq!(interval.every, 6);
+        assert_eq!(interval.unit, TimeUnit::Week);
+    }
+
+    #[test]
+    fn parse_interval_accepts_compact_form() {
+        let interval = super::parse_time_interval_str("12months").unwrap();
+        assert_eq!(interval.every, 12);
+        assert_eq!(interval.unit, TimeUnit::Month);
+    }
+
+    #[test]
+    fn parse_interval_rejects_zero() {
+        let err = super::parse_time_interval_str("0 days").unwrap_err();
+        matches!(err, CommandError::InvalidArguments(_));
     }
 }
