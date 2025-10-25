@@ -29,7 +29,7 @@ Budget Core provides a reusable Rust toolkit for building budgeting workflows, s
    cargo run --bin budget_core_cli
    ```
 
-   Inside the REPL use `help` to list available commands (`help add`, `help list`, etc.). The prompt reflects the active ledger (for example, `ledger(home) ⮞`), and commands such as `new-ledger`, `load`, `save`, `add`, `list`, and `summary` operate on the in-memory ledger state. Arrow keys navigate history, and contextual menus appear for commands that require additional input (choose **Custom...** to enter any repeat interval like “every 6 weeks”).
+   Inside the REPL use `help` to list available commands (`help add`, `help list`, etc.). The prompt reflects the active ledger (for example, `ledger(home) ⮞`), and commands such as `new-ledger`, `load`, `save`, `add`, `list`, and `summary` operate on the in-memory ledger state. Arrow keys navigate history, and contextual menus appear for commands that require additional input (choose **Custom...** to enter any repeat interval like “every 6 weeks”). Use `summary`, `summary past [n]`, `summary future [n]`, or `summary custom <start> <end>` to view budgeted vs. real totals with variance, category/account breakdowns, and health indicators.
 
    Script mode remains available for quick pipelines (interval strings such as `every 6 weeks` or `3 months` are accepted):
 

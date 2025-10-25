@@ -20,7 +20,7 @@ The ledger module owns the domain entities required for bookkeeping:
 - `Budget` stores spending guardrails per category and period.
 - `TimeInterval` and `TimeUnit` express common recurrence windows that power budgets and transactions alike.
 - `Transaction` captures discrete financial movements against accounts and encodes recurrence policies.
-- `Ledger` aggregates the above entities, offering storing and lookup helpers that surface structured `LedgerError` values. The structure is serde-friendly for JSON imports/exports while maintaining timestamps and schema versions for migrations.
+- `Ledger` aggregates the above entities, offering storing and lookup helpers that surface structured `LedgerError` values. The structure is serde-friendly for JSON imports/exports while maintaining timestamps and schema versions for migrations. Phase 4 layers budget summaries on the ledger so it can calculate period windows, per-category/account aggregations, variances, and health classifications without involving the CLI.
 
 ### `simulation`
 
@@ -28,7 +28,7 @@ The simulation module currently provides lightweight summaries (`SimulationSumma
 
 ### `cli`
 
-Phase 3 introduces an interactive `rustyline`-powered shell that wraps the ledger APIs with contextual menus and command dispatch. Users can create or load ledgers, add accounts/categories/transactions, list data, and save progress without leaving the prompt. Time-based fields use a `TimeInterval` editor that supports arbitrary “repeat every N <unit>” entries for budgets and recurrences. Script mode (enabled via the `BUDGET_CORE_CLI_SCRIPT` env var) keeps pipelines testable for CI and automated workflows.
+Phase 3 introduces an interactive `rustyline`-powered shell that wraps the ledger APIs with contextual menus and command dispatch. Users can create or load ledgers, add accounts/categories/transactions, list data, and save progress without leaving the prompt. Time-based fields use a `TimeInterval` editor that supports arbitrary “repeat every N <unit>” entries for budgets and recurrences. Script mode (enabled via the `BUDGET_CORE_CLI_SCRIPT` env var) keeps pipelines testable for CI and automated workflows. The `summary` command delegates directly to the ledger’s budgeting APIs so the shell remains a thin presentation layer.
 
 ### `utils`
 
