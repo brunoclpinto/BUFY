@@ -337,6 +337,16 @@ impl Ledger {
         CURRENT_SCHEMA_VERSION
     }
 
+    pub fn upgrade_schema_if_needed(&mut self) -> bool {
+        if self.schema_version < CURRENT_SCHEMA_VERSION {
+            self.schema_version = CURRENT_SCHEMA_VERSION;
+            self.touch();
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn create_simulation(
         &mut self,
         name: impl Into<String>,

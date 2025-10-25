@@ -503,9 +503,22 @@ impl CliApp {
     fn load_ledger(&mut self, path: &Path) -> CommandResult {
         let mut ledger =
             persistence::load_ledger_from_file(path).map_err(CommandError::from_ledger)?;
+        let previous_version = ledger.schema_version;
         ledger.refresh_recurrence_metadata();
+        let upgraded = ledger.upgrade_schema_if_needed();
         self.set_ledger(ledger, Some(path.to_path_buf()));
         println!("{}", "Ledger loaded".bright_green());
+        if upgraded {
+            println!(
+                "{}",
+                format!(
+                    "Schema upgraded from v{} to v{}. Run `save` to persist recurrence metadata.",
+                    previous_version,
+                    Ledger::schema_version_default()
+                )
+                .yellow()
+            );
+        }
         Ok(())
     }
 
