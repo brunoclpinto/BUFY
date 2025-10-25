@@ -11,13 +11,15 @@ use dialoguer::{theme::ColorfulTheme, Confirm, Input, Select};
 use rustyline::{error::ReadlineError, DefaultEditor};
 use shell_words::split;
 use strsim::levenshtein;
+use uuid::Uuid;
 
 use crate::{
     errors::LedgerError,
     ledger::{
-        account::AccountKind, category::CategoryKind, Account, BudgetPeriod, BudgetStatus,
-        BudgetSummary, Category, Ledger, Recurrence, RecurrenceMode, TimeInterval, TimeUnit,
-        Transaction,
+        account::AccountKind, category::CategoryKind, Account, BudgetPeriod, BudgetScope,
+        BudgetStatus, BudgetSummary, Category, DateWindow, Ledger, Recurrence, RecurrenceMode,
+        SimulationBudgetImpact, SimulationChange, SimulationStatus, SimulationTransactionPatch,
+        TimeInterval, TimeUnit, Transaction,
     },
     utils::persistence,
 };
@@ -100,6 +102,7 @@ pub struct CliApp {
 pub(crate) struct CliState {
     ledger: Option<Ledger>,
     ledger_path: Option<PathBuf>,
+    active_simulation: Option<String>,
 }
 
 impl CliState {
@@ -107,15 +110,25 @@ impl CliState {
         Self {
             ledger: None,
             ledger_path: None,
+            active_simulation: None,
         }
     }
 
     fn set_ledger(&mut self, ledger: Ledger) {
         self.ledger = Some(ledger);
+        self.active_simulation = None;
     }
 
     fn set_path(&mut self, path: Option<PathBuf>) {
         self.ledger_path = path;
+    }
+
+    fn active_simulation(&self) -> Option<&str> {
+        self.active_simulation.as_deref()
+    }
+
+    fn set_active_simulation(&mut self, name: Option<String>) {
+        self.active_simulation = name;
     }
 }
 
@@ -194,7 +207,21 @@ impl CliApp {
             .map(|ledger| format!("ledger({})", ledger.name))
             .unwrap_or_else(|| "no-ledger".to_string());
 
-        format!("{} {} ", context.bright_cyan(), PROMPT_ARROW.bright_black())
+        let sim_segment = self
+            .state
+            .active_simulation()
+            .map(|name| format!("[sim:{}]", name).bright_magenta().to_string())
+            .unwrap_or_default();
+        format!(
+            "{}{} {} ",
+            context.bright_cyan(),
+            if sim_segment.is_empty() {
+                String::new()
+            } else {
+                format!(" {}", sim_segment)
+            },
+            PROMPT_ARROW.bright_black()
+        )
     }
 
     pub(crate) fn process_line(&mut self, line: &str) -> Result<LoopControl, CommandError> {
@@ -292,9 +319,23 @@ impl CliApp {
             .ok_or(CommandError::LedgerNotLoaded)
     }
 
+    fn active_simulation_name(&self) -> Option<&str> {
+        self.state.active_simulation()
+    }
+
+    fn require_active_simulation(&self) -> Result<&str, CommandError> {
+        self.active_simulation_name().ok_or_else(|| {
+            CommandError::InvalidArguments(
+                "No active simulation. Use `enter-simulation <name>` first.".into(),
+            )
+        })
+    }
+
     fn set_ledger(&mut self, ledger: Ledger, path: Option<PathBuf>) {
         self.state.set_ledger(ledger);
         self.state.set_path(path);
+        self.state.set_active_simulation(None);
+        println!("{}", "Ledger loaded".bright_green());
     }
 
     fn command(&self, name: &str) -> Option<&Command> {
@@ -434,6 +475,11 @@ impl CliApp {
     }
 
     fn add_account_interactive(&mut self) -> CommandResult {
+        if self.active_simulation_name().is_some() {
+            return Err(CommandError::InvalidArguments(
+                "Leave simulation mode before editing accounts".into(),
+            ));
+        }
         let name: String = Input::with_theme(&self.theme)
             .with_prompt("Account name")
             .interact_text()
@@ -456,6 +502,11 @@ impl CliApp {
     }
 
     fn add_account_script(&mut self, args: &[&str]) -> CommandResult {
+        if self.active_simulation_name().is_some() {
+            return Err(CommandError::InvalidArguments(
+                "Leave simulation mode before editing accounts".into(),
+            ));
+        }
         if args.len() < 2 {
             return Err(CommandError::InvalidArguments(
                 "usage: add account <name> <kind>".into(),
@@ -472,6 +523,11 @@ impl CliApp {
     }
 
     fn add_category_interactive(&mut self) -> CommandResult {
+        if self.active_simulation_name().is_some() {
+            return Err(CommandError::InvalidArguments(
+                "Leave simulation mode before editing categories".into(),
+            ));
+        }
         let name: String = Input::with_theme(&self.theme)
             .with_prompt("Category name")
             .interact_text()
@@ -494,6 +550,11 @@ impl CliApp {
     }
 
     fn add_category_script(&mut self, args: &[&str]) -> CommandResult {
+        if self.active_simulation_name().is_some() {
+            return Err(CommandError::InvalidArguments(
+                "Leave simulation mode before editing categories".into(),
+            ));
+        }
         if args.len() < 2 {
             return Err(CommandError::InvalidArguments(
                 "usage: add category <name> <kind>".into(),
@@ -510,6 +571,62 @@ impl CliApp {
     }
 
     fn add_transaction_interactive(&mut self) -> CommandResult {
+        let sim = self.active_simulation_name().map(|s| s.to_string());
+        self.add_transaction_flow(sim.as_deref())
+    }
+
+    fn add_transaction_script(&mut self, args: &[&str]) -> CommandResult {
+        if args.len() < 4 {
+            return Err(CommandError::InvalidArguments(
+                "usage: add transaction <from_account_index> <to_account_index> <YYYY-MM-DD> <amount>".into(),
+            ));
+        }
+
+        let sim = self.active_simulation_name().map(|s| s.to_string());
+
+        let from_index: usize = args[0].parse().map_err(|_| {
+            CommandError::InvalidArguments("from_account_index must be numeric".into())
+        })?;
+        let to_index: usize = args[1].parse().map_err(|_| {
+            CommandError::InvalidArguments("to_account_index must be numeric".into())
+        })?;
+        let date = NaiveDate::parse_from_str(args[2], "%Y-%m-%d")
+            .map_err(|_| CommandError::InvalidArguments("invalid date".into()))?;
+        let amount: f64 = args[3]
+            .parse()
+            .map_err(|_| CommandError::InvalidArguments("invalid amount".into()))?;
+
+        {
+            let ledger = self.current_ledger()?;
+            if from_index >= ledger.accounts.len() || to_index >= ledger.accounts.len() {
+                return Err(CommandError::InvalidArguments(
+                    "account indices out of range".into(),
+                ));
+            }
+        }
+        let ledger = self.current_ledger()?;
+        let from_id = ledger.accounts[from_index].id;
+        let to_id = ledger.accounts[to_index].id;
+        let _ = ledger;
+
+        let transaction = Transaction::new(from_id, to_id, None, date, amount);
+        let ledger = self.current_ledger_mut()?;
+        if let Some(sim_name) = sim {
+            ledger
+                .add_simulation_transaction(&sim_name, transaction)
+                .map_err(CommandError::from_ledger)?;
+            println!(
+                "{}",
+                format!("Simulated transaction recorded in `{}`", sim_name).bright_green()
+            );
+        } else {
+            ledger.add_transaction(transaction);
+            println!("{}", "Transaction added".bright_green());
+        }
+        Ok(())
+    }
+
+    fn add_transaction_flow(&mut self, simulation: Option<&str>) -> CommandResult {
         {
             let ledger = self.current_ledger()?;
             if ledger.accounts.is_empty() {
@@ -549,42 +666,18 @@ impl CliApp {
             transaction.recurrence = Some(recurrence);
         }
 
-        let ledger = self.current_ledger_mut()?;
-        ledger.add_transaction(transaction);
-        println!("{}", "Transaction added".bright_green());
-        Ok(())
-    }
-
-    fn add_transaction_script(&mut self, args: &[&str]) -> CommandResult {
-        if args.len() < 4 {
-            return Err(CommandError::InvalidArguments(
-                "usage: add transaction <from_account_index> <to_account_index> <YYYY-MM-DD> <amount>".into(),
-            ));
+        if let Some(name) = simulation {
+            self.current_ledger_mut()?
+                .add_simulation_transaction(name, transaction)
+                .map_err(CommandError::from_ledger)?;
+            println!(
+                "{}",
+                format!("Simulated transaction recorded in `{}`", name).bright_green()
+            );
+        } else {
+            self.current_ledger_mut()?.add_transaction(transaction);
+            println!("{}", "Transaction added".bright_green());
         }
-
-        let from_index: usize = args[0].parse().map_err(|_| {
-            CommandError::InvalidArguments("from_account_index must be numeric".into())
-        })?;
-        let to_index: usize = args[1].parse().map_err(|_| {
-            CommandError::InvalidArguments("to_account_index must be numeric".into())
-        })?;
-        let date = NaiveDate::parse_from_str(args[2], "%Y-%m-%d")
-            .map_err(|_| CommandError::InvalidArguments("invalid date".into()))?;
-        let amount: f64 = args[3]
-            .parse()
-            .map_err(|_| CommandError::InvalidArguments("invalid amount".into()))?;
-
-        let ledger = self.current_ledger_mut()?;
-        if from_index >= ledger.accounts.len() || to_index >= ledger.accounts.len() {
-            return Err(CommandError::InvalidArguments(
-                "account indices out of range".into(),
-            ));
-        }
-        let from_id = ledger.accounts[from_index].id;
-        let to_id = ledger.accounts[to_index].id;
-        let transaction = Transaction::new(from_id, to_id, None, date, amount);
-        ledger.add_transaction(transaction);
-        println!("{}", "Transaction added".bright_green());
         Ok(())
     }
 
@@ -692,42 +785,77 @@ impl CliApp {
     fn show_budget_summary(&self, args: &[&str]) -> CommandResult {
         let ledger = self.current_ledger()?;
         let today = Utc::now().date_naive();
-        let summary = if args.is_empty() {
-            ledger.summarize_period_containing(today)
-        } else {
-            match args[0].to_lowercase().as_str() {
-                "current" => ledger.summarize_period_containing(today),
-                "past" => {
-                    let offset = parse_positive_or_default(args.get(1), 1)? as i32;
-                    ledger.summarize_period_offset(today, -offset)
-                }
-                "future" => {
-                    let offset = parse_positive_or_default(args.get(1), 1)? as i32;
-                    ledger.summarize_period_offset(today, offset)
-                }
-                "custom" | "range" => {
-                    if args.len() < 3 {
-                        return Err(CommandError::InvalidArguments(
-                            "usage: summary custom <start> <end>".into(),
-                        ));
-                    }
-                    let start = parse_date(args[1])?;
-                    let end = parse_date(args[2])?;
-                    ledger
-                        .summarize_range(start, end)
-                        .map_err(CommandError::from_ledger)?
-                }
-                other => {
-                    return Err(CommandError::InvalidArguments(format!(
-                        "unknown summary scope `{}`",
-                        other
-                    )))
-                }
-            }
-        };
 
+        let (simulation_name, remainder) =
+            if !args.is_empty() && ledger.simulation(args[0]).is_some() {
+                (Some(args[0]), &args[1..])
+            } else {
+                (None, args)
+            };
+
+        let (window, scope) = self.resolve_summary_window(ledger, remainder, today)?;
+
+        if let Some(name) = simulation_name {
+            let impact = ledger
+                .summarize_simulation_in_window(name, window, scope)
+                .map_err(CommandError::from_ledger)?;
+            self.print_simulation_impact(&impact);
+            return Ok(());
+        }
+
+        let summary = ledger.summarize_window_scope(window, scope);
         self.print_budget_summary(&summary);
         Ok(())
+    }
+
+    fn resolve_summary_window(
+        &self,
+        ledger: &Ledger,
+        args: &[&str],
+        today: NaiveDate,
+    ) -> Result<(DateWindow, BudgetScope), CommandError> {
+        if args.is_empty() {
+            let window = ledger.budget_window_for(today);
+            let scope = window.scope(today);
+            return Ok((window, scope));
+        }
+
+        match args[0].to_lowercase().as_str() {
+            "current" => {
+                let window = ledger.budget_window_for(today);
+                let scope = window.scope(today);
+                Ok((window, scope))
+            }
+            "past" => {
+                let offset = parse_positive_or_default(args.get(1), 1)? as i32;
+                let base = ledger.budget_window_for(today);
+                let window = base.shift(&ledger.budget_period.0, -offset);
+                let scope = window.scope(today);
+                Ok((window, scope))
+            }
+            "future" => {
+                let offset = parse_positive_or_default(args.get(1), 1)? as i32;
+                let base = ledger.budget_window_for(today);
+                let window = base.shift(&ledger.budget_period.0, offset);
+                let scope = window.scope(today);
+                Ok((window, scope))
+            }
+            "custom" | "range" => {
+                if args.len() < 3 {
+                    return Err(CommandError::InvalidArguments(
+                        "usage: summary custom <start> <end>".into(),
+                    ));
+                }
+                let start = parse_date(args[1])?;
+                let end = parse_date(args[2])?;
+                let window = DateWindow::new(start, end).map_err(CommandError::from_ledger)?;
+                Ok((window, BudgetScope::Custom))
+            }
+            other => Err(CommandError::InvalidArguments(format!(
+                "unknown summary scope `{}`",
+                other
+            ))),
+        }
     }
 
     fn print_budget_summary(&self, summary: &BudgetSummary) {
@@ -822,6 +950,245 @@ impl CliApp {
             }
         }
     }
+
+    fn print_simulation_impact(&self, impact: &SimulationBudgetImpact) {
+        println!(
+            "{}",
+            format!("Simulation `{}`", impact.simulation_name)
+                .bright_magenta()
+                .bold()
+        );
+        println!("Base totals:");
+        println!(
+            "  Budgeted: {:.2} | Real: {:.2} | Remaining: {:.2} | Variance: {:.2}",
+            impact.base.totals.budgeted,
+            impact.base.totals.real,
+            impact.base.totals.remaining,
+            impact.base.totals.variance
+        );
+        println!("Simulated totals:");
+        println!(
+            "  Budgeted: {:.2} | Real: {:.2} | Remaining: {:.2} | Variance: {:.2}",
+            impact.simulated.totals.budgeted,
+            impact.simulated.totals.real,
+            impact.simulated.totals.remaining,
+            impact.simulated.totals.variance
+        );
+        println!("Delta:");
+        println!(
+            "  Budgeted: {:+.2} | Real: {:+.2} | Remaining: {:+.2} | Variance: {:+.2}",
+            impact.delta.budgeted, impact.delta.real, impact.delta.remaining, impact.delta.variance
+        );
+    }
+
+    fn resolve_simulation_name(&self, arg: Option<&str>) -> Result<String, CommandError> {
+        let name = if let Some(name) = arg {
+            name.to_string()
+        } else {
+            self.require_active_simulation()?.to_string()
+        };
+        let ledger = self.current_ledger()?;
+        if ledger.simulation(&name).is_none() {
+            return Err(CommandError::InvalidArguments(format!(
+                "simulation `{}` not found",
+                name
+            )));
+        }
+        Ok(name)
+    }
+
+    fn print_simulation_changes(&self, sim_name: &str) -> CommandResult {
+        let ledger = self.current_ledger()?;
+        let sim = ledger.simulation(sim_name).ok_or_else(|| {
+            CommandError::InvalidArguments(format!("simulation `{}` not found", sim_name))
+        })?;
+        println!(
+            "{}",
+            format!("Simulation `{}` ({:?})", sim.name, sim.status).bright_magenta()
+        );
+        if sim.changes.is_empty() {
+            println!("{}", "No pending changes".bright_black());
+        } else {
+            for (idx, change) in sim.changes.iter().enumerate() {
+                match change {
+                    SimulationChange::AddTransaction { transaction } => println!(
+                        "{} Added transaction {} -> {} on {} budgeted {:.2}",
+                        format!("[{}]", idx).bright_white(),
+                        transaction.from_account,
+                        transaction.to_account,
+                        transaction.scheduled_date,
+                        transaction.budgeted_amount
+                    ),
+                    SimulationChange::ModifyTransaction(patch) => println!(
+                        "{} Modify transaction {}",
+                        format!("[{}]", idx).bright_white(),
+                        patch.transaction_id
+                    ),
+                    SimulationChange::ExcludeTransaction { transaction_id } => println!(
+                        "{} Exclude transaction {}",
+                        format!("[{}]", idx).bright_white(),
+                        transaction_id
+                    ),
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn simulation_add_transaction(&mut self, sim_name: &str) -> CommandResult {
+        self.add_transaction_flow(Some(sim_name))
+    }
+
+    fn simulation_exclude_transaction(&mut self, sim_name: &str) -> CommandResult {
+        let txn_id = self.select_transaction_id("Exclude which transaction?")?;
+        self.current_ledger_mut()?
+            .exclude_transaction_in_simulation(sim_name, txn_id)
+            .map_err(CommandError::from_ledger)?;
+        println!(
+            "{}",
+            format!("Transaction {} excluded in `{}`", txn_id, sim_name).bright_green()
+        );
+        Ok(())
+    }
+
+    fn simulation_modify_transaction(&mut self, sim_name: &str) -> CommandResult {
+        let txn_id = self.select_transaction_id("Modify which transaction?")?;
+
+        let budgeted_input =
+            self.prompt_optional_f64("New budgeted amount (leave blank to keep)")?;
+        let actual_input = self
+            .prompt_optional_f64_or_clear("New actual amount (blank to keep, 'none' to clear)")?;
+        let scheduled_input =
+            self.prompt_optional_date("New scheduled date (YYYY-MM-DD, blank to keep)")?;
+        let actual_date_input = self.prompt_optional_date_or_clear(
+            "New actual date (YYYY-MM-DD, blank to keep, 'none' to clear)",
+        )?;
+
+        let patch = SimulationTransactionPatch {
+            transaction_id: txn_id,
+            from_account: None,
+            to_account: None,
+            category_id: None,
+            scheduled_date: scheduled_input,
+            actual_date: actual_date_input,
+            budgeted_amount: budgeted_input,
+            actual_amount: actual_input,
+        };
+
+        if !patch.has_effect() {
+            return Err(CommandError::InvalidArguments(
+                "No changes were specified".into(),
+            ));
+        }
+
+        self.current_ledger_mut()?
+            .modify_transaction_in_simulation(sim_name, patch)
+            .map_err(CommandError::from_ledger)?;
+        println!(
+            "{}",
+            format!("Transaction {} modified in `{}`", txn_id, sim_name).bright_green()
+        );
+        Ok(())
+    }
+
+    fn select_transaction_id(&self, prompt: &str) -> Result<Uuid, CommandError> {
+        let ledger = self.current_ledger()?;
+        if ledger.transactions.is_empty() {
+            return Err(CommandError::InvalidArguments(
+                "No transactions available".into(),
+            ));
+        }
+        let items: Vec<String> = ledger
+            .transactions
+            .iter()
+            .enumerate()
+            .map(|(idx, txn)| {
+                format!(
+                    "[{}] {} -> {} | {} | {:.2}",
+                    idx, txn.from_account, txn.to_account, txn.scheduled_date, txn.budgeted_amount
+                )
+            })
+            .collect();
+        let selection = Select::with_theme(&self.theme)
+            .with_prompt(prompt)
+            .items(&items)
+            .default(0)
+            .interact()
+            .map_err(CommandError::from)?;
+        Ok(ledger.transactions[selection].id)
+    }
+
+    fn prompt_optional_f64(&self, prompt: &str) -> Result<Option<f64>, CommandError> {
+        let input: String = Input::with_theme(&self.theme)
+            .with_prompt(prompt)
+            .interact_text()
+            .map_err(CommandError::from)?;
+        if input.trim().is_empty() {
+            Ok(None)
+        } else {
+            input
+                .trim()
+                .parse::<f64>()
+                .map(Some)
+                .map_err(|_| CommandError::InvalidArguments("Invalid number supplied".into()))
+        }
+    }
+
+    fn prompt_optional_f64_or_clear(
+        &self,
+        prompt: &str,
+    ) -> Result<Option<Option<f64>>, CommandError> {
+        let input: String = Input::with_theme(&self.theme)
+            .with_prompt(prompt)
+            .interact_text()
+            .map_err(CommandError::from)?;
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
+            Ok(None)
+        } else if trimmed.eq_ignore_ascii_case("none") {
+            Ok(Some(None))
+        } else {
+            let value = trimmed
+                .parse::<f64>()
+                .map_err(|_| CommandError::InvalidArguments("Invalid number supplied".into()))?;
+            Ok(Some(Some(value)))
+        }
+    }
+
+    fn prompt_optional_date(&self, prompt: &str) -> Result<Option<NaiveDate>, CommandError> {
+        let input: String = Input::with_theme(&self.theme)
+            .with_prompt(prompt)
+            .interact_text()
+            .map_err(CommandError::from)?;
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
+            Ok(None)
+        } else {
+            NaiveDate::parse_from_str(trimmed, "%Y-%m-%d")
+                .map(Some)
+                .map_err(|_| CommandError::InvalidArguments("Invalid date format".into()))
+        }
+    }
+
+    fn prompt_optional_date_or_clear(
+        &self,
+        prompt: &str,
+    ) -> Result<Option<Option<NaiveDate>>, CommandError> {
+        let input: String = Input::with_theme(&self.theme)
+            .with_prompt(prompt)
+            .interact_text()
+            .map_err(CommandError::from)?;
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
+            Ok(None)
+        } else if trimmed.eq_ignore_ascii_case("none") {
+            Ok(Some(None))
+        } else {
+            NaiveDate::parse_from_str(trimmed, "%Y-%m-%d")
+                .map(|date| Some(Some(date)))
+                .map_err(|_| CommandError::InvalidArguments("Invalid date format".into()))
+        }
+    }
 }
 
 fn build_commands() -> Vec<Command> {
@@ -855,8 +1222,50 @@ fn build_commands() -> Vec<Command> {
         Command::new(
             "summary",
             "Show ledger summary",
-            "summary [past|future <n>] | summary custom <start YYYY-MM-DD> <end YYYY-MM-DD>",
+            "summary [simulation_name] [past|future <n>] | summary custom <start YYYY-MM-DD> <end YYYY-MM-DD>",
             cmd_summary,
+        ),
+        Command::new(
+            "list-simulations",
+            "List saved simulations",
+            "list-simulations",
+            cmd_list_simulations,
+        ),
+        Command::new(
+            "create-simulation",
+            "Create a new named simulation",
+            "create-simulation [name]",
+            cmd_create_simulation,
+        ),
+        Command::new(
+            "enter-simulation",
+            "Activate a simulation for editing",
+            "enter-simulation <name>",
+            cmd_enter_simulation,
+        ),
+        Command::new(
+            "leave-simulation",
+            "Leave the active simulation",
+            "leave-simulation",
+            cmd_leave_simulation,
+        ),
+        Command::new(
+            "apply-simulation",
+            "Apply a simulation to the ledger",
+            "apply-simulation <name>",
+            cmd_apply_simulation,
+        ),
+        Command::new(
+            "discard-simulation",
+            "Discard a simulation permanently",
+            "discard-simulation <name>",
+            cmd_discard_simulation,
+        ),
+        Command::new(
+            "simulation",
+            "Manage pending simulation changes",
+            "simulation <changes|add|modify|exclude> [simulation_name]",
+            cmd_simulation,
         ),
         Command::new("exit", "Exit the shell", "exit", cmd_exit),
     ]
@@ -991,6 +1400,185 @@ fn cmd_list(app: &mut CliApp, args: &[&str]) -> CommandResult {
 
 fn cmd_summary(app: &mut CliApp, args: &[&str]) -> CommandResult {
     app.show_budget_summary(args)
+}
+
+fn cmd_list_simulations(app: &mut CliApp, _args: &[&str]) -> CommandResult {
+    let ledger = app.current_ledger()?;
+    let sims = ledger.simulations();
+    if sims.is_empty() {
+        println!("{}", "No simulations defined".bright_black());
+        return Ok(());
+    }
+    println!("{}", "Simulations:".bright_white().bold());
+    for sim in sims {
+        println!(
+            "  {:<20} {:<8} changes:{:>2} updated:{}",
+            sim.name.bright_magenta(),
+            format!("{:?}", sim.status),
+            sim.changes.len(),
+            sim.updated_at
+        );
+    }
+    Ok(())
+}
+
+fn cmd_create_simulation(app: &mut CliApp, args: &[&str]) -> CommandResult {
+    let name = if let Some(name) = args.first() {
+        (*name).to_string()
+    } else {
+        Input::with_theme(&app.theme)
+            .with_prompt("Simulation name")
+            .validate_with(|input: &String| -> Result<(), &str> {
+                if input.trim().is_empty() {
+                    Err("Name cannot be empty")
+                } else {
+                    Ok(())
+                }
+            })
+            .interact_text()
+            .map_err(CommandError::from)?
+    };
+    let notes: Option<String> = if app.mode == CliMode::Interactive {
+        let text: String = Input::with_theme(&app.theme)
+            .with_prompt("Notes (optional)")
+            .interact_text()
+            .map_err(CommandError::from)?;
+        if text.trim().is_empty() {
+            None
+        } else {
+            Some(text)
+        }
+    } else {
+        None
+    };
+    let ledger = app.current_ledger_mut()?;
+    ledger
+        .create_simulation(name.clone(), notes)
+        .map_err(CommandError::from_ledger)?;
+    println!(
+        "{}",
+        format!("Simulation `{}` created", name).bright_green()
+    );
+    Ok(())
+}
+
+fn cmd_enter_simulation(app: &mut CliApp, args: &[&str]) -> CommandResult {
+    let name = args
+        .first()
+        .ok_or_else(|| CommandError::InvalidArguments("usage: enter-simulation <name>".into()))?;
+    let ledger = app.current_ledger()?;
+    let sim = ledger.simulation(name).ok_or_else(|| {
+        CommandError::InvalidArguments(format!("simulation `{}` not found", name))
+    })?;
+    if sim.status != SimulationStatus::Pending {
+        return Err(CommandError::InvalidArguments(format!(
+            "simulation `{}` is not editable",
+            name
+        )));
+    }
+    let canonical = sim.name.clone();
+    let _ = ledger;
+    app.state.set_active_simulation(Some(canonical.clone()));
+    println!(
+        "{}",
+        format!("Entered simulation `{}`", canonical).bright_green()
+    );
+    Ok(())
+}
+
+fn cmd_leave_simulation(app: &mut CliApp, _args: &[&str]) -> CommandResult {
+    if app.active_simulation_name().is_none() {
+        return Err(CommandError::InvalidArguments(
+            "No active simulation to leave".into(),
+        ));
+    }
+    app.state.set_active_simulation(None);
+    println!("{}", "Simulation mode cleared".bright_green());
+    Ok(())
+}
+
+fn cmd_apply_simulation(app: &mut CliApp, args: &[&str]) -> CommandResult {
+    let name = args
+        .first()
+        .ok_or_else(|| CommandError::InvalidArguments("usage: apply-simulation <name>".into()))?;
+    app.current_ledger_mut()?
+        .apply_simulation(name)
+        .map_err(CommandError::from_ledger)?;
+    if app
+        .active_simulation_name()
+        .map(|active| active.eq_ignore_ascii_case(name))
+        .unwrap_or(false)
+    {
+        app.state.set_active_simulation(None);
+    }
+    println!(
+        "{}",
+        format!("Simulation `{}` applied to ledger", name).bright_green()
+    );
+    Ok(())
+}
+
+fn cmd_discard_simulation(app: &mut CliApp, args: &[&str]) -> CommandResult {
+    let name = args
+        .first()
+        .ok_or_else(|| CommandError::InvalidArguments("usage: discard-simulation <name>".into()))?;
+    if app.mode == CliMode::Interactive {
+        let confirm = Confirm::with_theme(&app.theme)
+            .with_prompt(format!("Discard simulation `{}`?", name))
+            .default(false)
+            .interact()
+            .map_err(CommandError::from)?;
+        if !confirm {
+            return Ok(());
+        }
+    }
+    app.current_ledger_mut()?
+        .discard_simulation(name)
+        .map_err(CommandError::from_ledger)?;
+    if app
+        .active_simulation_name()
+        .map(|active| active.eq_ignore_ascii_case(name))
+        .unwrap_or(false)
+    {
+        app.state.set_active_simulation(None);
+    }
+    println!(
+        "{}",
+        format!("Simulation `{}` discarded", name).bright_green()
+    );
+    Ok(())
+}
+
+fn cmd_simulation(app: &mut CliApp, args: &[&str]) -> CommandResult {
+    if args.is_empty() {
+        return Err(CommandError::InvalidArguments(
+            "usage: simulation <changes|add|modify|exclude> [simulation_name]".into(),
+        ));
+    }
+    let sub = args[0].to_lowercase();
+    let target_name = if args.len() > 1 { Some(args[1]) } else { None };
+    match sub.as_str() {
+        "changes" => {
+            let name = app.resolve_simulation_name(target_name)?;
+            app.print_simulation_changes(&name)
+        }
+        "add" => {
+            let name = app.resolve_simulation_name(target_name)?;
+            app.simulation_add_transaction(&name)
+        }
+        "exclude" => {
+            let name = app.resolve_simulation_name(target_name)?;
+            app.simulation_exclude_transaction(&name)
+        }
+        "modify" => {
+            let name = app.resolve_simulation_name(target_name)?;
+            app.simulation_modify_transaction(&name)
+        }
+        _ => Err(CommandError::InvalidArguments(format!(
+            "unknown simulation subcommand `{}`",
+            sub
+        ))),
+    }
 }
 
 fn cmd_exit(_app: &mut CliApp, _args: &[&str]) -> CommandResult {
