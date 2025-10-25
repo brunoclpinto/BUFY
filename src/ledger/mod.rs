@@ -13,7 +13,8 @@ pub use budget::Budget;
 pub use category::{Category, CategoryKind};
 pub use ledger::{
     AccountBudget, BudgetPeriod, BudgetScope, BudgetStatus, BudgetSummary, BudgetTotals,
-    DateWindow, Ledger,
+    DateWindow, Ledger, Simulation, SimulationBudgetImpact, SimulationChange, SimulationStatus,
+    SimulationTransactionPatch,
 };
 pub use time_interval::{TimeInterval, TimeUnit};
 pub use transaction::{Recurrence, RecurrenceMode, Transaction, TransactionStatus};

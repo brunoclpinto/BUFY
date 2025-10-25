@@ -141,7 +141,82 @@ pub struct BudgetSummary {
     pub incomplete_transactions: usize,
 }
 
-const CURRENT_SCHEMA_VERSION: u8 = 1;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BudgetTotalsDelta {
+    pub budgeted: f64,
+    pub real: f64,
+    pub remaining: f64,
+    pub variance: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimulationBudgetImpact {
+    pub simulation_name: String,
+    pub base: BudgetSummary,
+    pub simulated: BudgetSummary,
+    pub delta: BudgetTotalsDelta,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Simulation {
+    pub name: String,
+    pub notes: Option<String>,
+    pub status: SimulationStatus,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    #[serde(default)]
+    pub applied_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub changes: Vec<SimulationChange>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SimulationStatus {
+    Pending,
+    Applied,
+    Discarded,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SimulationChange {
+    AddTransaction { transaction: Transaction },
+    ModifyTransaction(SimulationTransactionPatch),
+    ExcludeTransaction { transaction_id: Uuid },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimulationTransactionPatch {
+    pub transaction_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_account: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to_account: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category_id: Option<Option<Uuid>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scheduled_date: Option<NaiveDate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actual_date: Option<Option<NaiveDate>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budgeted_amount: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actual_amount: Option<Option<f64>>,
+}
+
+impl SimulationTransactionPatch {
+    pub fn has_effect(&self) -> bool {
+        self.from_account.is_some()
+            || self.to_account.is_some()
+            || self.category_id.is_some()
+            || self.scheduled_date.is_some()
+            || self.actual_date.is_some()
+            || self.budgeted_amount.is_some()
+            || self.actual_amount.is_some()
+    }
+}
+
+const CURRENT_SCHEMA_VERSION: u8 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Ledger {
@@ -154,6 +229,8 @@ pub struct Ledger {
     pub categories: Vec<Category>,
     #[serde(default)]
     pub transactions: Vec<Transaction>,
+    #[serde(default)]
+    pub simulations: Vec<Simulation>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     #[serde(default = "Ledger::schema_version_default")]
@@ -188,6 +265,7 @@ impl Ledger {
             accounts: Vec::new(),
             categories: Vec::new(),
             transactions: Vec::new(),
+            simulations: Vec::new(),
             created_at: now,
             updated_at: now,
             schema_version: CURRENT_SCHEMA_VERSION,
@@ -223,12 +301,59 @@ impl Ledger {
         self.accounts.iter().find(|account| account.id == id)
     }
 
+    pub fn simulations(&self) -> &[Simulation] {
+        &self.simulations
+    }
+
+    pub fn simulation(&self, name: &str) -> Option<&Simulation> {
+        self.simulations
+            .iter()
+            .find(|sim| sim.name.eq_ignore_ascii_case(name))
+    }
+
+    pub fn simulation_mut(&mut self, name: &str) -> Option<&mut Simulation> {
+        self.simulations
+            .iter_mut()
+            .find(|sim| sim.name.eq_ignore_ascii_case(name))
+    }
+
     pub fn touch(&mut self) {
         self.updated_at = Utc::now();
     }
 
     pub fn schema_version_default() -> u8 {
         CURRENT_SCHEMA_VERSION
+    }
+
+    pub fn create_simulation(
+        &mut self,
+        name: impl Into<String>,
+        notes: Option<String>,
+    ) -> Result<&Simulation, LedgerError> {
+        let name = name.into();
+        if self
+            .simulations
+            .iter()
+            .any(|sim| sim.name.eq_ignore_ascii_case(&name))
+        {
+            return Err(LedgerError::InvalidInput(format!(
+                "simulation `{}` already exists",
+                name
+            )));
+        }
+        let now = Utc::now();
+        let simulation = Simulation {
+            name,
+            notes,
+            status: SimulationStatus::Pending,
+            created_at: now,
+            updated_at: now,
+            applied_at: None,
+            changes: Vec::new(),
+        };
+        self.simulations.push(simulation);
+        self.touch();
+        Ok(self.simulations.last().unwrap())
     }
 
     pub fn summarize_current_period(&self) -> BudgetSummary {
@@ -247,6 +372,14 @@ impl Ledger {
         let shifted = base.shift(&self.budget_period.0, offset);
         let scope = shifted.scope(reference);
         self.summarize_window(shifted, scope, None)
+    }
+
+    pub fn budget_window_for(&self, reference: NaiveDate) -> DateWindow {
+        self.budget_window_containing(reference)
+    }
+
+    pub fn summarize_window_scope(&self, window: DateWindow, scope: BudgetScope) -> BudgetSummary {
+        self.summarize_window(window, scope, None)
     }
 
     pub fn summaries_before(&self, reference: NaiveDate, periods: usize) -> Vec<BudgetSummary> {
@@ -278,6 +411,181 @@ impl Ledger {
     ) -> Result<BudgetSummary, LedgerError> {
         let window = DateWindow::new(start, end)?;
         Ok(self.summarize_window(window, BudgetScope::Custom, Some(transactions)))
+    }
+
+    pub fn add_simulation_transaction(
+        &mut self,
+        sim_name: &str,
+        mut transaction: Transaction,
+    ) -> Result<(), LedgerError> {
+        transaction.id = Uuid::new_v4();
+        let sim = self.editable_simulation(sim_name)?;
+        sim.changes
+            .push(SimulationChange::AddTransaction { transaction });
+        sim.updated_at = Utc::now();
+        self.touch();
+        Ok(())
+    }
+
+    pub fn exclude_transaction_in_simulation(
+        &mut self,
+        sim_name: &str,
+        transaction_id: Uuid,
+    ) -> Result<(), LedgerError> {
+        if !self.transactions.iter().any(|t| t.id == transaction_id) {
+            return Err(LedgerError::InvalidRef(format!(
+                "transaction {} not found",
+                transaction_id
+            )));
+        }
+        let sim = self.editable_simulation(sim_name)?;
+        sim.changes
+            .push(SimulationChange::ExcludeTransaction { transaction_id });
+        sim.updated_at = Utc::now();
+        self.touch();
+        Ok(())
+    }
+
+    pub fn modify_transaction_in_simulation(
+        &mut self,
+        sim_name: &str,
+        patch: SimulationTransactionPatch,
+    ) -> Result<(), LedgerError> {
+        if !self
+            .transactions
+            .iter()
+            .any(|t| t.id == patch.transaction_id)
+        {
+            return Err(LedgerError::InvalidRef(format!(
+                "transaction {} not found",
+                patch.transaction_id
+            )));
+        }
+        let sim = self.editable_simulation(sim_name)?;
+        sim.changes.push(SimulationChange::ModifyTransaction(patch));
+        sim.updated_at = Utc::now();
+        self.touch();
+        Ok(())
+    }
+
+    pub fn apply_simulation(&mut self, sim_name: &str) -> Result<(), LedgerError> {
+        let index = self
+            .simulations
+            .iter()
+            .position(|sim| sim.name.eq_ignore_ascii_case(sim_name))
+            .ok_or_else(|| {
+                LedgerError::InvalidRef(format!("simulation `{}` not found", sim_name))
+            })?;
+        if self.simulations[index].status != SimulationStatus::Pending {
+            return Err(LedgerError::InvalidInput(format!(
+                "simulation `{}` is not pending",
+                sim_name
+            )));
+        }
+
+        let changes = self.simulations[index].changes.clone();
+
+        let mut applied = self.transactions.clone();
+        for change in &changes {
+            match change {
+                SimulationChange::AddTransaction { transaction } => {
+                    applied.push(transaction.clone());
+                }
+                SimulationChange::ModifyTransaction(patch) => {
+                    let txn = applied
+                        .iter_mut()
+                        .find(|t| t.id == patch.transaction_id)
+                        .ok_or_else(|| {
+                            LedgerError::InvalidRef(format!(
+                                "transaction {} not found",
+                                patch.transaction_id
+                            ))
+                        })?;
+                    apply_patch(txn, patch);
+                }
+                SimulationChange::ExcludeTransaction { transaction_id } => {
+                    let before = applied.len();
+                    applied.retain(|t| t.id != *transaction_id);
+                    if before == applied.len() {
+                        return Err(LedgerError::InvalidRef(format!(
+                            "transaction {} not found",
+                            transaction_id
+                        )));
+                    }
+                }
+            }
+        }
+
+        self.transactions = applied;
+        let simulation = &mut self.simulations[index];
+        simulation.status = SimulationStatus::Applied;
+        simulation.applied_at = Some(Utc::now());
+        simulation.updated_at = Utc::now();
+        self.touch();
+        Ok(())
+    }
+
+    pub fn discard_simulation(&mut self, sim_name: &str) -> Result<(), LedgerError> {
+        let len_before = self.simulations.len();
+        self.simulations
+            .retain(|sim| !sim.name.eq_ignore_ascii_case(sim_name));
+        if len_before == self.simulations.len() {
+            return Err(LedgerError::InvalidRef(format!(
+                "simulation `{}` not found",
+                sim_name
+            )));
+        }
+        self.touch();
+        Ok(())
+    }
+
+    pub fn simulation_changes(&self, sim_name: &str) -> Result<&[SimulationChange], LedgerError> {
+        let sim = self.simulation(sim_name).ok_or_else(|| {
+            LedgerError::InvalidRef(format!("simulation `{}` not found", sim_name))
+        })?;
+        Ok(&sim.changes)
+    }
+
+    pub fn summarize_simulation_in_window(
+        &self,
+        simulation_name: &str,
+        window: DateWindow,
+        scope: BudgetScope,
+    ) -> Result<SimulationBudgetImpact, LedgerError> {
+        let simulation = self.simulation(simulation_name).ok_or_else(|| {
+            LedgerError::InvalidRef(format!("simulation `{}` not found", simulation_name))
+        })?;
+        if simulation.status == SimulationStatus::Discarded {
+            return Err(LedgerError::InvalidInput(format!(
+                "simulation `{}` is discarded",
+                simulation_name
+            )));
+        }
+        let simulated_transactions = self.transactions_with_simulation(simulation)?;
+        let base = self.summarize_window(window, scope, None);
+        let simulated = self.summarize_window(window, scope, Some(&simulated_transactions));
+        let delta = BudgetTotalsDelta {
+            budgeted: simulated.totals.budgeted - base.totals.budgeted,
+            real: simulated.totals.real - base.totals.real,
+            remaining: simulated.totals.remaining - base.totals.remaining,
+            variance: simulated.totals.variance - base.totals.variance,
+        };
+        Ok(SimulationBudgetImpact {
+            simulation_name: simulation.name.clone(),
+            base,
+            simulated,
+            delta,
+        })
+    }
+
+    pub fn summarize_simulation_current(
+        &self,
+        simulation_name: &str,
+    ) -> Result<SimulationBudgetImpact, LedgerError> {
+        let today = Utc::now().date_naive();
+        let window = self.budget_window_containing(today);
+        let scope = window.scope(today);
+        self.summarize_simulation_in_window(simulation_name, window, scope)
     }
 
     fn summarize_window(
@@ -445,6 +753,80 @@ impl Ledger {
         let start = self.budget_period.0.cycle_start(anchor, reference);
         let end = self.budget_period.0.next_date(start);
         DateWindow { start, end }
+    }
+
+    fn transactions_with_simulation(
+        &self,
+        simulation: &Simulation,
+    ) -> Result<Vec<Transaction>, LedgerError> {
+        let mut snapshot = self.transactions.clone();
+        for change in &simulation.changes {
+            match change {
+                SimulationChange::AddTransaction { transaction } => {
+                    snapshot.push(transaction.clone());
+                }
+                SimulationChange::ModifyTransaction(patch) => {
+                    let txn = snapshot
+                        .iter_mut()
+                        .find(|t| t.id == patch.transaction_id)
+                        .ok_or_else(|| {
+                            LedgerError::InvalidRef(format!(
+                                "transaction {} not found for simulation `{}`",
+                                patch.transaction_id, simulation.name
+                            ))
+                        })?;
+                    apply_patch(txn, patch);
+                }
+                SimulationChange::ExcludeTransaction { transaction_id } => {
+                    let before = snapshot.len();
+                    snapshot.retain(|t| t.id != *transaction_id);
+                    if before == snapshot.len() {
+                        return Err(LedgerError::InvalidRef(format!(
+                            "transaction {} not found for simulation `{}`",
+                            transaction_id, simulation.name
+                        )));
+                    }
+                }
+            }
+        }
+        Ok(snapshot)
+    }
+
+    fn editable_simulation(&mut self, name: &str) -> Result<&mut Simulation, LedgerError> {
+        let sim = self
+            .simulation_mut(name)
+            .ok_or_else(|| LedgerError::InvalidRef(format!("simulation `{}` not found", name)))?;
+        if sim.status != SimulationStatus::Pending {
+            return Err(LedgerError::InvalidInput(format!(
+                "simulation `{}` is not editable",
+                name
+            )));
+        }
+        Ok(sim)
+    }
+}
+
+fn apply_patch(txn: &mut Transaction, patch: &SimulationTransactionPatch) {
+    if let Some(value) = patch.from_account {
+        txn.from_account = value;
+    }
+    if let Some(value) = patch.to_account {
+        txn.to_account = value;
+    }
+    if let Some(category) = &patch.category_id {
+        txn.category_id = *category;
+    }
+    if let Some(date) = patch.scheduled_date {
+        txn.scheduled_date = date;
+    }
+    if let Some(actual_date) = &patch.actual_date {
+        txn.actual_date = *actual_date;
+    }
+    if let Some(amount) = patch.budgeted_amount {
+        txn.budgeted_amount = amount;
+    }
+    if let Some(actual_amount) = &patch.actual_amount {
+        txn.actual_amount = *actual_amount;
     }
 }
 
