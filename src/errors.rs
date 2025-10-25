@@ -9,4 +9,6 @@ pub enum LedgerError {
     Serde(#[from] serde_json::Error),
     #[error("Invalid reference: {0}")]
     InvalidRef(String),
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
 }

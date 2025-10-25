@@ -11,6 +11,9 @@ pub mod transaction;
 pub use account::{Account, AccountKind};
 pub use budget::Budget;
 pub use category::{Category, CategoryKind};
-pub use ledger::{BudgetPeriod, Ledger};
+pub use ledger::{
+    AccountBudget, BudgetPeriod, BudgetScope, BudgetStatus, BudgetSummary, BudgetTotals,
+    DateWindow, Ledger,
+};
 pub use time_interval::{TimeInterval, TimeUnit};
 pub use transaction::{Recurrence, RecurrenceMode, Transaction, TransactionStatus};
