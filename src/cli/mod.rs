@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use chrono::NaiveDate;
+use chrono::{Duration, NaiveDate, Utc};
 use colored::Colorize;
 use dialoguer::{theme::ColorfulTheme, Confirm, Input, Select};
 use rustyline::{error::ReadlineError, DefaultEditor};
@@ -15,8 +15,9 @@ use strsim::levenshtein;
 use crate::{
     errors::LedgerError,
     ledger::{
-        account::AccountKind, category::CategoryKind, Account, BudgetPeriod, Category, Ledger,
-        Recurrence, RecurrenceMode, TimeInterval, TimeUnit, Transaction,
+        account::AccountKind, category::CategoryKind, Account, BudgetPeriod, BudgetStatus,
+        BudgetSummary, Category, Ledger, Recurrence, RecurrenceMode, TimeInterval, TimeUnit,
+        Transaction,
     },
     utils::persistence,
 };
@@ -688,20 +689,138 @@ impl CliApp {
         Ok(())
     }
 
-    fn show_summary(&self) -> CommandResult {
+    fn show_budget_summary(&self, args: &[&str]) -> CommandResult {
         let ledger = self.current_ledger()?;
+        let today = Utc::now().date_naive();
+        let summary = if args.is_empty() {
+            ledger.summarize_period_containing(today)
+        } else {
+            match args[0].to_lowercase().as_str() {
+                "current" => ledger.summarize_period_containing(today),
+                "past" => {
+                    let offset = parse_positive_or_default(args.get(1), 1)? as i32;
+                    ledger.summarize_period_offset(today, -offset)
+                }
+                "future" => {
+                    let offset = parse_positive_or_default(args.get(1), 1)? as i32;
+                    ledger.summarize_period_offset(today, offset)
+                }
+                "custom" | "range" => {
+                    if args.len() < 3 {
+                        return Err(CommandError::InvalidArguments(
+                            "usage: summary custom <start> <end>".into(),
+                        ));
+                    }
+                    let start = parse_date(args[1])?;
+                    let end = parse_date(args[2])?;
+                    ledger
+                        .summarize_range(start, end)
+                        .map_err(CommandError::from_ledger)?
+                }
+                other => {
+                    return Err(CommandError::InvalidArguments(format!(
+                        "unknown summary scope `{}`",
+                        other
+                    )))
+                }
+            }
+        };
+
+        self.print_budget_summary(&summary);
+        Ok(())
+    }
+
+    fn print_budget_summary(&self, summary: &BudgetSummary) {
+        let end_display = summary.window.end - Duration::days(1);
+        println!(
+            "{} {} → {}",
+            format!("{:?}", summary.scope).bright_cyan(),
+            summary.window.start,
+            end_display
+        );
+
         println!(
             "{}",
             format!(
-                "Ledger `{}`: {} accounts, {} categories, {} transactions",
-                ledger.name,
-                ledger.accounts.len(),
-                ledger.categories.len(),
-                ledger.transactions.len()
+                "Budgeted: {budget:.2} | Real: {real:.2} | Remaining: {remain:.2} | Variance: {var:.2}",
+                budget = summary.totals.budgeted,
+                real = summary.totals.real,
+                remain = summary.totals.remaining,
+                var = summary.totals.variance
             )
             .bright_white()
         );
-        Ok(())
+
+        if let Some(percent) = summary.totals.percent_used {
+            println!("{}", format!("Usage: {:.1}% ", percent).bright_white());
+        }
+
+        let status_label = format!("{:?}", summary.totals.status);
+        let colored_status = match summary.totals.status {
+            BudgetStatus::OnTrack => status_label.green(),
+            BudgetStatus::UnderBudget => status_label.cyan(),
+            BudgetStatus::OverBudget => status_label.red(),
+            BudgetStatus::Empty => status_label.bright_black(),
+            BudgetStatus::Incomplete => status_label.yellow(),
+        };
+        println!("Status: {}", colored_status);
+
+        if summary.incomplete_transactions > 0 {
+            println!(
+                "{}",
+                format!(
+                    "⚠️  {} incomplete transactions",
+                    summary.incomplete_transactions
+                )
+                .yellow()
+            );
+        }
+
+        if summary.orphaned_transactions > 0 {
+            println!(
+                "{}",
+                format!(
+                    "⚠️  {} transactions reference unknown accounts or categories",
+                    summary.orphaned_transactions
+                )
+                .yellow()
+            );
+        }
+
+        if summary.per_category.is_empty() {
+            println!("{}", "No category data for this window.".bright_black());
+        } else {
+            println!("{}", "Categories:".bright_white().bold());
+            for cat in summary.per_category.iter().take(5) {
+                println!(
+                    "  {:<20} {:>8.2} budgeted / {:>8.2} real ({:?})",
+                    cat.name, cat.totals.budgeted, cat.totals.real, cat.totals.status
+                );
+            }
+            if summary.per_category.len() > 5 {
+                println!(
+                    "{}",
+                    format!("  ... {} more categories", summary.per_category.len() - 5)
+                        .bright_black()
+                );
+            }
+        }
+
+        if !summary.per_account.is_empty() {
+            println!("{}", "Accounts:".bright_white().bold());
+            for acct in summary.per_account.iter().take(5) {
+                println!(
+                    "  {:<20} {:>8.2} budgeted / {:>8.2} real ({:?})",
+                    acct.name, acct.totals.budgeted, acct.totals.real, acct.totals.status
+                );
+            }
+            if summary.per_account.len() > 5 {
+                println!(
+                    "{}",
+                    format!("  ... {} more accounts", summary.per_account.len() - 5).bright_black()
+                );
+            }
+        }
     }
 }
 
@@ -733,7 +852,12 @@ fn build_commands() -> Vec<Command> {
             "list [accounts|categories|transactions]",
             cmd_list,
         ),
-        Command::new("summary", "Show ledger summary", "summary", cmd_summary),
+        Command::new(
+            "summary",
+            "Show ledger summary",
+            "summary [past|future <n>] | summary custom <start YYYY-MM-DD> <end YYYY-MM-DD>",
+            cmd_summary,
+        ),
         Command::new("exit", "Exit the shell", "exit", cmd_exit),
     ]
 }
@@ -865,8 +989,8 @@ fn cmd_list(app: &mut CliApp, args: &[&str]) -> CommandResult {
     }
 }
 
-fn cmd_summary(app: &mut CliApp, _args: &[&str]) -> CommandResult {
-    app.show_summary()
+fn cmd_summary(app: &mut CliApp, args: &[&str]) -> CommandResult {
+    app.show_budget_summary(args)
 }
 
 fn cmd_exit(_app: &mut CliApp, _args: &[&str]) -> CommandResult {
@@ -1013,6 +1137,29 @@ fn parse_time_unit(token: &str) -> Result<TimeUnit, CommandError> {
             other
         ))),
     }
+}
+
+fn parse_positive_or_default(arg: Option<&&str>, default: usize) -> Result<usize, CommandError> {
+    if let Some(value) = arg {
+        let parsed = value.parse::<usize>().map_err(|_| {
+            CommandError::InvalidArguments("offset must be a positive integer".into())
+        })?;
+        if parsed == 0 {
+            Err(CommandError::InvalidArguments(
+                "offset must be greater than zero".into(),
+            ))
+        } else {
+            Ok(parsed)
+        }
+    } else {
+        Ok(default)
+    }
+}
+
+fn parse_date(input: &str) -> Result<NaiveDate, CommandError> {
+    NaiveDate::parse_from_str(input, "%Y-%m-%d").map_err(|_| {
+        CommandError::InvalidArguments(format!("invalid date `{}` (use YYYY-MM-DD)", input))
+    })
 }
 
 #[derive(Debug)]
