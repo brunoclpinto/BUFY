@@ -20,13 +20,14 @@ fn ledger_simulation_smoke() {
         NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
         42.0,
     );
-    transaction.recurrence = Some(budget_core::ledger::Recurrence {
-        interval: TimeInterval {
+    transaction.set_recurrence(Some(budget_core::ledger::Recurrence::new(
+        NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(),
+        TimeInterval {
             every: 1,
             unit: TimeUnit::Month,
         },
-        mode: budget_core::ledger::RecurrenceMode::FixedSchedule,
-    });
+        budget_core::ledger::RecurrenceMode::FixedSchedule,
+    )));
     ledger.add_transaction(transaction);
 
     let summary = simulation::summarize(&ledger);

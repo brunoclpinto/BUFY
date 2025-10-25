@@ -5,6 +5,7 @@ pub mod budget;
 pub mod category;
 #[allow(clippy::module_inception)]
 pub mod ledger;
+pub mod recurring;
 pub mod time_interval;
 pub mod transaction;
 
@@ -13,8 +14,13 @@ pub use budget::Budget;
 pub use category::{Category, CategoryKind};
 pub use ledger::{
     AccountBudget, BudgetPeriod, BudgetScope, BudgetStatus, BudgetSummary, BudgetTotals,
-    DateWindow, Ledger, Simulation, SimulationBudgetImpact, SimulationChange, SimulationStatus,
-    SimulationTransactionPatch,
+    DateWindow, ForecastReport, Ledger, Simulation, SimulationBudgetImpact, SimulationChange,
+    SimulationStatus, SimulationTransactionPatch,
+};
+pub use recurring::{
+    ForecastResult, ForecastTotals, ForecastTransaction, RecurrenceSnapshot, ScheduledStatus,
 };
 pub use time_interval::{TimeInterval, TimeUnit};
-pub use transaction::{Recurrence, RecurrenceMode, Transaction, TransactionStatus};
+pub use transaction::{
+    Recurrence, RecurrenceEnd, RecurrenceMode, RecurrenceStatus, Transaction, TransactionStatus,
+};

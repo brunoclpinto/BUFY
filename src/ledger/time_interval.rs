@@ -20,19 +20,8 @@ impl TimeInterval {
         match self.unit {
             TimeUnit::Day => from + Duration::days(self.every as i64),
             TimeUnit::Week => from + Duration::weeks(self.every as i64),
-            TimeUnit::Month => {
-                let mut year = from.year();
-                let mut month = from.month() as i32 + self.every as i32;
-                while month > 12 {
-                    month -= 12;
-                    year += 1;
-                }
-                NaiveDate::from_ymd_opt(year, month as u32, from.day()).unwrap_or(from)
-            }
-            TimeUnit::Year => {
-                NaiveDate::from_ymd_opt(from.year() + self.every as i32, from.month(), from.day())
-                    .unwrap_or(from)
-            }
+            TimeUnit::Month => shift_month(from, self.every as i32),
+            TimeUnit::Year => shift_year(from, self.every as i32),
         }
     }
 

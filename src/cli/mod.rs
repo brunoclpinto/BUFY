@@ -1,4 +1,5 @@
 use std::{
+    cmp::Ordering,
     collections::HashMap,
     fmt,
     io::{self, BufRead},
@@ -17,7 +18,8 @@ use crate::{
     errors::LedgerError,
     ledger::{
         account::AccountKind, category::CategoryKind, Account, BudgetPeriod, BudgetScope,
-        BudgetStatus, BudgetSummary, Category, DateWindow, Ledger, Recurrence, RecurrenceMode,
+        BudgetStatus, BudgetSummary, Category, DateWindow, ForecastReport, Ledger, Recurrence,
+        RecurrenceEnd, RecurrenceMode, RecurrenceSnapshot, RecurrenceStatus, ScheduledStatus,
         SimulationBudgetImpact, SimulationChange, SimulationStatus, SimulationTransactionPatch,
         TimeInterval, TimeUnit, Transaction,
     },
@@ -151,6 +153,17 @@ impl CliApp {
             state: CliState::new(),
             theme: ColorfulTheme::default(),
         })
+    }
+
+    fn ensure_base_mode(&self, action: &str) -> Result<(), CommandError> {
+        if self.state.active_simulation().is_some() {
+            Err(CommandError::InvalidArguments(format!(
+                "{} is unavailable while editing a simulation. Use `leave-simulation` first.",
+                action
+            )))
+        } else {
+            Ok(())
+        }
     }
 
     pub fn run_loop(&mut self) -> Result<(), CliError> {
@@ -369,21 +382,41 @@ impl CliApp {
     }
 
     fn prompt_budget_period(&self) -> Result<BudgetPeriod, CommandError> {
-        let interval = self.prompt_time_interval()?;
+        let interval = self.prompt_time_interval(None)?;
         Ok(BudgetPeriod(interval))
     }
 
-    fn prompt_time_interval(&self) -> Result<TimeInterval, CommandError> {
+    fn prompt_time_interval(
+        &self,
+        defaults: Option<&TimeInterval>,
+    ) -> Result<TimeInterval, CommandError> {
         let options = interval_options();
+        let custom_index = options.len() - 1;
+        let mut default_selection = 0;
+        let mut custom_defaults: Option<&TimeInterval> = None;
+        if let Some(interval) = defaults {
+            default_selection = match (interval.every, &interval.unit) {
+                (1, TimeUnit::Month) => 0,
+                (1, TimeUnit::Week) => 1,
+                (1, TimeUnit::Day) => 2,
+                (1, TimeUnit::Year) => 3,
+                _ => {
+                    custom_defaults = Some(interval);
+                    custom_index
+                }
+            };
+        }
+        default_selection = default_selection.min(custom_index);
+
         let selection = Select::with_theme(&self.theme)
             .with_prompt("Select interval")
             .items(options)
-            .default(0)
+            .default(default_selection)
             .interact()
             .map_err(CommandError::from)?;
 
-        if selection == options.len() - 1 {
-            let every: u32 = Input::<u32>::with_theme(&self.theme)
+        if selection == custom_index {
+            let mut every_input = Input::<u32>::with_theme(&self.theme)
                 .with_prompt("Repeat every (number)")
                 .validate_with(|value: &u32| -> Result<(), &str> {
                     if *value == 0 {
@@ -391,15 +424,26 @@ impl CliApp {
                     } else {
                         Ok(())
                     }
-                })
-                .interact_text()
-                .map_err(CommandError::from)?;
+                });
+            if let Some(defaults) = custom_defaults {
+                every_input = every_input.with_initial_text(defaults.every.to_string());
+            }
+            let every: u32 = every_input.interact_text().map_err(CommandError::from)?;
 
             let units = ["Day", "Week", "Month", "Year"];
+            let mut unit_default = 2;
+            if let Some(defaults) = custom_defaults {
+                unit_default = match defaults.unit {
+                    TimeUnit::Day => 0,
+                    TimeUnit::Week => 1,
+                    TimeUnit::Month => 2,
+                    TimeUnit::Year => 3,
+                };
+            }
             let unit_selection = Select::with_theme(&self.theme)
                 .with_prompt("Time unit")
                 .items(&units)
-                .default(2)
+                .default(unit_default)
                 .interact()
                 .map_err(CommandError::from)?;
             let unit = match unit_selection {
@@ -412,17 +456,17 @@ impl CliApp {
             Ok(TimeInterval { every, unit })
         } else {
             Ok(match options[selection].to_lowercase().as_str() {
-                "daily" => TimeInterval {
+                "monthly" => TimeInterval {
                     every: 1,
-                    unit: TimeUnit::Day,
+                    unit: TimeUnit::Month,
                 },
                 "weekly" => TimeInterval {
                     every: 1,
                     unit: TimeUnit::Week,
                 },
-                "monthly" => TimeInterval {
+                "daily" => TimeInterval {
                     every: 1,
-                    unit: TimeUnit::Month,
+                    unit: TimeUnit::Day,
                 },
                 "yearly" => TimeInterval {
                     every: 1,
@@ -457,7 +501,9 @@ impl CliApp {
     }
 
     fn load_ledger(&mut self, path: &Path) -> CommandResult {
-        let ledger = persistence::load_ledger_from_file(path).map_err(CommandError::from_ledger)?;
+        let mut ledger =
+            persistence::load_ledger_from_file(path).map_err(CommandError::from_ledger)?;
+        ledger.refresh_recurrence_metadata();
         self.set_ledger(ledger, Some(path.to_path_buf()));
         println!("{}", "Ledger loaded".bright_green());
         Ok(())
@@ -662,7 +708,7 @@ impl CliApp {
             .interact()
             .map_err(CommandError::from)?
         {
-            let recurrence = self.prompt_recurrence()?;
+            let recurrence = self.prompt_recurrence(scheduled_date, None)?;
             transaction.recurrence = Some(recurrence);
         }
 
@@ -681,22 +727,103 @@ impl CliApp {
         Ok(())
     }
 
-    fn prompt_recurrence(&self) -> Result<Recurrence, CommandError> {
-        let interval = self.prompt_time_interval()?;
+    fn prompt_recurrence(
+        &self,
+        default_start: NaiveDate,
+        existing: Option<&Recurrence>,
+    ) -> Result<Recurrence, CommandError> {
+        let start_default = existing.map(|r| r.start_date).unwrap_or(default_start);
+        let start_input = Input::<String>::with_theme(&self.theme)
+            .with_prompt("Start date (YYYY-MM-DD)")
+            .with_initial_text(start_default.to_string());
+        let start_raw = start_input.interact_text().map_err(CommandError::from)?;
+        let start_date = parse_date(&start_raw)?;
+
+        let interval = self.prompt_time_interval(existing.map(|r| &r.interval))?;
         let modes = [
             ("Fixed schedule", RecurrenceMode::FixedSchedule),
             ("After last performed", RecurrenceMode::AfterLastPerformed),
         ];
-        let selection = Select::with_theme(&self.theme)
+        let mode_default = existing
+            .map(|r| match r.mode {
+                RecurrenceMode::FixedSchedule => 0,
+                RecurrenceMode::AfterLastPerformed => 1,
+            })
+            .unwrap_or(0);
+        let mode_selection = Select::with_theme(&self.theme)
             .with_prompt("Recurrence mode")
-            .items(&modes.iter().map(|(label, _)| label).collect::<Vec<_>>())
-            .default(0)
+            .items(&modes.iter().map(|(label, _)| *label).collect::<Vec<_>>())
+            .default(mode_default)
             .interact()
             .map_err(CommandError::from)?;
-        Ok(Recurrence {
-            interval,
-            mode: modes[selection].1.clone(),
-        })
+        let mode = modes[mode_selection].1.clone();
+
+        let end_options = ["No end", "End on date", "End after N occurrences"];
+        let mut end_default = 0;
+        let mut existing_end_date: Option<NaiveDate> = None;
+        let mut existing_occurrences: Option<u32> = None;
+        if let Some(recurrence) = existing {
+            match recurrence.end {
+                RecurrenceEnd::Never => end_default = 0,
+                RecurrenceEnd::OnDate(date) => {
+                    end_default = 1;
+                    existing_end_date = Some(date);
+                }
+                RecurrenceEnd::AfterOccurrences(n) => {
+                    end_default = 2;
+                    existing_occurrences = Some(n);
+                }
+            }
+        }
+        let end_selection = Select::with_theme(&self.theme)
+            .with_prompt("End condition")
+            .items(&end_options)
+            .default(end_default)
+            .interact()
+            .map_err(CommandError::from)?;
+        let end = match end_selection {
+            0 => RecurrenceEnd::Never,
+            1 => {
+                let default_text = existing_end_date.unwrap_or(start_date).to_string();
+                let date_input = Input::<String>::with_theme(&self.theme)
+                    .with_prompt("End date (YYYY-MM-DD)")
+                    .with_initial_text(default_text)
+                    .interact_text()
+                    .map_err(CommandError::from)?;
+                RecurrenceEnd::OnDate(parse_date(&date_input)?)
+            }
+            _ => {
+                let mut count_input =
+                    Input::<u32>::with_theme(&self.theme).with_prompt("Number of occurrences");
+                if let Some(n) = existing_occurrences {
+                    count_input = count_input.with_initial_text(n.to_string());
+                }
+                let count = count_input
+                    .validate_with(|value: &u32| -> Result<(), &str> {
+                        if *value == 0 {
+                            Err("Value must be greater than zero")
+                        } else {
+                            Ok(())
+                        }
+                    })
+                    .interact_text()
+                    .map_err(CommandError::from)?;
+                RecurrenceEnd::AfterOccurrences(count)
+            }
+        };
+
+        let mut recurrence = Recurrence::new(start_date, interval, mode);
+        recurrence.end = end;
+        if let Some(existing) = existing {
+            recurrence.series_id = existing.series_id;
+            recurrence.exceptions = existing.exceptions.clone();
+            recurrence.status = existing.status.clone();
+            recurrence.last_generated = existing.last_generated;
+            recurrence.last_completed = existing.last_completed;
+            recurrence.generated_occurrences = existing.generated_occurrences;
+            recurrence.next_scheduled = existing.next_scheduled;
+        }
+        Ok(recurrence)
     }
 
     fn select_accounts(&mut self) -> Result<(uuid::Uuid, uuid::Uuid), CommandError> {
@@ -770,12 +897,40 @@ impl CliApp {
         let ledger = self.current_ledger()?;
         if ledger.transactions.is_empty() {
             println!("{}", "No transactions recorded".bright_black());
-        } else {
-            println!("{}", "Transactions".bright_white().bold());
-            for (idx, txn) in ledger.transactions.iter().enumerate() {
+            return Ok(());
+        }
+
+        println!("{}", "Transactions".bright_white().bold());
+        for (idx, txn) in ledger.transactions.iter().enumerate() {
+            let route = self.describe_transaction_route(ledger, txn);
+            let category = txn
+                .category_id
+                .and_then(|id| self.lookup_category_name(ledger, id))
+                .unwrap_or_else(|| "Uncategorized".into());
+            let status = format!("{:?}", txn.status);
+            println!(
+                "  [{idx:>3}] {date} | {amount:>10.2} | {status:<10} | {route} ({category})",
+                idx = idx,
+                date = txn.scheduled_date,
+                amount = txn.budgeted_amount,
+                status = status,
+                route = route,
+                category = category
+            );
+            if let Some(actual_date) = txn.actual_date {
+                let actual_amount = txn.actual_amount.unwrap_or(0.0);
                 println!(
-                    "  [{}] {} -> {} | {} | {:.2}",
-                    idx, txn.from_account, txn.to_account, txn.scheduled_date, txn.budgeted_amount
+                    "        actual {date} | {amount:>10.2}",
+                    date = actual_date,
+                    amount = actual_amount
+                );
+            }
+            if let Some(hint) = self.transaction_recurrence_hint(txn) {
+                println!("        {}", hint.bright_black());
+            } else if txn.recurrence_series_id.is_some() {
+                println!(
+                    "{}",
+                    "        scheduled instance from recurrence".bright_black()
                 );
             }
         }
@@ -856,6 +1011,40 @@ impl CliApp {
                 other
             ))),
         }
+    }
+
+    fn resolve_forecast_window(
+        &self,
+        args: &[&str],
+        today: NaiveDate,
+    ) -> Result<DateWindow, CommandError> {
+        if args.is_empty() {
+            let end = today + Duration::days(90);
+            return DateWindow::new(today, end).map_err(CommandError::from_ledger);
+        }
+        if matches!(args[0].to_lowercase().as_str(), "custom" | "range") {
+            if args.len() < 3 {
+                return Err(CommandError::InvalidArguments(
+                    "usage: forecast custom <start YYYY-MM-DD> <end YYYY-MM-DD>".into(),
+                ));
+            }
+            let start = parse_date(args[1])?;
+            let end = parse_date(args[2])?;
+            return DateWindow::new(start, end).map_err(CommandError::from_ledger);
+        }
+        let mut tokens = args;
+        if !tokens.is_empty() && tokens[0].eq_ignore_ascii_case("next") {
+            tokens = &tokens[1..];
+        }
+        if tokens.is_empty() {
+            return Err(CommandError::InvalidArguments(
+                "usage: forecast <number> <unit>".into(),
+            ));
+        }
+        let interval_expr = tokens.join(" ");
+        let interval = parse_time_interval_str(&interval_expr)?;
+        let end = interval.add_to(today, 1);
+        DateWindow::new(today, end).map_err(CommandError::from_ledger)
     }
 
     fn print_budget_summary(&self, summary: &BudgetSummary) {
@@ -979,6 +1168,356 @@ impl CliApp {
             "  Budgeted: {:+.2} | Real: {:+.2} | Remaining: {:+.2} | Variance: {:+.2}",
             impact.delta.budgeted, impact.delta.real, impact.delta.remaining, impact.delta.variance
         );
+    }
+
+    fn print_forecast_report(
+        &self,
+        ledger: &Ledger,
+        simulation: Option<&str>,
+        report: &ForecastReport,
+    ) {
+        let window = report.forecast.window;
+        let header = if let Some(name) = simulation {
+            format!("Forecast (`{}`)", name)
+        } else {
+            "Forecast".into()
+        };
+        let end_display = window.end - Duration::days(1);
+        println!(
+            "{} {} → {}",
+            header.bright_cyan().bold(),
+            window.start,
+            end_display
+        );
+
+        let totals = &report.forecast.totals;
+        let instance_count = report.forecast.instances.len();
+        let generated_count = totals.generated;
+        let existing_count = instance_count.saturating_sub(generated_count);
+        let overdue = report
+            .forecast
+            .instances
+            .iter()
+            .filter(|inst| matches!(inst.status, ScheduledStatus::Overdue))
+            .count();
+        let pending = report
+            .forecast
+            .instances
+            .iter()
+            .filter(|inst| matches!(inst.status, ScheduledStatus::Pending))
+            .count();
+        let future = report
+            .forecast
+            .instances
+            .iter()
+            .filter(|inst| matches!(inst.status, ScheduledStatus::Future))
+            .count();
+
+        println!(
+            "Occurrences: {} total | {} already scheduled | {} projected",
+            instance_count, existing_count, generated_count
+        );
+        println!(
+            "Status mix → {} overdue | {} pending | {} future",
+            overdue, pending, future
+        );
+        println!(
+            "Projected totals → Inflow: {:+.2} | Outflow: {:+.2} | Net: {:+.2}",
+            totals.projected_inflow, totals.projected_outflow, totals.net
+        );
+        println!(
+            "Budget impact → Budgeted: {:.2} | Real: {:.2} | Remaining: {:.2} | Variance: {:.2}",
+            report.summary.totals.budgeted,
+            report.summary.totals.real,
+            report.summary.totals.remaining,
+            report.summary.totals.variance
+        );
+
+        if report.forecast.transactions.is_empty() {
+            println!(
+                "{}",
+                "No additional projections required within this window.".bright_black()
+            );
+            return;
+        }
+
+        println!("{}", "Upcoming projections:".bright_white().bold());
+        for item in report.forecast.transactions.iter().take(8) {
+            let status = self.scheduled_status_label(item.status);
+            let route = self.describe_transaction_route(ledger, &item.transaction);
+            let category = item
+                .transaction
+                .category_id
+                .and_then(|id| self.lookup_category_name(ledger, id))
+                .unwrap_or_else(|| "Uncategorized".into());
+            println!(
+                "  {} | {:>10.2} | {} | {}",
+                format!("{}", item.transaction.scheduled_date).bright_white(),
+                item.transaction.budgeted_amount,
+                status,
+                format!("{} ({})", route, category)
+            );
+        }
+        if report.forecast.transactions.len() > 8 {
+            println!(
+                "{}",
+                format!(
+                    "  ... {} additional projections",
+                    report.forecast.transactions.len() - 8
+                )
+                .bright_black()
+            );
+        }
+    }
+
+    fn scheduled_status_label(&self, status: ScheduledStatus) -> colored::ColoredString {
+        match status {
+            ScheduledStatus::Overdue => "Overdue".red().bold(),
+            ScheduledStatus::Pending => "Pending".yellow(),
+            ScheduledStatus::Future => "Future".bright_cyan(),
+        }
+    }
+
+    fn describe_transaction_route(&self, ledger: &Ledger, txn: &Transaction) -> String {
+        let from = ledger
+            .account(txn.from_account)
+            .map(|acct| acct.name.clone())
+            .unwrap_or_else(|| "Unknown".into());
+        let to = ledger
+            .account(txn.to_account)
+            .map(|acct| acct.name.clone())
+            .unwrap_or_else(|| "Unknown".into());
+        format!("{} → {}", from, to)
+    }
+
+    fn lookup_category_name(&self, ledger: &Ledger, id: Uuid) -> Option<String> {
+        ledger
+            .categories
+            .iter()
+            .find(|cat| cat.id == id)
+            .map(|cat| cat.name.clone())
+    }
+
+    fn transaction_recurrence_hint(&self, txn: &Transaction) -> Option<String> {
+        let rule = txn.recurrence.as_ref()?;
+        let mut parts = vec![format!("Recurring {}", rule.interval.label())];
+        match rule.status {
+            RecurrenceStatus::Active => {}
+            RecurrenceStatus::Paused => parts.push("paused".into()),
+            RecurrenceStatus::Completed => parts.push("completed".into()),
+        }
+        if let Some(next) = rule.next_scheduled {
+            parts.push(format!("next {}", next));
+        }
+        if let Some(last) = rule.last_completed {
+            parts.push(format!("last actual {}", last));
+        }
+        if rule.generated_occurrences > 0 {
+            parts.push(format!("occurrences {}", rule.generated_occurrences));
+        }
+        Some(parts.join(" | "))
+    }
+
+    fn list_recurrences(&self, filter: RecurrenceListFilter) -> CommandResult {
+        let ledger = self.current_ledger()?;
+        let today = Utc::now().date_naive();
+        let snapshot_map: HashMap<Uuid, RecurrenceSnapshot> = ledger
+            .recurrence_snapshots(today)
+            .into_iter()
+            .map(|snap| (snap.series_id, snap))
+            .collect();
+        if snapshot_map.is_empty() {
+            println!("{}", "No recurring schedules defined.".bright_black());
+            return Ok(());
+        }
+        let mut entries: Vec<(usize, &Transaction, &RecurrenceSnapshot)> = ledger
+            .transactions
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, txn)| {
+                txn.recurrence.as_ref().and_then(|recurrence| {
+                    snapshot_map
+                        .get(&recurrence.series_id)
+                        .map(|snap| (idx, txn, snap))
+                })
+            })
+            .collect();
+        entries.sort_by(|(_, _, a), (_, _, b)| match (a.next_due, b.next_due) {
+            (Some(lhs), Some(rhs)) => lhs.cmp(&rhs),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => Ordering::Equal,
+        });
+
+        println!("{}", "Recurring schedules:".bright_white().bold());
+        let mut shown = 0;
+        for (index, txn, snapshot) in entries {
+            if !filter.matches(snapshot) {
+                continue;
+            }
+            shown += 1;
+            self.print_recurrence_entry(ledger, index, txn, snapshot);
+        }
+        if shown == 0 {
+            println!(
+                "{}",
+                "No recurring entries match the requested filter.".bright_black()
+            );
+        }
+        Ok(())
+    }
+
+    fn print_recurrence_entry(
+        &self,
+        ledger: &Ledger,
+        index: usize,
+        txn: &Transaction,
+        snapshot: &RecurrenceSnapshot,
+    ) {
+        let route = self.describe_transaction_route(ledger, txn);
+        let category = txn
+            .category_id
+            .and_then(|id| self.lookup_category_name(ledger, id))
+            .unwrap_or_else(|| "Uncategorized".into());
+        let next_due = snapshot
+            .next_due
+            .map(|d| d.to_string())
+            .unwrap_or_else(|| "None".into());
+        let status = self.recurrence_status_label(&snapshot.status);
+        println!(
+            "[{idx}] {route} | {cat} | every {freq} | next {next} | overdue {overdue} | pending {pending}",
+            idx = index,
+            route = route,
+            cat = category,
+            freq = snapshot.interval_label,
+            next = next_due,
+            overdue = snapshot.overdue,
+            pending = snapshot.pending
+        );
+        println!(
+            "      amount {:.2} | status {} | since {}",
+            txn.budgeted_amount, status, snapshot.start_date
+        );
+    }
+
+    fn recurrence_status_label(&self, status: &RecurrenceStatus) -> colored::ColoredString {
+        match status {
+            RecurrenceStatus::Active => "Active".green(),
+            RecurrenceStatus::Paused => "Paused".yellow(),
+            RecurrenceStatus::Completed => "Completed".bright_black(),
+        }
+    }
+
+    fn recurrence_edit(&mut self, index: usize) -> CommandResult {
+        self.ensure_base_mode("Recurrence editing")?;
+        let (scheduled_date, existing) = {
+            let ledger = self.current_ledger()?;
+            let txn = ledger.transactions.get(index).ok_or_else(|| {
+                CommandError::InvalidArguments("transaction index out of range".into())
+            })?;
+            (txn.scheduled_date, txn.recurrence.clone())
+        };
+        let recurrence = self.prompt_recurrence(scheduled_date, existing.as_ref())?;
+        let ledger = self.current_ledger_mut()?;
+        let txn = ledger.transactions.get_mut(index).ok_or_else(|| {
+            CommandError::InvalidArguments("transaction index out of range".into())
+        })?;
+        txn.set_recurrence(Some(recurrence));
+        ledger.refresh_recurrence_metadata();
+        ledger.touch();
+        println!(
+            "{}",
+            format!("Recurrence updated for transaction {}", index).bright_green()
+        );
+        Ok(())
+    }
+
+    fn recurrence_clear(&mut self, index: usize) -> CommandResult {
+        self.ensure_base_mode("Recurrence removal")?;
+        let ledger = self.current_ledger_mut()?;
+        let txn = ledger.transactions.get_mut(index).ok_or_else(|| {
+            CommandError::InvalidArguments("transaction index out of range".into())
+        })?;
+        if txn.recurrence.is_none() {
+            println!(
+                "{}",
+                "Transaction has no recurrence defined.".bright_black()
+            );
+            return Ok(());
+        }
+        txn.set_recurrence(None);
+        txn.recurrence_series_id = None;
+        ledger.refresh_recurrence_metadata();
+        ledger.touch();
+        println!(
+            "{}",
+            format!("Recurrence removed from transaction {}", index).bright_green()
+        );
+        Ok(())
+    }
+
+    fn recurrence_set_status(&mut self, index: usize, status: RecurrenceStatus) -> CommandResult {
+        self.ensure_base_mode("Recurrence status change")?;
+        let ledger = self.current_ledger_mut()?;
+        let txn = ledger.transactions.get_mut(index).ok_or_else(|| {
+            CommandError::InvalidArguments("transaction index out of range".into())
+        })?;
+        let recurrence = txn.recurrence.as_mut().ok_or_else(|| {
+            CommandError::InvalidArguments("transaction has no recurrence".into())
+        })?;
+        recurrence.status = status.clone();
+        ledger.refresh_recurrence_metadata();
+        ledger.touch();
+        println!(
+            "{}",
+            format!("Recurrence {:?} for transaction {}", status, index).bright_green()
+        );
+        Ok(())
+    }
+
+    fn recurrence_skip_date(&mut self, index: usize, date: NaiveDate) -> CommandResult {
+        self.ensure_base_mode("Recurrence exception editing")?;
+        let ledger = self.current_ledger_mut()?;
+        let txn = ledger.transactions.get_mut(index).ok_or_else(|| {
+            CommandError::InvalidArguments("transaction index out of range".into())
+        })?;
+        let recurrence = txn.recurrence.as_mut().ok_or_else(|| {
+            CommandError::InvalidArguments("transaction has no recurrence".into())
+        })?;
+        if recurrence.exceptions.contains(&date) {
+            println!(
+                "{}",
+                format!("Date {} already skipped for this recurrence", date).bright_black()
+            );
+            return Ok(());
+        }
+        recurrence.exceptions.push(date);
+        recurrence.exceptions.sort();
+        ledger.refresh_recurrence_metadata();
+        ledger.touch();
+        println!(
+            "{}",
+            format!("Added skip date {} for transaction {}", date, index).bright_green()
+        );
+        Ok(())
+    }
+
+    fn recurrence_sync(&mut self, reference: NaiveDate) -> CommandResult {
+        self.ensure_base_mode("Recurrence synchronization")?;
+        let ledger = self.current_ledger_mut()?;
+        let created = ledger.materialize_due_recurrences(reference);
+        if created == 0 {
+            println!(
+                "{}",
+                "All due recurring instances already exist.".bright_black()
+            );
+        } else {
+            println!(
+                "{}",
+                format!("Created {} pending transactions from schedules", created).bright_green()
+            );
+        }
+        Ok(())
     }
 
     fn resolve_simulation_name(&self, arg: Option<&str>) -> Result<String, CommandError> {
@@ -1226,6 +1765,12 @@ fn build_commands() -> Vec<Command> {
             cmd_summary,
         ),
         Command::new(
+            "forecast",
+            "Forecast recurring activity",
+            "forecast [simulation_name] [<number> <unit> | custom <start YYYY-MM-DD> <end YYYY-MM-DD>]",
+            cmd_forecast,
+        ),
+        Command::new(
             "list-simulations",
             "List saved simulations",
             "list-simulations",
@@ -1266,6 +1811,18 @@ fn build_commands() -> Vec<Command> {
             "Manage pending simulation changes",
             "simulation <changes|add|modify|exclude> [simulation_name]",
             cmd_simulation,
+        ),
+        Command::new(
+            "recurring",
+            "Manage recurring schedules",
+            "recurring [list|edit|clear|pause|resume|skip|sync] ...",
+            cmd_recurring,
+        ),
+        Command::new(
+            "complete",
+            "Mark a transaction as completed",
+            "complete <transaction_index> <YYYY-MM-DD> <amount>",
+            cmd_complete,
         ),
         Command::new("exit", "Exit the shell", "exit", cmd_exit),
     ]
@@ -1400,6 +1957,22 @@ fn cmd_list(app: &mut CliApp, args: &[&str]) -> CommandResult {
 
 fn cmd_summary(app: &mut CliApp, args: &[&str]) -> CommandResult {
     app.show_budget_summary(args)
+}
+
+fn cmd_forecast(app: &mut CliApp, args: &[&str]) -> CommandResult {
+    let ledger = app.current_ledger()?;
+    let today = Utc::now().date_naive();
+    let (simulation, remainder) = if !args.is_empty() && ledger.simulation(args[0]).is_some() {
+        (Some(args[0]), &args[1..])
+    } else {
+        (None, args)
+    };
+    let window = app.resolve_forecast_window(remainder, today)?;
+    let report = ledger
+        .forecast_window_report(window, today, simulation)
+        .map_err(CommandError::from_ledger)?;
+    app.print_forecast_report(ledger, simulation, &report);
+    Ok(())
 }
 
 fn cmd_list_simulations(app: &mut CliApp, _args: &[&str]) -> CommandResult {
@@ -1581,8 +2154,129 @@ fn cmd_simulation(app: &mut CliApp, args: &[&str]) -> CommandResult {
     }
 }
 
+fn cmd_recurring(app: &mut CliApp, args: &[&str]) -> CommandResult {
+    if args.is_empty() {
+        return app.list_recurrences(RecurrenceListFilter::All);
+    }
+    match args[0].to_lowercase().as_str() {
+        "list" => {
+            let filter = RecurrenceListFilter::parse(args.get(1).copied())?;
+            app.list_recurrences(filter)
+        }
+        "edit" => {
+            let idx = args
+                .get(1)
+                .ok_or_else(|| {
+                    CommandError::InvalidArguments(
+                        "usage: recurring edit <transaction_index>".into(),
+                    )
+                })?
+                .parse()
+                .map_err(|_| {
+                    CommandError::InvalidArguments("transaction_index must be numeric".into())
+                })?;
+            app.recurrence_edit(idx)
+        }
+        "clear" => {
+            let idx = args
+                .get(1)
+                .ok_or_else(|| {
+                    CommandError::InvalidArguments(
+                        "usage: recurring clear <transaction_index>".into(),
+                    )
+                })?
+                .parse()
+                .map_err(|_| {
+                    CommandError::InvalidArguments("transaction_index must be numeric".into())
+                })?;
+            app.recurrence_clear(idx)
+        }
+        "pause" => {
+            let idx = args
+                .get(1)
+                .ok_or_else(|| {
+                    CommandError::InvalidArguments(
+                        "usage: recurring pause <transaction_index>".into(),
+                    )
+                })?
+                .parse()
+                .map_err(|_| {
+                    CommandError::InvalidArguments("transaction_index must be numeric".into())
+                })?;
+            app.recurrence_set_status(idx, RecurrenceStatus::Paused)
+        }
+        "resume" => {
+            let idx = args
+                .get(1)
+                .ok_or_else(|| {
+                    CommandError::InvalidArguments(
+                        "usage: recurring resume <transaction_index>".into(),
+                    )
+                })?
+                .parse()
+                .map_err(|_| {
+                    CommandError::InvalidArguments("transaction_index must be numeric".into())
+                })?;
+            app.recurrence_set_status(idx, RecurrenceStatus::Active)
+        }
+        "skip" => {
+            if args.len() < 3 {
+                return Err(CommandError::InvalidArguments(
+                    "usage: recurring skip <transaction_index> <YYYY-MM-DD>".into(),
+                ));
+            }
+            let idx: usize = args[1].parse().map_err(|_| {
+                CommandError::InvalidArguments("transaction_index must be numeric".into())
+            })?;
+            let date = parse_date(args[2])?;
+            app.recurrence_skip_date(idx, date)
+        }
+        "sync" => {
+            let reference = if args.len() > 1 {
+                parse_date(args[1])?
+            } else {
+                Utc::now().date_naive()
+            };
+            app.recurrence_sync(reference)
+        }
+        other => Err(CommandError::InvalidArguments(format!(
+            "unknown recurring subcommand `{}`",
+            other
+        ))),
+    }
+}
+
 fn cmd_exit(_app: &mut CliApp, _args: &[&str]) -> CommandResult {
     Err(CommandError::ExitRequested)
+}
+
+fn cmd_complete(app: &mut CliApp, args: &[&str]) -> CommandResult {
+    if args.len() < 3 {
+        return Err(CommandError::InvalidArguments(
+            "usage: complete <transaction_index> <YYYY-MM-DD> <amount>".into(),
+        ));
+    }
+    app.ensure_base_mode("Completion")?;
+    let idx: usize = args[0]
+        .parse()
+        .map_err(|_| CommandError::InvalidArguments("transaction_index must be numeric".into()))?;
+    let actual_date = parse_date(args[1])?;
+    let amount: f64 = args[2]
+        .parse()
+        .map_err(|_| CommandError::InvalidArguments("amount must be numeric".into()))?;
+    let ledger = app.current_ledger_mut()?;
+    let txn = ledger
+        .transactions
+        .get_mut(idx)
+        .ok_or_else(|| CommandError::InvalidArguments("transaction index out of range".into()))?;
+    txn.mark_completed(actual_date, amount);
+    ledger.refresh_recurrence_metadata();
+    ledger.touch();
+    println!(
+        "{}",
+        format!("Transaction {} marked completed", idx).bright_green()
+    );
+    Ok(())
 }
 
 fn parse_command_line(line: &str) -> Result<Vec<String>, ParseError> {
@@ -1701,6 +2395,47 @@ fn parse_category_kind(input: &str) -> Result<CategoryKind, CommandError> {
             "unknown category kind `{}`",
             other
         ))),
+    }
+}
+
+#[derive(Clone, Copy)]
+enum RecurrenceListFilter {
+    All,
+    Pending,
+    Overdue,
+    Active,
+    Paused,
+    Completed,
+}
+
+impl RecurrenceListFilter {
+    fn parse(token: Option<&str>) -> Result<Self, CommandError> {
+        match token.map(|t| t.to_lowercase()) {
+            None => Ok(RecurrenceListFilter::All),
+            Some(ref value) if value == "all" => Ok(RecurrenceListFilter::All),
+            Some(ref value) if value == "pending" => Ok(RecurrenceListFilter::Pending),
+            Some(ref value) if value == "overdue" => Ok(RecurrenceListFilter::Overdue),
+            Some(ref value) if value == "active" => Ok(RecurrenceListFilter::Active),
+            Some(ref value) if value == "paused" => Ok(RecurrenceListFilter::Paused),
+            Some(ref value) if value == "completed" => Ok(RecurrenceListFilter::Completed),
+            Some(value) => Err(CommandError::InvalidArguments(format!(
+                "unknown recurrence filter `{}`",
+                value
+            ))),
+        }
+    }
+
+    fn matches(&self, snapshot: &RecurrenceSnapshot) -> bool {
+        match self {
+            RecurrenceListFilter::All => true,
+            RecurrenceListFilter::Pending => snapshot.pending > 0,
+            RecurrenceListFilter::Overdue => snapshot.overdue > 0,
+            RecurrenceListFilter::Active => matches!(snapshot.status, RecurrenceStatus::Active),
+            RecurrenceListFilter::Paused => matches!(snapshot.status, RecurrenceStatus::Paused),
+            RecurrenceListFilter::Completed => {
+                matches!(snapshot.status, RecurrenceStatus::Completed)
+            }
+        }
     }
 }
 

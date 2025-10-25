@@ -1,6 +1,6 @@
 use budget_core::ledger::{
     transaction::{Recurrence, RecurrenceMode},
-    Account, AccountKind, BudgetPeriod, Ledger, TimeInterval, TimeUnit, Transaction,
+    Account, AccountKind, BudgetPeriod, DateWindow, Ledger, TimeInterval, TimeUnit, Transaction,
 };
 use budget_core::utils::persistence;
 use chrono::{NaiveDate, TimeZone, Utc};
@@ -57,14 +57,12 @@ fn test_recurrence_fixed_vs_afterlast() {
     let last_scheduled = NaiveDate::from_ymd_opt(2025, 1, 1).unwrap();
     let last_performed = Some(NaiveDate::from_ymd_opt(2025, 1, 15).unwrap());
 
-    let fixed = Recurrence {
-        interval: interval.clone(),
-        mode: RecurrenceMode::FixedSchedule,
-    };
-    let after = Recurrence {
-        interval,
-        mode: RecurrenceMode::AfterLastPerformed,
-    };
+    let fixed = Recurrence::new(
+        last_scheduled,
+        interval.clone(),
+        RecurrenceMode::FixedSchedule,
+    );
+    let after = Recurrence::new(last_scheduled, interval, RecurrenceMode::AfterLastPerformed);
 
     assert_eq!(
         fixed.next_occurrence(last_scheduled, last_performed),
@@ -78,13 +76,14 @@ fn test_recurrence_fixed_vs_afterlast() {
 
 #[test]
 fn test_recurrence_reset_behavior() {
-    let recurrence = Recurrence {
-        interval: TimeInterval {
+    let recurrence = Recurrence::new(
+        NaiveDate::from_ymd_opt(2025, 3, 1).unwrap(),
+        TimeInterval {
             every: 2,
             unit: TimeUnit::Month,
         },
-        mode: RecurrenceMode::AfterLastPerformed,
-    };
+        RecurrenceMode::AfterLastPerformed,
+    );
 
     let next = recurrence.next_occurrence(
         NaiveDate::from_ymd_opt(2025, 3, 1).unwrap(),
@@ -107,13 +106,14 @@ fn test_serialization_roundtrip() {
         NaiveDate::from_ymd_opt(2025, 5, 5).unwrap(),
         1200.55,
     );
-    transaction.recurrence = Some(Recurrence {
-        interval: TimeInterval {
+    transaction.set_recurrence(Some(Recurrence::new(
+        NaiveDate::from_ymd_opt(2025, 5, 5).unwrap(),
+        TimeInterval {
             every: 1,
             unit: TimeUnit::Month,
         },
-        mode: RecurrenceMode::FixedSchedule,
-    });
+        RecurrenceMode::FixedSchedule,
+    )));
     ledger.add_transaction(transaction);
 
     // Adjust timestamps to deterministic values for comparison.
@@ -142,4 +142,45 @@ fn test_label_generation() {
         unit: TimeUnit::Week,
     };
     assert_eq!(biweekly.label(), "Every 2 Weeks");
+}
+
+#[test]
+fn test_materialize_and_forecast_flow() {
+    let mut ledger = Ledger::new("Forecast", BudgetPeriod::default());
+    let from = ledger.add_account(Account::new("Operating", AccountKind::Bank));
+    let to = ledger.add_account(Account::new("Rent", AccountKind::ExpenseDestination));
+
+    let start = NaiveDate::from_ymd_opt(2025, 1, 1).unwrap();
+    let mut template = Transaction::new(from, to, None, start, 1500.0);
+    template.set_recurrence(Some(Recurrence::new(
+        start,
+        TimeInterval {
+            every: 1,
+            unit: TimeUnit::Month,
+        },
+        RecurrenceMode::FixedSchedule,
+    )));
+    ledger.add_transaction(template);
+
+    let reference = NaiveDate::from_ymd_opt(2025, 3, 5).unwrap();
+    let created = ledger.materialize_due_recurrences(reference);
+    assert_eq!(created, 2, "Expected Feb and Mar instances to materialize");
+    assert_eq!(ledger.transactions.len(), 3);
+    assert!(ledger
+        .transactions
+        .iter()
+        .any(|txn| txn.recurrence.is_none() && txn.recurrence_series().is_some()));
+
+    let window = DateWindow::new(
+        NaiveDate::from_ymd_opt(2025, 4, 1).unwrap(),
+        NaiveDate::from_ymd_opt(2025, 7, 1).unwrap(),
+    )
+    .unwrap();
+    let report = ledger
+        .forecast_window_report(window, reference, None)
+        .expect("forecast");
+    assert!(
+        report.forecast.transactions.len() >= 2,
+        "should generate at least two future projections"
+    );
 }

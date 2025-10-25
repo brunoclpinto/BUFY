@@ -7,6 +7,10 @@ use uuid::Uuid;
 use super::{
     account::Account,
     category::Category,
+    recurring::{
+        forecast_for_window, materialize_due_instances, rebuild_metadata, snapshot_recurrences,
+        ForecastResult, RecurrenceSnapshot,
+    },
     time_interval::{TimeInterval, TimeUnit},
     transaction::Transaction,
 };
@@ -149,6 +153,13 @@ pub struct BudgetTotalsDelta {
     pub variance: f64,
 }
 
+#[derive(Debug, Clone)]
+pub struct ForecastReport {
+    pub scope: BudgetScope,
+    pub forecast: ForecastResult,
+    pub summary: BudgetSummary,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimulationBudgetImpact {
     pub simulation_name: String,
@@ -216,7 +227,7 @@ impl SimulationTransactionPatch {
     }
 }
 
-const CURRENT_SCHEMA_VERSION: u8 = 2;
+const CURRENT_SCHEMA_VERSION: u8 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Ledger {
@@ -289,6 +300,7 @@ impl Ledger {
     pub fn add_transaction(&mut self, transaction: Transaction) -> Uuid {
         let id = transaction.id;
         self.transactions.push(transaction);
+        self.refresh_recurrence_metadata();
         self.touch();
         id
     }
@@ -413,6 +425,84 @@ impl Ledger {
         Ok(self.summarize_window(window, BudgetScope::Custom, Some(transactions)))
     }
 
+    pub fn recurrence_snapshots(&self, reference: NaiveDate) -> Vec<RecurrenceSnapshot> {
+        snapshot_recurrences(&self.transactions, reference)
+    }
+
+    pub fn forecast_window_report(
+        &self,
+        window: DateWindow,
+        reference: NaiveDate,
+        simulation: Option<&str>,
+    ) -> Result<ForecastReport, LedgerError> {
+        let scope = window.scope(reference);
+        let base_transactions = if let Some(name) = simulation {
+            let sim = self.simulation(name).ok_or_else(|| {
+                LedgerError::InvalidRef(format!("simulation `{}` not found", name))
+            })?;
+            self.transactions_with_simulation(sim)?
+        } else {
+            self.transactions.clone()
+        };
+        let forecast = forecast_for_window(window, reference, &base_transactions);
+        let mut overlay = base_transactions.clone();
+        overlay.extend(
+            forecast
+                .transactions
+                .iter()
+                .map(|item| item.transaction.clone()),
+        );
+        let summary = self.summarize_window(window, scope, Some(&overlay));
+        Ok(ForecastReport {
+            scope,
+            forecast,
+            summary,
+        })
+    }
+
+    pub fn materialize_due_recurrences(&mut self, reference: NaiveDate) -> usize {
+        let pending = materialize_due_instances(reference, &self.transactions);
+        if pending.is_empty() {
+            return 0;
+        }
+        let created = pending.len();
+        self.transactions.extend(pending);
+        self.refresh_recurrence_metadata();
+        self.touch();
+        created
+    }
+
+    pub fn refresh_recurrence_metadata(&mut self) {
+        if self
+            .transactions
+            .iter()
+            .all(|txn| txn.recurrence.is_none() && txn.recurrence_series_id.is_none())
+        {
+            return;
+        }
+        let metadata = rebuild_metadata(&self.transactions);
+        if metadata.is_empty() {
+            return;
+        }
+        for txn in &mut self.transactions {
+            if let Some(recurrence) = txn.recurrence.as_mut() {
+                let series_id = if recurrence.series_id.is_nil() {
+                    txn.id
+                } else {
+                    recurrence.series_id
+                };
+                if let Some(series) = metadata.get(&series_id) {
+                    recurrence.update_metadata(
+                        series.last_generated,
+                        series.last_completed,
+                        series.next_due,
+                        series.total_occurrences,
+                    );
+                }
+            }
+        }
+    }
+
     pub fn add_simulation_transaction(
         &mut self,
         sim_name: &str,
@@ -517,6 +607,7 @@ impl Ledger {
         }
 
         self.transactions = applied;
+        self.refresh_recurrence_metadata();
         let simulation = &mut self.simulations[index];
         simulation.status = SimulationStatus::Applied;
         simulation.applied_at = Some(Utc::now());

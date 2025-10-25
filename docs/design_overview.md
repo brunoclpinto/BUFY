@@ -40,6 +40,16 @@ Simulations are persisted, name-addressable overlays that store only the delta r
 
 Ledger JSON now includes a `simulations` array so scenarios survive reloads and version bumps. The ledger exposes APIs to create, list, summarize, apply, and discard simulations, and budget summaries can optionally include a simulation overlay to show base/simulated totals plus deltas. The CLI surfaces this lifecycle via commands such as `create-simulation`, `enter-simulation`, `simulation add/modify/exclude`, `list-simulations`, `summary <simulation>`, `apply-simulation`, and `discard-simulation` while the prompt indicates when the user is editing a simulation.
 
+### Recurrence & Forecasting (Phase 6)
+
+Recurring schedules are encoded directly on `Transaction` records via a richer `Recurrence` definition (start date, interval, end condition, status, exceptions, metadata for last/next occurrences). Every recurrence owns a stable `series_id` so generated instances (pending ledger transactions) can be tied back to their definition without duplicating JSON structures. The `ledger::recurring` module walks each series iteratively, classifies instances as Overdue/Pending/Future, and produces:
+
+- `RecurrenceSnapshot` summaries for quick CLI listings.
+- `ForecastResult`/`ForecastReport` bundles that merge temporary projections into `BudgetSummary` outputs without mutating the authoritative ledger.
+- `materialize_due_recurrences` helpers that clone scheduled occurrences into the ledger once a due date passes, preventing gaps between expected and real-world entries.
+
+`Ledger::refresh_recurrence_metadata` keeps next-due hints persisted so reloads remain stable, while `forecast_window_report` composes forecasts with budgeting logic for any date window or simulation overlay. The CLI exposes an entire management surface via `recurring list/edit/clear/pause/resume/skip/sync`, the `forecast` command (with optional simulation overlays and custom ranges), and `complete <index>` for marking real activity. These operations keep recurrence data deterministic, detect conflicts, and protect against infinite projections by enforcing bounded windows. Older ledgers remain compatible—new metadata simply defaults when missing.
+
 ### `utils`
 
 Utility helpers house cross-cutting concerns. Phase 0 ships the tracing bootstrapper (`init_tracing`) that configures an env-filtered subscriber with the crate defaulting to `info` level. Phase 2 introduces JSON persistence helpers that stage atomic writes and make loading/saving ledgers trivial for the CLI and future services.
