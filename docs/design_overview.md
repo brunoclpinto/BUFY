@@ -28,7 +28,13 @@ The simulation module currently provides lightweight summaries (`SimulationSumma
 
 ### `cli`
 
-Phase 3 introduces an interactive `rustyline`-powered shell that wraps the ledger APIs with contextual menus and command dispatch. Users can create or load ledgers, add accounts/categories/transactions, list data, and save progress without leaving the prompt. Time-based fields use a `TimeInterval` editor that supports arbitrary “repeat every N <unit>” entries for budgets and recurrences. Script mode (enabled via the `BUDGET_CORE_CLI_SCRIPT` env var) keeps pipelines testable for CI and automated workflows. The `summary` command delegates directly to the ledger’s budgeting APIs so the shell remains a thin presentation layer.
+Phase 3 introduces an interactive `rustyline`-powered shell that wraps the ledger APIs with contextual menus and command dispatch. Highlights:
+
+- **Ledger workflows** – `new-ledger`, `save`, `load`, and their named counterparts (`save-ledger`, `load-ledger`) keep the working set obvious. The prompt reflects the active ledger, and auto-complete/history improve ergonomics.
+- **Data entry** – guided prompts for accounts, categories, and transactions with validation, plus script-mode (`BUDGET_CORE_CLI_SCRIPT=1`) automation for tests and CI. Transaction listings annotate recurrence hints (`[recurring]`, `[instance]`).
+- **Recurrence tooling** – `recurring list/edit/clear/pause/resume/skip/sync` and `complete <idx>` manage schedules without leaving the shell.
+- **Forecasting & simulations** – `forecast`, `summary <simulation>`, and `simulation add/modify/exclude` expose future-looking views side-by-side with base results.
+- **Persistence integration** – the CLI auto-loads the last ledger, exposes backup/restore commands, and surfaces migration warnings emitted by `LedgerStore`.
 
 ### Simulations (Phase 5)
 

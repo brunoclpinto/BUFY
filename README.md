@@ -2,9 +2,19 @@
 
 Budget Core provides a reusable Rust toolkit for building budgeting workflows, simulations, and command-line experiences. Phase 0 establishes a reproducible development environment, initial domain models, and CI automation that future phases will build upon.
 
+## Feature Highlights
+
+- **Ledger fundamentals** – accounts, categories, transactions, and budget periods form the core domain (`src/ledger`).
+- **Interactive CLI** – a `rustyline` REPL (`budget_core_cli`) with contextual prompts, script mode (`BUDGET_CORE_CLI_SCRIPT=1`), and rich command set for day‑to‑day operations.
+- **Simulations** – name-addressable overlays that stage hypothetical changes without mutating the authoritative ledger.
+- **Recurrence & forecasting** – recurring transactions, automatic schedule regeneration, and future projections with variance-aware summaries.
+- **Managed persistence (Phase 7)** – deterministic JSON serialization under `~/.budget_core`, schema migrations, rotating backups, and recovery tooling.
+
+For architectural background see `docs/design_overview.md`.
+
 ## Getting Started
 
-1. Install the stable toolchain and required components:
+1. **Install prerequisites**
 
    ```sh
    rustup toolchain install stable
@@ -12,7 +22,7 @@ Budget Core provides a reusable Rust toolkit for building budgeting workflows, s
    cargo install cargo-nextest cargo-audit cargo-edit
    ```
 
-2. Bootstrap the workspace:
+2. **Bootstrap the workspace**
 
    ```sh
    cargo fmt --all
@@ -23,24 +33,29 @@ Budget Core provides a reusable Rust toolkit for building budgeting workflows, s
    cargo audit
    ```
 
-3. Launch the CLI harness (interactive shell):
+3. **Launch the CLI**
 
    ```sh
    cargo run --bin budget_core_cli
    ```
 
-   Inside the REPL use `help` to list available commands (`help add`, `help list`, etc.). The prompt reflects the active ledger (for example, `ledger(home) ⮞`), and commands such as `new-ledger`, `load`, `save`, `add`, `list`, and `summary` operate on the in-memory ledger state. Arrow keys navigate history, and contextual menus appear for commands that require additional input (choose **Custom...** to enter any repeat interval like “every 6 weeks”). Use `summary`, `summary past [n]`, `summary future [n]`, or `summary custom <start> <end>` to view budgeted vs. real totals with variance, category/account breakdowns, and health indicators.
+   - The prompt indicates the active ledger (`ledger(demo) ⮞`). Use `help` or `help <command>` for inline docs.
+   - Script mode (`BUDGET_CORE_CLI_SCRIPT=1`) accepts newline-delimited commands for tests/automation.
+   - The CLI auto-loads the last opened ledger (tracked in `~/.budget_core/state.json`) when running interactively.
 
-   Script mode remains available for quick pipelines (interval strings such as `every 6 weeks` or `3 months` are accepted):
+### CLI Quick Reference
 
-   ```sh
-   cargo run --bin budget_core_cli -- new "Demo Ledger" | cargo run --bin budget_core_cli -- save demo-ledger.json
-   cargo run --bin budget_core_cli -- load demo-ledger.json
-   ```
+| Area | Commands | Notes |
+| --- | --- | --- |
+| Ledger lifecycle | `new-ledger`, `load [path]`, `save [path]`, `load-ledger <name>`, `save-ledger [name]` | Named saves use the managed store; path-based commands operate on arbitrary JSON files. |
+| Persistence tooling | `backup-ledger [name]`, `list-backups [name]`, `restore-ledger <idx|pattern> [name]` | Snapshots live under `~/.budget_core/backups/<name>/YYYY-MM-DDTHH-MM-SS.json.bak`. |
+| Data entry | `add account`, `add category`, `add transaction`, `list [accounts|categories|transactions]` | Transaction list output shows recurrence hints (`[recurring]`, `[instance]`). |
+| Recurrence | `recurring list/edit/clear/pause/resume/skip/sync`, `complete <idx>` | Schedules track start/end dates, exceptions, and automatically materialize overdue instances. |
+| Forecasting | `forecast [simulation] [<n> <unit> | custom <start> <end>]` | Produces future inflow/outflow projections plus window-specific budget summaries. |
+| Simulations | `create-simulation`, `enter-simulation`, `simulation add/modify/exclude`, `list-simulations`, `summary <simulation>`, `apply-simulation`, `discard-simulation` | Enables “what-if” comparisons against the base ledger. |
+| Summaries | `summary [past|future <n> | custom <start> <end>]` | Default view shows the active budget period; optional simulation overlay highlights deltas. |
 
-   Named simulations persist alongside the ledger. Use `create-simulation`, `enter-simulation`, `simulation add/modify/exclude`, `list-simulations`, `summary <simulation>`, `apply-simulation`, and `discard-simulation` to manage and compare "what-if" scenarios without mutating the base data.
-
-   For more detail on the command set and how it ties back to the ledger model, check `docs/design_overview.md`.
+Use `BUDGET_CORE_HOME=/custom/path` to relocate the managed store. `save-ledger <name>` remembers the canonical filename and enables quick resaves without re-entering the path.
 
 ## Forecasting & Recurrence
 
@@ -65,11 +80,31 @@ All saves are deterministic (bar timestamps), schema versioned, and guard agains
 
 Additional architectural notes are captured in `docs/design_overview.md`.
 
+### File Layout
+
+```
+~/.budget_core/
+├── demo.json                 # canonical ledger save
+├── backups/
+│   └── demo/
+│       ├── 2025-10-26T08-20-00.json.bak
+│       └── …
+└── state.json                # remembers the last opened ledger
+```
+
+Every save produces pretty JSON for human inspection, and backups are pruned according to the store’s retention setting (default 5). Loads validate schema versions (`schema_version`), rebuild recurrence metadata, and surface migration notes in the CLI.
+
 ## Development Conventions
 
 - Crate edition: Rust 2021.
 - Tracing is initialized via `budget_core::init()` or `budget_core::utils::init_tracing()`.
 - All warnings are denied by default (`.cargo/config.toml`), so fix lint issues before committing.
+
+## Testing & CI
+
+- `cargo test` exercises unit, integration, CLI-script, and persistence suites.
+- `cargo nextest run` and `cargo clippy --all-targets -- -D warnings` keep execution fast in CI.
+- CLI scenarios in `tests/cli_script.rs` demonstrate script mode pipelines; `tests/persistence_suite.rs` guards backup/restore flows.
 
 ## License
 
