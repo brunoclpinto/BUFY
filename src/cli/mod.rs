@@ -23,7 +23,7 @@ use crate::{
         SimulationBudgetImpact, SimulationChange, SimulationStatus, SimulationTransactionPatch,
         TimeInterval, TimeUnit, Transaction,
     },
-    utils::persistence,
+    utils::persistence::LedgerStore,
 };
 
 const PROMPT_ARROW: &str = "⮞";
@@ -99,11 +99,13 @@ pub struct CliApp {
     commands: HashMap<&'static str, Command>,
     state: CliState,
     theme: ColorfulTheme,
+    store: LedgerStore,
 }
 
 pub(crate) struct CliState {
     ledger: Option<Ledger>,
     ledger_path: Option<PathBuf>,
+    ledger_name: Option<String>,
     active_simulation: Option<String>,
 }
 
@@ -112,17 +114,27 @@ impl CliState {
         Self {
             ledger: None,
             ledger_path: None,
+            ledger_name: None,
             active_simulation: None,
         }
     }
 
-    fn set_ledger(&mut self, ledger: Ledger) {
+    fn set_ledger(&mut self, ledger: Ledger, path: Option<PathBuf>, name: Option<String>) {
         self.ledger = Some(ledger);
+        self.ledger_path = path;
+        self.ledger_name = name;
         self.active_simulation = None;
     }
 
     fn set_path(&mut self, path: Option<PathBuf>) {
         self.ledger_path = path;
+        if self.ledger_path.is_some() {
+            self.ledger_name = None;
+        }
+    }
+
+    fn set_named(&mut self, name: Option<String>) {
+        self.ledger_name = name;
     }
 
     fn active_simulation(&self) -> Option<&str> {
@@ -132,9 +144,43 @@ impl CliState {
     fn set_active_simulation(&mut self, name: Option<String>) {
         self.active_simulation = name;
     }
+
+    fn ledger_name(&self) -> Option<&str> {
+        self.ledger_name.as_deref()
+    }
 }
 
 impl CliApp {
+    fn auto_load_last(&mut self) -> Result<(), CliError> {
+        if self.mode != CliMode::Interactive {
+            return Ok(());
+        }
+        if self.state.ledger.is_some() {
+            return Ok(());
+        }
+        let last = match self.store.last_ledger() {
+            Ok(value) => value,
+            Err(err) => {
+                tracing::warn!("last ledger lookup failed: {err}");
+                return Ok(());
+            }
+        };
+        let Some(name) = last else {
+            return Ok(());
+        };
+        if let Ok(report) = self.store.load_named(&name) {
+            let path = self.store.ledger_path(&name);
+            self.state
+                .set_ledger(report.ledger, Some(path), Some(name.clone()));
+            self.report_load(&report.warnings, &report.migrations);
+            println!(
+                "{}",
+                format!("Automatically loaded last ledger `{}`", name).bright_green()
+            );
+        }
+        Ok(())
+    }
+
     pub fn new(mode: CliMode) -> Result<Self, CliError> {
         let mut commands = HashMap::new();
         for command in build_commands() {
@@ -146,13 +192,19 @@ impl CliApp {
             CliMode::Script => None,
         };
 
-        Ok(Self {
+        let store = LedgerStore::default().map_err(|err| CliError::Internal(err.to_string()))?;
+
+        let mut app = Self {
             mode,
             rl,
             commands,
             state: CliState::new(),
             theme: ColorfulTheme::default(),
-        })
+            store,
+        };
+
+        app.auto_load_last()?;
+        Ok(app)
     }
 
     fn ensure_base_mode(&self, action: &str) -> Result<(), CommandError> {
@@ -164,6 +216,14 @@ impl CliApp {
         } else {
             Ok(())
         }
+    }
+
+    fn require_named_ledger(&self) -> Result<&str, CommandError> {
+        self.state.ledger_name().ok_or_else(|| {
+            CommandError::InvalidArguments(
+                "No named ledger associated. Use `save-ledger <name>` once to bind it.".into(),
+            )
+        })
     }
 
     pub fn run_loop(&mut self) -> Result<(), CliError> {
@@ -235,6 +295,15 @@ impl CliApp {
             },
             PROMPT_ARROW.bright_black()
         )
+    }
+
+    fn report_load(&self, warnings: &[String], migrations: &[String]) {
+        for note in migrations {
+            println!("{}", format!("Migration: {}", note).bright_yellow());
+        }
+        for warning in warnings {
+            println!("{}", format!("⚠️  {}", warning).yellow());
+        }
     }
 
     pub(crate) fn process_line(&mut self, line: &str) -> Result<LoopControl, CommandError> {
@@ -344,11 +413,9 @@ impl CliApp {
         })
     }
 
-    fn set_ledger(&mut self, ledger: Ledger, path: Option<PathBuf>) {
-        self.state.set_ledger(ledger);
-        self.state.set_path(path);
+    fn set_ledger(&mut self, ledger: Ledger, path: Option<PathBuf>, name: Option<String>) {
+        self.state.set_ledger(ledger, path, name);
         self.state.set_active_simulation(None);
-        println!("{}", "Ledger loaded".bright_green());
     }
 
     fn command(&self, name: &str) -> Option<&Command> {
@@ -375,8 +442,8 @@ impl CliApp {
             .map_err(CommandError::from)?;
 
         let period = self.prompt_budget_period()?;
-        let ledger = Ledger::new(name, period);
-        self.set_ledger(ledger, None);
+        let ledger = Ledger::new(name.clone(), period);
+        self.set_ledger(ledger, None, Some(name));
         println!("{}", "New ledger created".bright_green());
         Ok(())
     }
@@ -494,43 +561,163 @@ impl CliApp {
             "monthly".to_string()
         };
         let period = parse_period(&period_str)?;
-        let ledger = Ledger::new(name, period);
-        self.set_ledger(ledger, None);
+        let ledger = Ledger::new(name.clone(), period);
+        self.set_ledger(ledger, None, Some(name));
         println!("{}", "New ledger created".bright_green());
         Ok(())
     }
 
     fn load_ledger(&mut self, path: &Path) -> CommandResult {
-        let mut ledger =
-            persistence::load_ledger_from_file(path).map_err(CommandError::from_ledger)?;
-        let previous_version = ledger.schema_version;
-        ledger.refresh_recurrence_metadata();
-        let upgraded = ledger.upgrade_schema_if_needed();
-        self.set_ledger(ledger, Some(path.to_path_buf()));
-        println!("{}", "Ledger loaded".bright_green());
-        if upgraded {
-            println!(
-                "{}",
-                format!(
-                    "Schema upgraded from v{} to v{}. Run `save` to persist recurrence metadata.",
-                    previous_version,
-                    Ledger::schema_version_default()
-                )
-                .yellow()
-            );
-        }
+        let report = self
+            .store
+            .load_from_path(path)
+            .map_err(CommandError::from_ledger)?;
+        self.set_ledger(report.ledger, Some(path.to_path_buf()), None);
+        println!(
+            "{}",
+            format!("Ledger loaded from {}", path.display()).bright_green()
+        );
+        self.report_load(&report.warnings, &report.migrations);
+        let _ = self.store.record_last_ledger(None);
         Ok(())
     }
 
     fn save_to_path(&mut self, path: &Path) -> CommandResult {
-        let ledger = self.current_ledger()?;
-        persistence::save_ledger_to_file(ledger, path).map_err(CommandError::from_ledger)?;
+        let mut snapshot = self.current_ledger()?.clone();
+        self.store
+            .save_to_path(&mut snapshot, path)
+            .map_err(CommandError::from_ledger)?;
         self.state.set_path(Some(path.to_path_buf()));
+        self.state.set_named(None);
         println!(
             "{}",
             format!("Ledger saved to {}", path.display()).bright_green()
         );
         Ok(())
+    }
+
+    fn load_named_ledger(&mut self, name: &str) -> CommandResult {
+        let report = self
+            .store
+            .load_named(name)
+            .map_err(CommandError::from_ledger)?;
+        let path = self.store.ledger_path(name);
+        self.set_ledger(report.ledger, Some(path.clone()), Some(name.to_string()));
+        println!(
+            "{}",
+            format!("Ledger `{}` loaded from {}", name, path.display()).bright_green()
+        );
+        self.report_load(&report.warnings, &report.migrations);
+        let _ = self.store.record_last_ledger(Some(name));
+        Ok(())
+    }
+
+    fn save_named_ledger(&mut self, name: &str) -> CommandResult {
+        let mut snapshot = self.current_ledger()?.clone();
+        let path = self
+            .store
+            .save_named(&mut snapshot, name)
+            .map_err(CommandError::from_ledger)?;
+        self.state.set_path(Some(path.clone()));
+        self.state.set_named(Some(name.to_string()));
+        println!(
+            "{}",
+            format!("Ledger `{}` saved to {}", name, path.display()).bright_green()
+        );
+        let _ = self.store.record_last_ledger(Some(name));
+        Ok(())
+    }
+
+    fn create_backup(&mut self, name: &str) -> CommandResult {
+        let path = self
+            .store
+            .backup_named(name)
+            .map_err(CommandError::from_ledger)?;
+        println!(
+            "{}",
+            format!("Backup created at {}", path.display()).bright_green()
+        );
+        Ok(())
+    }
+
+    fn list_backups(&self, name: &str) -> CommandResult {
+        let backups = self
+            .store
+            .list_backups(name)
+            .map_err(CommandError::from_ledger)?;
+        if backups.is_empty() {
+            println!("{}", "No backups found".bright_black());
+            return Ok(());
+        }
+        println!("{}", "Available backups:".bright_white().bold());
+        for (idx, backup) in backups.iter().enumerate() {
+            println!(
+                "  [{}] {} ({})",
+                idx,
+                backup.timestamp,
+                backup.path.display()
+            );
+        }
+        Ok(())
+    }
+
+    fn restore_backup(&mut self, name: &str, reference: &str) -> CommandResult {
+        let backups = self
+            .store
+            .list_backups(name)
+            .map_err(CommandError::from_ledger)?;
+        if backups.is_empty() {
+            return Err(CommandError::InvalidArguments(
+                "no backups available to restore".into(),
+            ));
+        }
+        let target = if let Ok(index) = reference.parse::<usize>() {
+            backups
+                .get(index)
+                .ok_or_else(|| {
+                    CommandError::InvalidArguments(format!("backup index {} out of range", index))
+                })?
+                .path
+                .clone()
+        } else {
+            let matching = backups
+                .iter()
+                .find(|info| {
+                    info.path
+                        .file_name()
+                        .and_then(|os| os.to_str())
+                        .map(|name| name.contains(reference))
+                        .unwrap_or(false)
+                })
+                .ok_or_else(|| {
+                    CommandError::InvalidArguments(format!(
+                        "no backup matches reference `{}`",
+                        reference
+                    ))
+                })?;
+            matching.path.clone()
+        };
+        let confirm = if self.mode == CliMode::Interactive {
+            Confirm::with_theme(&self.theme)
+                .with_prompt(format!(
+                    "Restore ledger `{}` from {}?",
+                    name,
+                    target.display()
+                ))
+                .default(false)
+                .interact()
+                .map_err(CommandError::from)?
+        } else {
+            true
+        };
+        if !confirm {
+            println!("{}", "Restore cancelled".bright_black());
+            return Ok(());
+        }
+        self.store
+            .restore_backup(name, &target)
+            .map_err(CommandError::from_ledger)?;
+        self.load_named_ledger(name)
     }
 
     fn add_account_interactive(&mut self) -> CommandResult {
@@ -941,7 +1128,10 @@ impl CliApp {
             if let Some(hint) = self.transaction_recurrence_hint(txn) {
                 println!("        {}", hint.bright_black());
             } else if txn.recurrence_series_id.is_some() {
-                println!("{}", "[instance] scheduled entry from recurrence".bright_black());
+                println!(
+                    "{}",
+                    "[instance] scheduled entry from recurrence".bright_black()
+                );
             }
         }
         Ok(())
@@ -1755,7 +1945,37 @@ fn build_commands() -> Vec<Command> {
             cmd_new_ledger,
         ),
         Command::new("load", "Load a ledger from JSON", "load [path]", cmd_load),
+        Command::new(
+            "load-ledger",
+            "Load a ledger by name from the persistence store",
+            "load-ledger <name>",
+            cmd_load_named,
+        ),
         Command::new("save", "Save current ledger", "save [path]", cmd_save),
+        Command::new(
+            "save-ledger",
+            "Save current ledger by name in the persistence store",
+            "save-ledger [name]",
+            cmd_save_named,
+        ),
+        Command::new(
+            "backup-ledger",
+            "Create a snapshot of the current ledger",
+            "backup-ledger [name]",
+            cmd_backup_ledger,
+        ),
+        Command::new(
+            "list-backups",
+            "List available snapshots for the current ledger",
+            "list-backups [name]",
+            cmd_list_backups,
+        ),
+        Command::new(
+            "restore-ledger",
+            "Restore a ledger from a snapshot",
+            "restore-ledger <backup_index|pattern> [name]",
+            cmd_restore_ledger,
+        ),
         Command::new(
             "add",
             "Add an account, category, or transaction",
@@ -1889,18 +2109,108 @@ fn cmd_save(app: &mut CliApp, args: &[&str]) -> CommandResult {
     if let Some(path) = args.first() {
         let path = PathBuf::from(path);
         app.save_to_path(&path)
+    } else if let Some(name) = app.state.ledger_name().map(|s| s.to_string()) {
+        app.save_named_ledger(&name)
     } else if let Some(path) = app.state.ledger_path.clone() {
         app.save_to_path(&path)
     } else if app.mode == CliMode::Interactive {
-        let path: PathBuf = Input::<String>::with_theme(&app.theme)
-            .with_prompt("Save ledger to")
-            .interact_text()
-            .map(PathBuf::from)
+        let current = app.current_ledger()?;
+        let suggested = app
+            .state
+            .ledger_name()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| current.name.clone());
+        let choice = Select::with_theme(&app.theme)
+            .with_prompt("Choose save method")
+            .items(&["Name in store", "Custom path"])
+            .default(0)
+            .interact()
             .map_err(CommandError::from)?;
-        app.save_to_path(&path)
+        if choice == 0 {
+            let name: String = Input::<String>::with_theme(&app.theme)
+                .with_prompt("Ledger name")
+                .with_initial_text(suggested)
+                .interact_text()
+                .map_err(CommandError::from)?;
+            app.save_named_ledger(&name)
+        } else {
+            let path: PathBuf = Input::<String>::with_theme(&app.theme)
+                .with_prompt("Save ledger to path")
+                .interact_text()
+                .map(PathBuf::from)
+                .map_err(CommandError::from)?;
+            app.save_to_path(&path)
+        }
     } else {
         Err(CommandError::InvalidArguments("usage: save <path>".into()))
     }
+}
+
+fn cmd_save_named(app: &mut CliApp, args: &[&str]) -> CommandResult {
+    let name = if let Some(name) = args.first() {
+        (*name).to_string()
+    } else if let Some(existing) = app.state.ledger_name().map(|s| s.to_string()) {
+        existing
+    } else if app.mode == CliMode::Interactive {
+        Input::<String>::with_theme(&app.theme)
+            .with_prompt("Ledger name")
+            .interact_text()
+            .map_err(CommandError::from)?
+    } else {
+        return Err(CommandError::InvalidArguments(
+            "usage: save-ledger <name>".into(),
+        ));
+    };
+    app.save_named_ledger(&name)
+}
+
+fn cmd_load_named(app: &mut CliApp, args: &[&str]) -> CommandResult {
+    let name = if let Some(name) = args.first() {
+        (*name).to_string()
+    } else if app.mode == CliMode::Interactive {
+        Input::<String>::with_theme(&app.theme)
+            .with_prompt("Ledger name to load")
+            .interact_text()
+            .map_err(CommandError::from)?
+    } else {
+        return Err(CommandError::InvalidArguments(
+            "usage: load-ledger <name>".into(),
+        ));
+    };
+    app.load_named_ledger(&name)
+}
+
+fn cmd_backup_ledger(app: &mut CliApp, args: &[&str]) -> CommandResult {
+    let name = if let Some(name) = args.first() {
+        (*name).to_string()
+    } else {
+        app.require_named_ledger()?.to_string()
+    };
+    app.create_backup(&name)
+}
+
+fn cmd_list_backups(app: &mut CliApp, args: &[&str]) -> CommandResult {
+    let name = if let Some(name) = args.first() {
+        (*name).to_string()
+    } else {
+        app.require_named_ledger()?.to_string()
+    };
+    app.list_backups(&name)
+}
+
+fn cmd_restore_ledger(app: &mut CliApp, args: &[&str]) -> CommandResult {
+    if args.is_empty() {
+        return Err(CommandError::InvalidArguments(
+            "usage: restore-ledger <backup_reference> [name]".into(),
+        ));
+    }
+    let reference = args[0];
+    let name = if args.len() > 1 {
+        args[1].to_string()
+    } else {
+        app.require_named_ledger()?.to_string()
+    };
+    app.restore_backup(&name, reference)
 }
 
 fn cmd_add(app: &mut CliApp, args: &[&str]) -> CommandResult {

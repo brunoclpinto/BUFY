@@ -337,6 +337,22 @@ impl Ledger {
         CURRENT_SCHEMA_VERSION
     }
 
+    pub fn migrate_from_schema(&mut self, original_version: u8) -> Vec<String> {
+        let mut notes = Vec::new();
+        if original_version < CURRENT_SCHEMA_VERSION {
+            notes.push(format!(
+                "upgraded schema from v{} to v{}",
+                original_version, CURRENT_SCHEMA_VERSION
+            ));
+        }
+        if original_version < 3 {
+            self.refresh_recurrence_metadata();
+            notes.push("refreshed recurrence metadata for schema v3".into());
+        }
+        self.schema_version = CURRENT_SCHEMA_VERSION;
+        notes
+    }
+
     pub fn upgrade_schema_if_needed(&mut self) -> bool {
         if self.schema_version < CURRENT_SCHEMA_VERSION {
             self.schema_version = CURRENT_SCHEMA_VERSION;

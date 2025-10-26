@@ -2,9 +2,10 @@ use budget_core::ledger::{
     transaction::{Recurrence, RecurrenceMode},
     Account, AccountKind, BudgetPeriod, DateWindow, Ledger, TimeInterval, TimeUnit, Transaction,
 };
-use budget_core::utils::persistence;
+use budget_core::utils::persistence::LedgerStore;
 use chrono::{NaiveDate, TimeZone, Utc};
 use serde_json::Value;
+use std::path::PathBuf;
 use tempfile::NamedTempFile;
 
 #[test]
@@ -121,8 +122,15 @@ fn test_serialization_roundtrip() {
     ledger.updated_at = ledger.created_at;
 
     let tmp = NamedTempFile::new().unwrap();
-    persistence::save_ledger_to_file(&ledger, tmp.path()).unwrap();
-    let loaded = persistence::load_ledger_from_file(tmp.path()).unwrap();
+    let parent = tmp
+        .path()
+        .parent()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let store = LedgerStore::new(Some(parent), Some(2)).unwrap();
+    let mut snapshot = ledger.clone();
+    store.save_to_path(&mut snapshot, tmp.path()).unwrap();
+    let loaded = store.load_from_path(tmp.path()).unwrap().ledger;
 
     let original_json: Value = serde_json::to_value(&ledger).unwrap();
     let loaded_json: Value = serde_json::to_value(&loaded).unwrap();

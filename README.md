@@ -52,6 +52,17 @@ Budget Core now understands recurring obligations and can materialize missed occ
 
 Recurrence state is persisted with the ledger JSON so restarting the CLI preserves start dates, next occurrences, and skipped dates. Use `recurring sync` after structural changes (new accounts/categories) to ensure schedules stay aligned.
 
+## Persistence & Backups
+
+Phase 7 introduces a fully managed JSON store rooted at `~/.budget_core` (override with `BUDGET_CORE_HOME`). Each ledger is saved as `<name>.json`, accompanied by a rotating set of timestamped backups under `backups/<name>/YYYY-MM-DDTHH-MM-SS.json.bak`.
+
+- `save-ledger [name]` writes the in-memory ledger using atomic temp-file swaps and records the name for future quick saves.
+- `load-ledger <name>` retrieves a named ledger while validating schema versions, rebuilding recurrence metadata, and surfacing any migration warnings.
+- `backup-ledger [name]` snapshots the current file, `list-backups [name]` enumerates available restore points, and `restore-ledger <index|pattern> [name]` reverts to the desired snapshot (with interactive confirmation).
+- The classic `save [path]` / `load [path]` commands remain for ad-hoc JSON paths.
+
+All saves are deterministic (bar timestamps), schema versioned, and guard against corruption via temp files plus optional rolling backups. A small state file remembers the last open ledger; interactive sessions auto-load it on startup for continuity.
+
 Additional architectural notes are captured in `docs/design_overview.md`.
 
 ## Development Conventions

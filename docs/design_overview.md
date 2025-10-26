@@ -52,7 +52,23 @@ Recurring schedules are encoded directly on `Transaction` records via a richer `
 
 ### `utils`
 
-Utility helpers house cross-cutting concerns. Phase 0 ships the tracing bootstrapper (`init_tracing`) that configures an env-filtered subscriber with the crate defaulting to `info` level. Phase 2 introduces JSON persistence helpers that stage atomic writes and make loading/saving ledgers trivial for the CLI and future services.
+Utility helpers house cross-cutting concerns. Phase 0 ships the tracing bootstrapper (`init_tracing`) that configures an env-filtered subscriber with the crate defaulting to `info` level. Phase 2 introduces JSON persistence helpers that stage atomic writes and make loading/saving ledgers trivial for the CLI and future services. Phase 7 promotes this into a dedicated `LedgerStore` that:
+
+- Resolves a stable home directory (`~/.budget_core` by default, overridable via `BUDGET_CORE_HOME`).
+- Serializes ledgers deterministically (pretty JSON) while enforcing atomic writes through staged temp files.
+- Maintains version metadata (`schema_version`) and invokes `Ledger::migrate_from_schema` plus recurrence refreshes on load.
+- Creates timestamped `.json.bak` snapshots before overwriting existing ledgers and exposes backup/restore/list primitives with configurable retention.
+- Tracks the “last opened ledger” so the CLI can resume stateful sessions automatically.
+
+All persistence errors surface as `LedgerError::Persistence`, ensuring higher layers can present actionable guidance instead of panicking.
+
+### Persistence (Phase 7)
+
+- **File layout**: `ledger_name.json` files sit at the store root. Backups live under `backups/<ledger_name>/YYYY-MM-DDTHH-MM-SS.json.bak`. A `state.json` file records the last loaded ledger for convenience.
+- **Atomic saves**: writes always target `<file>.tmp`, flush, and rename into place. Previous snapshots are retained before overwrites so users can roll back.
+- **Schema evolution**: each save bumps `schema_version`. Loading older files runs migrations (e.g., refreshing recurrence metadata) and logs the steps taken so users know why a save is requested.
+- **CLI integration**: `save-ledger`, `load-ledger`, `backup-ledger`, `list-backups`, and `restore-ledger` wrap the store APIs. Interactive sessions prompt for ledger names or allow custom paths via the legacy `save`/`load` commands. Script mode reuses the same infrastructure via environment variables to keep CI deterministic.
+- **Recovery**: restore operations copy the chosen snapshot into place (optionally creating a safety backup first) and then reload the ledger, surfacing any validation warnings. Tests simulate interrupted saves to guarantee the original JSON is never corrupted.
 
 ### `errors`
 
@@ -63,5 +79,6 @@ Utility helpers house cross-cutting concerns. Phase 0 ships the tracing bootstra
 1. Expand ledger operations with validated mutations that maintain account balances.
 2. Introduce persistence adapters (file-based, SQLite) with serde-powered serialization.
 3. Layer richer simulations and forecasting utilities, leveraging cached snapshots.
-4. Wire additional tooling (benchmarks, fuzzing) as the codebase
+4. Extend persistence with alternate backends (SQLite/cloud) once JSON parity is battle-tested.
+5. Wire additional tooling (benchmarks, fuzzing) as the codebase
    deepens.

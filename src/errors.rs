@@ -11,4 +11,6 @@ pub enum LedgerError {
     InvalidRef(String),
     #[error("Invalid input: {0}")]
     InvalidInput(String),
+    #[error("Persistence error: {0}")]
+    Persistence(String),
 }
