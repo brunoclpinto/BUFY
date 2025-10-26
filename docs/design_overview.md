@@ -4,27 +4,42 @@ Budget Core is the domain foundation for a multi-surface budgeting experience. T
 
 ## Architectural Principles
 
-- **Deterministic & auditable**: Ledger operations should be reproducible, validating all inputs and preserving authority for each mutation.
-- **Composable domain primitives**: Accounts, categories, budgets, and transactions are isolated modules that can be combined into higher-level workflows.
-- **Extensible simulations**: Simulation features consume ledger data through stable APIs, enabling experimentation without mutating authoritative state.
-- **Observability-first**: Tracing is available from the earliest boot sequence so that future services inherit consistent telemetry.
+- **Deterministic & auditable** – every API is designed to be side-effect free unless explicitly mutating state. JSON persistence is formatted and ordered to make diffs meaningful, and atomic saves prevent partially-written ledgers.
+- **Composable domain primitives** – accounts, categories, transactions, budgets, recurrences, and simulations live in dedicated modules so higher-level workflows (CLI, automation) can mix/match them without tight coupling.
+- **Extensible simulations & forecasting** – simulations operate on deltas while recurrence/forecasting logic is pure and serializable. This keeps “what-if” flows hermetic, but ready for richer surfaces (GUI, services) later.
+- **Observability-first** – `budget_core::init()` wires tracing before any other work, and CLI/reporting surfaces bubble warnings (schema migrations, orphaned transactions) directly to the user instead of burying them in logs.
+- **Resilient persistence** – JSON files are schema versioned, backups are automatic, migrations are explicit, and recovery commands are first-class citizens of the CLI. Our goal is to make “data loss” an impossible class of bug.
 
 ## Module Breakdown
 
 ### `ledger`
 
-The ledger module owns the domain entities required for bookkeeping:
+The ledger module owns the core domain types. Each struct is `serde`-friendly and intentionally “dumb” so that advanced behavior can be layered on top without mutating the raw data.
 
-- `Account` represents asset or liability containers and tracks balances in integer cents.
-- `Category` labels transactions for budgeting and reporting.
-- `Budget` stores spending guardrails per category and period.
-- `TimeInterval` and `TimeUnit` express common recurrence windows that power budgets and transactions alike.
-- `Transaction` captures discrete financial movements against accounts and encodes recurrence policies.
-- `Ledger` aggregates the above entities, offering storing and lookup helpers that surface structured `LedgerError` values. The structure is serde-friendly for JSON imports/exports while maintaining timestamps and schema versions for migrations. Phase 4 layers budget summaries on the ledger so it can calculate period windows, per-category/account aggregations, variances, and health classifications without involving the CLI.
+| Type | Purpose | Key Fields | Design Rationale |
+| --- | --- | --- | --- |
+| `Account` | Represents an asset, liability, or logical bucket. | `id`, `name`, `kind` (`AccountKind`). | IDs are UUIDs for cross-file stability; `kind` drives reporting semantics but does not strictly enforce debit/credit rules, keeping the domain flexible. |
+| `Category` | Labels transactions for budgeting and reporting. | `id`, `name`, `kind` (`CategoryKind`), optional parent. | Nested parents let us do future roll-ups; `Option<Uuid>` avoids enforcing hierarchies before the UI needs them. |
+| `Budget` | Expresses recurring spending guardrails. | `limit_amount`, `recurrence: TimeInterval`, `is_active`. | Reuses the same interval math as transactions so schedules stay consistent. |
+| `TimeInterval` / `TimeUnit` | Date math helper with “next/previous/add” APIs. | `every`, `unit`. | Keeps period calculations centralized and testable, including tricky month/year shifts and leap days. |
+| `Transaction` | Authoritative record of budgeted vs. real movement. | `from_account`, `to_account`, `category_id`, `scheduled_date`, `actual_*`, `recurrence`, `recurrence_series_id`, `status`. | Bundling recurrence metadata with the template transaction removes the need for a separate recurrence table and keeps JSON intuitive (“this transaction repeats monthly…”). `recurrence_series_id` decouples generated instances from their template while maintaining referential integrity. |
+| `Recurrence` | Scheduling rule and derived metadata. | `series_id`, `start_date`, `interval`, `mode`, `end`, `exceptions`, `status`, `last_generated`, `next_scheduled`. | Storing derived metadata (like `next_scheduled`) reduces recomputation cost and gives the CLI instant answers. Metadata is refreshed whenever transactions mutate or after deserialization. |
+| `Ledger` | Aggregates all above data plus simulations and timestamps. | `budget_period`, collections of accounts/categories/transactions/simulations, `schema_version`, `created_at`/`updated_at`. | The ledger struct is the sole persistence surface. All CLI commands operate on it via immutable or mutable references, which keeps ownership clear and reduces accidental mutation. |
+
+Budget summaries (Phase 4) and recurrence projection helpers (Phase 6) live alongside the core types so they can be reused by both CLI and future API layers without duplication.
 
 ### `simulation`
 
-The simulation module currently provides lightweight summaries (`SimulationSummary`) of ledger activity. Future iterations will deliver forward-looking projections, Monte Carlo models, and scenario testing. The intent is to keep simulation read-only, consuming ledger data via well-defined APIs.
+Simulations are modeled as change sets on top of a ledger snapshot:
+
+- `Simulation` captures metadata (name, notes, timestamps, status).
+- `SimulationChange` enumerates add/modify/exclude operations.
+- `ledger::Ledger::transactions_with_simulation` materializes an “overlay” list to feed budgeting/reporting APIs, while `apply_simulation` rewrites the canonical ledger when the user commits the plan.
+
+Design trade-offs:
+
+- **Delta-based** rather than full copies to minimize JSON size and make intent obvious (“this simulation modifies txn X”).
+- **Pending-only edits** – once applied or discarded, the simulation is still serialized for auditability but marked non-editable, preventing accidental replays.
 
 ### `cli`
 
@@ -48,37 +63,101 @@ Ledger JSON now includes a `simulations` array so scenarios survive reloads and 
 
 ### Recurrence & Forecasting (Phase 6)
 
-Recurring schedules are encoded directly on `Transaction` records via a richer `Recurrence` definition (start date, interval, end condition, status, exceptions, metadata for last/next occurrences). Every recurrence owns a stable `series_id` so generated instances (pending ledger transactions) can be tied back to their definition without duplicating JSON structures. The `ledger::recurring` module walks each series iteratively, classifies instances as Overdue/Pending/Future, and produces:
+The `ledger::recurring` module isolates all scheduling math. Flow:
 
-- `RecurrenceSnapshot` summaries for quick CLI listings.
-- `ForecastResult`/`ForecastReport` bundles that merge temporary projections into `BudgetSummary` outputs without mutating the authoritative ledger.
-- `materialize_due_recurrences` helpers that clone scheduled occurrences into the ledger once a due date passes, preventing gaps between expected and real-world entries.
+1. **Authoring** – when a transaction is created with recurrence info, `Transaction::set_recurrence` stamps a `series_id` (defaulting to the transaction UUID) and ensures `start_date` matches the template’s `scheduled_date`. This keeps JSON human-readable.
+2. **Metadata refresh** – after any mutation or deserialization, `Ledger::refresh_recurrence_metadata` rebuilds:
+   - occurrence counts,
+   - last generated/completed dates,
+   - next due date (skipping exceptions and respecting `RecurrenceEnd`).
+   The metadata is persisted to accelerate CLI calls and provide meaningful hints even before recomputation.
+3. **Materialization** – `materialize_due_recurrences` scans series and creates concrete transactions for overdue occurrences that lack ledger entries. This supports “auto-posting” once a period begins without waiting for manual entry.
+4. **Forecasting** – `forecast_for_window` walks occurrences inside a `DateWindow`, producing:
+   - existing but incomplete instances (pending/overdue),
+   - synthetic “future” entries that feed budget summaries without mutating the ledger.
+   The CLI uses this to show inflow/outflow projections, counts of overdue/pending items, and top-line financial deltas.
 
-`Ledger::refresh_recurrence_metadata` keeps next-due hints persisted so reloads remain stable, while `forecast_window_report` composes forecasts with budgeting logic for any date window or simulation overlay. The CLI exposes an entire management surface via `recurring list/edit/clear/pause/resume/skip/sync`, the `forecast` command (with optional simulation overlays and custom ranges), and `complete <index>` for marking real activity. These operations keep recurrence data deterministic, detect conflicts, and protect against infinite projections by enforcing bounded windows. Older ledgers remain compatible—new metadata simply defaults when missing.
+Decision rationale:
+
+- Keeping recurrence definitions inline with transactions keeps the JSON approachable (“a monthly rent template”).
+- `RecurrenceMode` (“FixedSchedule”, “AfterLastPerformed”) supports both hard due dates and “repeat N days after last completion”, covering common workflows.
+- Exceptions are modeled as concrete dates to guarantee reproducibility, and we log warnings if a rule becomes ambiguous (e.g., end condition reached but still active).
 
 ### `utils`
 
-Utility helpers house cross-cutting concerns. Phase 0 ships the tracing bootstrapper (`init_tracing`) that configures an env-filtered subscriber with the crate defaulting to `info` level. Phase 2 introduces JSON persistence helpers that stage atomic writes and make loading/saving ledgers trivial for the CLI and future services. Phase 7 promotes this into a dedicated `LedgerStore` that:
+Utility helpers house cross-cutting concerns.
 
-- Resolves a stable home directory (`~/.budget_core` by default, overridable via `BUDGET_CORE_HOME`).
-- Serializes ledgers deterministically (pretty JSON) while enforcing atomic writes through staged temp files.
-- Maintains version metadata (`schema_version`) and invokes `Ledger::migrate_from_schema` plus recurrence refreshes on load.
-- Creates timestamped `.json.bak` snapshots before overwriting existing ledgers and exposes backup/restore/list primitives with configurable retention.
-- Tracks the “last opened ledger” so the CLI can resume stateful sessions automatically.
+- `budget_core::utils::init_tracing` sets up an `EnvFilter`-driven `tracing` subscriber so both CLI and tests get consistent logging.
+- `budget_core::utils::persistence::LedgerStore` (Phase 7) is the single entry point for persistence. Responsibilities:
+  - Resolve the base directory (`~/.budget_core` or `BUDGET_CORE_HOME`).
+  - Generate canonical filenames (slugified ledger names), temp-file paths, and backup directories.
+  - Perform deterministic, pretty JSON serialization (`serde_json::to_string_pretty`) and atomic writes via `<file>.tmp` + `rename`.
+  - Run schema migrations by calling `Ledger::migrate_from_schema` and `refresh_recurrence_metadata` on load, recording any warnings.
+  - Maintain `state.json` so the CLI can auto-load the previous ledger.
+  - Manage retention-limited backups (`YYYY-MM-DDTHH-MM-SS.json.bak`) and expose `backup_named`, `list_backups`, and `restore_backup` APIs.
 
-All persistence errors surface as `LedgerError::Persistence`, ensuring higher layers can present actionable guidance instead of panicking.
+Error handling:
 
-### Persistence (Phase 7)
+- IO / JSON issues bubble up via `LedgerError::Persistence`.
+- Validation helpers warn about orphaned transactions, missing accounts, or inactive recurrences without silently mutating data.
 
-- **File layout**: `ledger_name.json` files sit at the store root. Backups live under `backups/<ledger_name>/YYYY-MM-DDTHH-MM-SS.json.bak`. A `state.json` file records the last loaded ledger for convenience.
-- **Atomic saves**: writes always target `<file>.tmp`, flush, and rename into place. Previous snapshots are retained before overwrites so users can roll back.
-- **Schema evolution**: each save bumps `schema_version`. Loading older files runs migrations (e.g., refreshing recurrence metadata) and logs the steps taken so users know why a save is requested.
-- **CLI integration**: `save-ledger`, `load-ledger`, `backup-ledger`, `list-backups`, and `restore-ledger` wrap the store APIs. Interactive sessions prompt for ledger names or allow custom paths via the legacy `save`/`load` commands. Script mode reuses the same infrastructure via environment variables to keep CI deterministic.
-- **Recovery**: restore operations copy the chosen snapshot into place (optionally creating a safety backup first) and then reload the ledger, surfacing any validation warnings. Tests simulate interrupted saves to guarantee the original JSON is never corrupted.
+### Persistence (Phase 7) – Data & Process Lifecycle
+
+1. **Save**
+   - CLI mutates the in-memory `Ledger`.
+   - `LedgerStore::save_named` or `save_to_path` clones the ledger (immutability ensures we don’t partially mutate state if a write fails), serializes to pretty JSON, writes `<file>.tmp`, and atomically renames to the final path.
+   - If an existing file is being overwritten, a `.json.bak` snapshot is created first and old backups are pruned to respect retention.
+   - `schema_version` is updated and `updated_at` re-stamped.
+2. **Load**
+   - `LedgerStore::load_named` reads JSON, deserializes into a `Ledger`, runs migrations, refreshes recurrence metadata, and validates references (issues are surfaced as CLI warnings).
+   - The CLI records the ledger name/path, resets active simulations, and updates `state.json`.
+3. **Backup / Restore**
+   - `backup-ledger` is an alias for `LedgerStore::backup_named`, giving the user an explicit restore point.
+   - `restore-ledger` copies the selected snapshot into place (also backing up the current file for safety) and immediately reloads it so the user sees the resulting warnings/migrations.
+4. **Script mode**
+   - Scripted flows (tests or automation) often chain commands such as `new-ledger Demo monthly` / `save-ledger demo`. Because script mode runs non-interactively, all prompts fall back to defaults or require explicit arguments.
+
+The combination of atomic writes, JSON readability, migration hooks, and CLI feedback ensures we can evolve the schema without breaking older ledgers or requiring manual interventions.
+
+### Data Lifecycle & Decision Rationale
+
+| Stage | Description | Why it matters |
+| --- | --- | --- |
+| Authoring | Users create ledgers, accounts, categories, and transactions via CLI. Script mode allows fixtures/tests to do the same. | Keeps all state mutations explicit and traceable; no hidden side effects. |
+| Scheduling | Recurrence definitions live inside transactions, and metadata is auto-refreshed. | Embedding the schedule with its template keeps files self-documenting and avoids separate recurrence tables. |
+| Forecasting | For any window, the ledger merges planned, pending, and projected transactions into a `ForecastReport`. | Budget summaries remain deterministic and inspectable without mutating the ledger. |
+| Persistence | Saves always go through `LedgerStore`, ensuring atomic writes + backups + schema versioning. | Prevents corruption and provides a single seam for future storage backends (e.g., SQLite/cloud). |
+| Recovery | Built-in CLI commands discover backups, restore snapshots, and surface warnings/migrations. | Users don’t need to leave the shell or manually manipulate files to recover from mistakes. |
+
+Key decisions:
+
+- **JSON format** – chosen for transparency; users can open ledger files in any editor, diff them in git, and make surgical fixes if necessary. Pretty printing trades slightly larger files for readability.
+- **UUID identifiers** – guarantee uniqueness across merges/backups and allow us to regenerate derived structures without losing referential integrity.
+- **Atomic saves** – `rename` is an atomic operation on POSIX/Windows, ensuring either the old file or the new one exists, never a half-written hybrid.
+- **Backups-per-save** – providing a rolling history removes the need for a separate “snapshot” command before risky operations and makes restore flows trivial.
+- **CLI-first UX** – building the feature set inside the CLI keeps the surface area small while making sure every workflow (interactive or automated) can exercise the same APIs.
+
+### CLI Usage: Interactive vs. Script
+
+| Workflow | Interactive Mode | Script Mode |
+| --- | --- | --- |
+| Start session | `cargo run --bin budget_core_cli` (auto-load last ledger). | `BUDGET_CORE_CLI_SCRIPT=1 cargo run --bin budget_core_cli -- < commands.txt` |
+| Create ledger | `new-ledger Demo monthly` (prompts for name/period if omitted). | `new-ledger Demo every 2 weeks` |
+| Work with recurrences | `recurring edit 3`, `recurring list overdue`, `complete 5 2025-02-01 1200`. | scripted commands: `recurring sync 2025-03-01` etc. |
+| Save/backup | `save-ledger household`, `backup-ledger`. | `save-ledger household` (no prompts). |
+| Restore | CLI asks for confirmation and reloads automatically. | `restore-ledger 0 household` (non-interactive; assumes the reference is either index or substring). |
+
+Script mode is deterministic: prompts are disabled, so each command must provide all required arguments. This keeps CI fixtures repeatable (see `tests/cli_script.rs`).
 
 ### `errors`
 
-`LedgerError` consolidates domain error reporting using `thiserror` for ergonomic conversions. IO and serialization errors are captured directly, and higher-level operations will extend the enum with contextual variants as functionality expands.
+`LedgerError` is the single error enum exposed by domain/persistence APIs. Major variants:
+
+- `Io`, `Serde` – low-level issues; surfaced directly in CLI so users know whether it’s a permissions problem or malformed JSON.
+- `InvalidRef`, `InvalidInput` – domain validation failures (unknown IDs, empty names, etc.).
+- `Persistence` – wraps higher-level issues (backup missing, store misconfigured).
+
+CLI helpers map these into `CommandError`, allowing interactive sessions to provide guidance (“use `save` first”, “ledger not loaded”) while script mode propagates the failure to stdout/stderr for tests to assert against.
 
 ## Next Steps
 
