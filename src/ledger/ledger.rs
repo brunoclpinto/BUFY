@@ -1,7 +1,7 @@
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use uuid::Uuid;
 
 use super::{
@@ -14,7 +14,13 @@ use super::{
     time_interval::{TimeInterval, TimeUnit},
     transaction::Transaction,
 };
-use crate::errors::LedgerError;
+use crate::{
+    currency::{
+        policy_date, ConvertedAmount, CurrencyCode, FormatOptions, FxBook, LocaleConfig,
+        ValuationPolicy,
+    },
+    errors::LedgerError,
+};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DateWindow {
@@ -143,6 +149,8 @@ pub struct BudgetSummary {
     pub per_account: Vec<AccountBudget>,
     pub orphaned_transactions: usize,
     pub incomplete_transactions: usize,
+    #[serde(default)]
+    pub disclosures: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -158,6 +166,18 @@ pub struct ForecastReport {
     pub scope: BudgetScope,
     pub forecast: ForecastResult,
     pub summary: BudgetSummary,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConversionContext {
+    pub policy: ValuationPolicy,
+    pub report_date: NaiveDate,
+}
+
+impl ConversionContext {
+    pub fn effective_date(&self, txn_date: NaiveDate) -> NaiveDate {
+        policy_date(&self.policy, txn_date, self.report_date)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -227,13 +247,21 @@ impl SimulationTransactionPatch {
     }
 }
 
-const CURRENT_SCHEMA_VERSION: u8 = 3;
+const CURRENT_SCHEMA_VERSION: u8 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Ledger {
     pub id: Uuid,
     pub name: String,
     pub budget_period: BudgetPeriod,
+    #[serde(default)]
+    pub base_currency: CurrencyCode,
+    #[serde(default)]
+    pub locale: LocaleConfig,
+    #[serde(default, skip_serializing_if = "FormatOptions::is_default")]
+    pub format: FormatOptions,
+    #[serde(default)]
+    pub valuation_policy: ValuationPolicy,
     #[serde(default)]
     pub accounts: Vec<Account>,
     #[serde(default)]
@@ -246,6 +274,8 @@ pub struct Ledger {
     pub updated_at: DateTime<Utc>,
     #[serde(default = "Ledger::schema_version_default")]
     pub schema_version: u8,
+    #[serde(default)]
+    pub fx_book: FxBook,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -273,6 +303,10 @@ impl Ledger {
             id: Uuid::new_v4(),
             name: name.into(),
             budget_period,
+            base_currency: CurrencyCode::default(),
+            locale: LocaleConfig::default(),
+            format: FormatOptions::default(),
+            valuation_policy: ValuationPolicy::default(),
             accounts: Vec::new(),
             categories: Vec::new(),
             transactions: Vec::new(),
@@ -280,7 +314,65 @@ impl Ledger {
             created_at: now,
             updated_at: now,
             schema_version: CURRENT_SCHEMA_VERSION,
+            fx_book: FxBook::default(),
         }
+    }
+
+    pub fn base_currency(&self) -> &CurrencyCode {
+        &self.base_currency
+    }
+
+    pub fn conversion_context(&self, report_date: NaiveDate) -> ConversionContext {
+        ConversionContext {
+            policy: self.valuation_policy.clone(),
+            report_date,
+        }
+    }
+
+    fn account_currency(&self, id: Uuid) -> Option<String> {
+        self.account(id).and_then(|acct| acct.currency.clone())
+    }
+
+    pub fn transaction_currency(&self, txn: &Transaction) -> CurrencyCode {
+        if let Some(code) = &txn.currency {
+            return CurrencyCode::new(code.clone());
+        }
+        self.account_currency(txn.from_account)
+            .or_else(|| self.account_currency(txn.to_account))
+            .map(CurrencyCode::new)
+            .unwrap_or_else(|| self.base_currency.clone())
+    }
+
+    fn convert_amount(
+        &self,
+        amount: f64,
+        from: &CurrencyCode,
+        txn_date: NaiveDate,
+        ctx: &ConversionContext,
+    ) -> Result<ConvertedAmount, LedgerError> {
+        let target = self.base_currency();
+        if from.as_str() == target.as_str() {
+            return Ok(ConvertedAmount {
+                amount,
+                rate_used: 1.0,
+                rate_date: ctx.effective_date(txn_date),
+                source: "parity".into(),
+                from: from.clone(),
+                to: target.clone(),
+            });
+        }
+        let effective_date = ctx.effective_date(txn_date);
+        let lookup = self
+            .fx_book
+            .lookup_rate(from.as_str(), target.as_str(), effective_date)?;
+        Ok(ConvertedAmount {
+            amount: amount * lookup.rate,
+            rate_used: lookup.rate,
+            rate_date: lookup.date,
+            source: lookup.source,
+            from: from.clone(),
+            to: target.clone(),
+        })
     }
 
     pub fn add_account(&mut self, account: Account) -> Uuid {
@@ -348,6 +440,18 @@ impl Ledger {
         if original_version < 3 {
             self.refresh_recurrence_metadata();
             notes.push("refreshed recurrence metadata for schema v3".into());
+        }
+        if original_version < 4 {
+            if self.base_currency.as_str().is_empty() {
+                self.base_currency = CurrencyCode::default();
+            }
+            if self.locale.language_tag.is_empty() {
+                self.locale = LocaleConfig::default();
+            }
+            self.format = FormatOptions::default();
+            self.valuation_policy = ValuationPolicy::TransactionDate;
+            self.fx_book = FxBook::default();
+            notes.push("initialized currency/localization defaults for schema v4".into());
         }
         self.schema_version = CURRENT_SCHEMA_VERSION;
         notes
@@ -717,6 +821,18 @@ impl Ledger {
         let mut account_map: HashMap<Uuid, Accumulator> = HashMap::new();
         let mut orphaned = 0usize;
         let mut incomplete_transactions = 0usize;
+        let mut warnings = Vec::new();
+        let mut disclosures: BTreeSet<String> = BTreeSet::new();
+
+        let report_reference = window
+            .end
+            .checked_sub_signed(Duration::days(1))
+            .unwrap_or(window.end);
+        let ctx = self.conversion_context(report_reference);
+        disclosures.insert(format!(
+            "Valuation policy: {:?} (report date {})",
+            self.valuation_policy, report_reference
+        ));
 
         let category_lookup: HashMap<Uuid, &Category> =
             self.categories.iter().map(|c| (c.id, c)).collect();
@@ -731,62 +847,75 @@ impl Ledger {
                 .unwrap_or(false);
             let actual_amount = txn.actual_amount;
 
+            if !budget_in && !actual_in {
+                continue;
+            }
+
             let mut txn_incomplete = false;
+            let cat_entry = category_map.entry(txn.category_id).or_default();
+            let account_entry = account_map.entry(txn.from_account).or_default();
+            let txn_currency = self.transaction_currency(txn);
 
             if budget_in {
-                totals_acc.add_budgeted(txn.budgeted_amount);
+                match self.convert_amount(
+                    txn.budgeted_amount,
+                    &txn_currency,
+                    txn.scheduled_date,
+                    &ctx,
+                ) {
+                    Ok(converted) => {
+                        record_disclosure(&mut disclosures, &converted);
+                        totals_acc.add_budgeted(converted.amount);
+                        cat_entry.add_budgeted(converted.amount);
+                        account_entry.add_budgeted(converted.amount);
+                    }
+                    Err(err) => {
+                        warnings.push(format!("{} budget conversion failed: {}", txn.id, err));
+                        totals_acc.missing_budget = true;
+                        cat_entry.missing_budget = true;
+                        account_entry.missing_budget = true;
+                        txn_incomplete = true;
+                    }
+                }
             }
+
             if actual_in {
                 if let Some(amount) = actual_amount {
-                    totals_acc.add_real(amount);
+                    let actual_date = txn.actual_date.unwrap_or(txn.scheduled_date);
+                    match self.convert_amount(amount, &txn_currency, actual_date, &ctx) {
+                        Ok(converted) => {
+                            record_disclosure(&mut disclosures, &converted);
+                            totals_acc.add_real(converted.amount);
+                            cat_entry.add_real(converted.amount);
+                            account_entry.add_real(converted.amount);
+                        }
+                        Err(err) => {
+                            warnings.push(format!("{} actual conversion failed: {}", txn.id, err));
+                            totals_acc.missing_real = true;
+                            cat_entry.missing_real = true;
+                            account_entry.missing_real = true;
+                            txn_incomplete = true;
+                        }
+                    }
                 } else {
                     totals_acc.missing_real = true;
+                    cat_entry.missing_real = true;
+                    account_entry.missing_real = true;
                     txn_incomplete = true;
                 }
             }
-            if budget_in && txn.actual_amount.is_none() {
-                totals_acc.missing_real = true;
-                txn_incomplete = true;
-            }
+
             if actual_in && !budget_in {
                 totals_acc.missing_budget = true;
+                cat_entry.missing_budget = true;
+                account_entry.missing_budget = true;
                 txn_incomplete = true;
             }
-
-            let cat_entry = category_map.entry(txn.category_id).or_default();
-            if budget_in {
-                cat_entry.add_budgeted(txn.budgeted_amount);
-            }
-            if actual_in {
-                if let Some(amount) = actual_amount {
-                    cat_entry.add_real(amount);
-                } else {
-                    cat_entry.missing_real = true;
-                }
-            }
-            if actual_in && !budget_in {
-                cat_entry.missing_budget = true;
-            }
             if budget_in && txn.actual_amount.is_none() {
+                totals_acc.missing_real = true;
                 cat_entry.missing_real = true;
-            }
-
-            let account_entry = account_map.entry(txn.from_account).or_default();
-            if budget_in {
-                account_entry.add_budgeted(txn.budgeted_amount);
-            }
-            if actual_in {
-                if let Some(amount) = actual_amount {
-                    account_entry.add_real(amount);
-                } else {
-                    account_entry.missing_real = true;
-                }
-            }
-            if actual_in && !budget_in {
-                account_entry.missing_budget = true;
-            }
-            if budget_in && txn.actual_amount.is_none() {
                 account_entry.missing_real = true;
+                txn_incomplete = true;
             }
 
             if !account_lookup.contains_key(&txn.from_account)
@@ -844,6 +973,9 @@ impl Ledger {
             .collect();
         per_account.sort_by(|a, b| a.name.cmp(&b.name));
 
+        let mut disclosures_vec: Vec<String> = disclosures.into_iter().collect();
+        disclosures_vec.extend(warnings);
+
         BudgetSummary {
             scope,
             window,
@@ -852,6 +984,7 @@ impl Ledger {
             per_account,
             orphaned_transactions: orphaned,
             incomplete_transactions,
+            disclosures: disclosures_vec,
         }
     }
 
@@ -945,6 +1078,17 @@ fn apply_patch(txn: &mut Transaction, patch: &SimulationTransactionPatch) {
     if let Some(actual_amount) = &patch.actual_amount {
         txn.actual_amount = *actual_amount;
     }
+}
+
+fn record_disclosure(disclosures: &mut BTreeSet<String>, converted: &ConvertedAmount) {
+    disclosures.insert(format!(
+        "{} → {} @ {:.6} on {} ({})",
+        converted.from.as_str(),
+        converted.to.as_str(),
+        converted.rate_used,
+        converted.rate_date,
+        converted.source
+    ));
 }
 
 #[derive(Default)]

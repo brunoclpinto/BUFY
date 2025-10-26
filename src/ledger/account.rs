@@ -8,6 +8,8 @@ pub struct Account {
     pub name: String,
     pub kind: AccountKind,
     pub category_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub currency: Option<String>,
 }
 
 impl Account {
@@ -18,6 +20,7 @@ impl Account {
             name: name.into(),
             kind,
             category_id: None,
+            currency: None,
         }
     }
 

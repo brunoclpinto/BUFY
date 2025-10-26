@@ -137,6 +137,26 @@ Key decisions:
 - **Backups-per-save** – providing a rolling history removes the need for a separate “snapshot” command before risky operations and makes restore flows trivial.
 - **CLI-first UX** – building the feature set inside the CLI keeps the surface area small while making sure every workflow (interactive or automated) can exercise the same APIs.
 
+### Currency, FX, and Localization (Phase 8)
+
+- **Configuration model**:
+  - `CurrencyCode` and `FormatOptions` live on the ledger, while accounts/transactions store optional overrides so original units are preserved in JSON.
+  - `LocaleConfig` drives number/date formatting plus the first weekday, keeping summaries aligned with local budgeting norms.
+  - `ValuationPolicy` (transaction date, report date, or explicit custom date) is evaluated through a `ConversionContext` passed to every aggregate.
+- **FX pipeline**:
+  - `FxBook` holds dated `FxRate` entries and a tolerance window; lookups fall back to the nearest prior rate within tolerance and error otherwise.
+  - Rates are always resolved relative to the base currency (with automatic inversion) to avoid long conversion chains; disclosures report the rate date/source.
+- **Aggregation & disclosure**:
+  - `Ledger::convert_amount` returns a `ConvertedAmount` used in budgeting, forecasting, and simulation overlays. Every conversion invites a disclosure entry (policy + rate provenance) stored on `BudgetSummary`.
+  - Summaries propagate these disclosures to the CLI, ensuring every reported number can explain “source currency, rate, date, policy, rounding”.
+- **Localization & accessibility**:
+  - `format_currency_value` honors locale separators, currency style, and negative-style preferences while screen-reader mode replaces ambiguous symbols with readable phrases.
+  - High-contrast mode disables ANSI color usage; warning prefixes automatically switch from emoji to text when assistive modes are enabled.
+- **CLI controls**:
+  - `config base-currency|locale|negative-style|screen-reader|high-contrast|valuation` persists preferences.
+  - `fx list|add|remove|tolerance` manages the offline FX store.
+  - Transaction listings, summaries, forecasts, and simulations consume these settings automatically.
+
 ### CLI Usage: Interactive vs. Script
 
 | Workflow | Interactive Mode | Script Mode |

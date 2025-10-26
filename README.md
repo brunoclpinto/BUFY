@@ -8,6 +8,7 @@ Budget Core provides a reusable Rust toolkit for building budgeting workflows, s
 - **Interactive CLI** – a `rustyline` REPL (`budget_core_cli`) with contextual prompts, script mode (`BUDGET_CORE_CLI_SCRIPT=1`), and rich command set for day‑to‑day operations.
 - **Simulations** – name-addressable overlays that stage hypothetical changes without mutating the authoritative ledger.
 - **Recurrence & forecasting** – recurring transactions, automatic schedule regeneration, and future projections with variance-aware summaries.
+- **Multi-currency & localization (Phase 8)** – base/reporting currency per ledger, overrides per account/transaction, FX valuation policies, and locale/ accessibility-aware formatting.
 - **Managed persistence (Phase 7)** – deterministic JSON serialization under `~/.budget_core`, schema migrations, rotating backups, and recovery tooling.
 
 For architectural background see `docs/design_overview.md`.
@@ -49,6 +50,8 @@ For architectural background see `docs/design_overview.md`.
 | --- | --- | --- |
 | Ledger lifecycle | `new-ledger`, `load [path]`, `save [path]`, `load-ledger <name>`, `save-ledger [name]` | Named saves use the managed store; path-based commands operate on arbitrary JSON files. |
 | Persistence tooling | `backup-ledger [name]`, `list-backups [name]`, `restore-ledger <idx|pattern> [name]` | Snapshots live under `~/.budget_core/backups/<name>/YYYY-MM-DDTHH-MM-SS.json.bak`. |
+| Currency & locale | `config [show|base-currency|locale|negative-style|screen-reader|high-contrast|valuation]` | Persisted per-ledger settings for currency display, locale defaults, valuation policies, and accessibility. |
+| FX management | `fx list`, `fx add <from> <to> <YYYY-MM-DD> <rate> [source]`, `fx remove`, `fx tolerance <days>` | Offline-first FX rate store with tolerance windows and manual overrides. |
 | Data entry | `add account`, `add category`, `add transaction`, `list [accounts|categories|transactions]` | Transaction list output shows recurrence hints (`[recurring]`, `[instance]`). |
 | Recurrence | `recurring list/edit/clear/pause/resume/skip/sync`, `complete <idx>` | Schedules track start/end dates, exceptions, and automatically materialize overdue instances. |
 | Forecasting | `forecast [simulation] [<n> <unit> | custom <start> <end>]` | Produces future inflow/outflow projections plus window-specific budget summaries. |
@@ -94,6 +97,14 @@ Additional architectural notes are captured in `docs/design_overview.md`.
 
 Every save produces pretty JSON for human inspection, and backups are pruned according to the store’s retention setting (default 5). Loads validate schema versions (`schema_version`), rebuild recurrence metadata, and surface migration notes in the CLI.
 
+## Currency, FX & Localization
+
+- **Base currency / valuation policy** – All summaries convert into the ledger’s base currency using `config valuation <transaction|report|custom>` to control rate selection.
+- **Account/transaction currency** – Account creation prompts for a currency override; transactions inherit from their source account unless explicitly set.
+- **FX store** – Manage dated rates with `fx add`, inspect with `fx list`, and control fallback tolerance with `fx tolerance <days>`.
+- **Locale & formatting** – `config locale <tag>` adjusts decimal/grouping separators, date formats, and the first weekday; `config negative-style`, `config screen-reader`, and `config high-contrast` tune CLI output for accessibility.
+- **Disclosures** – Budget summaries and forecasts include a disclosure footer listing valuation policy, FX sources, and fallback usage so reports stay auditable.
+
 ## Development Conventions
 
 - Crate edition: Rust 2021.
@@ -102,7 +113,7 @@ Every save produces pretty JSON for human inspection, and backups are pruned acc
 
 ## Testing & CI
 
-- `cargo test` exercises unit, integration, CLI-script, and persistence suites.
+- `cargo test` exercises unit, integration, CLI-script, currency/FX, and persistence suites.
 - `cargo nextest run` and `cargo clippy --all-targets -- -D warnings` keep execution fast in CI.
 - CLI scenarios in `tests/cli_script.rs` demonstrate script mode pipelines; `tests/persistence_suite.rs` guards backup/restore flows.
 

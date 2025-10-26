@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use chrono::{Duration, NaiveDate, Utc};
+use chrono::{Duration, NaiveDate, Utc, Weekday};
 use colored::Colorize;
 use dialoguer::{theme::ColorfulTheme, Confirm, Input, Select};
 use rustyline::{error::ReadlineError, DefaultEditor};
@@ -15,6 +15,10 @@ use strsim::levenshtein;
 use uuid::Uuid;
 
 use crate::{
+    currency::{
+        format_currency_value, format_date, CurrencyCode, DateFormatStyle, FxRate, LocaleConfig,
+        NegativeStyle, ValuationPolicy,
+    },
     errors::LedgerError,
     ledger::{
         account::AccountKind, category::CategoryKind, Account, BudgetPeriod, BudgetScope,
@@ -216,6 +220,66 @@ impl CliApp {
         } else {
             Ok(())
         }
+    }
+
+    fn format_amount(&self, ledger: &Ledger, amount: f64) -> String {
+        format_currency_value(
+            amount,
+            ledger.base_currency(),
+            &ledger.locale,
+            &ledger.format,
+        )
+    }
+
+    fn format_date(&self, ledger: &Ledger, date: NaiveDate) -> String {
+        format_date(&ledger.locale, date)
+    }
+
+    fn warning_prefix<'a>(&self, ledger: &'a Ledger) -> &'a str {
+        if ledger.format.screen_reader_mode {
+            "Warning:"
+        } else {
+            "⚠️"
+        }
+    }
+
+    fn paint<'a>(
+        &self,
+        ledger: &Ledger,
+        text: String,
+        colorizer: impl Fn(String) -> colored::ColoredString,
+    ) -> String {
+        if ledger.format.high_contrast_mode {
+            text
+        } else {
+            colorizer(text).to_string()
+        }
+    }
+
+    fn show_config(&self) -> CommandResult {
+        let ledger = self.current_ledger()?;
+        println!("Base currency: {}", ledger.base_currency.as_str());
+        println!("Locale: {}", ledger.locale.language_tag);
+        println!("Negative style: {:?}", ledger.format.negative_style);
+        println!(
+            "Screen reader mode: {}",
+            if ledger.format.screen_reader_mode {
+                "on"
+            } else {
+                "off"
+            }
+        );
+        println!(
+            "High contrast mode: {}",
+            if ledger.format.high_contrast_mode {
+                "on"
+            } else {
+                "off"
+            }
+        );
+        println!("Valuation policy: {:?}", ledger.valuation_policy);
+        println!("FX tolerance: {} days", ledger.fx_book.tolerance.days);
+        Ok(())
     }
 
     fn require_named_ledger(&self) -> Result<&str, CommandError> {
@@ -1096,11 +1160,18 @@ impl CliApp {
     fn list_transactions(&self) -> CommandResult {
         let ledger = self.current_ledger()?;
         if ledger.transactions.is_empty() {
-            println!("{}", "No transactions recorded".bright_black());
+            println!(
+                "{}",
+                self.paint(ledger, "No transactions recorded.".into(), |s| s
+                    .bright_black())
+            );
             return Ok(());
         }
 
-        println!("{}", "Transactions".bright_white().bold());
+        println!(
+            "{}",
+            self.paint(ledger, "Transactions".into(), |s| s.bright_white().bold())
+        );
         for (idx, txn) in ledger.transactions.iter().enumerate() {
             let route = self.describe_transaction_route(ledger, txn);
             let category = txn
@@ -1108,29 +1179,45 @@ impl CliApp {
                 .and_then(|id| self.lookup_category_name(ledger, id))
                 .unwrap_or_else(|| "Uncategorized".into());
             let status = format!("{:?}", txn.status);
+            let txn_currency = ledger.transaction_currency(txn);
+            let scheduled = self.format_date(ledger, txn.scheduled_date);
+            let budget_amount = format_currency_value(
+                txn.budgeted_amount,
+                &txn_currency,
+                &ledger.locale,
+                &ledger.format,
+            );
             println!(
-                "  [{idx:>3}] {date} | {amount:>10.2} | {status:<10} | {route} ({category})",
+                "  [{idx:>3}] {date} | {amount} | {status:<10} | {route} ({category})",
                 idx = idx,
-                date = txn.scheduled_date,
-                amount = txn.budgeted_amount,
+                date = scheduled,
+                amount = budget_amount,
                 status = status,
                 route = route,
                 category = category
             );
             if let Some(actual_date) = txn.actual_date {
-                let actual_amount = txn.actual_amount.unwrap_or(0.0);
-                println!(
-                    "        actual {date} | {amount:>10.2}",
-                    date = actual_date,
-                    amount = actual_amount
-                );
+                if let Some(actual_amount) = txn.actual_amount {
+                    let formatted_date = self.format_date(ledger, actual_date);
+                    let formatted_amount = format_currency_value(
+                        actual_amount,
+                        &txn_currency,
+                        &ledger.locale,
+                        &ledger.format,
+                    );
+                    println!("        actual {} | {}", formatted_date, formatted_amount);
+                }
             }
             if let Some(hint) = self.transaction_recurrence_hint(txn) {
-                println!("        {}", hint.bright_black());
+                println!("        {}", self.paint(ledger, hint, |s| s.bright_black()));
             } else if txn.recurrence_series_id.is_some() {
                 println!(
                     "{}",
-                    "[instance] scheduled entry from recurrence".bright_black()
+                    self.paint(
+                        ledger,
+                        "        [instance] scheduled entry from recurrence".into(),
+                        |s| s.bright_black()
+                    )
                 );
             }
         }
@@ -1248,125 +1335,179 @@ impl CliApp {
     }
 
     fn print_budget_summary(&self, summary: &BudgetSummary) {
-        let end_display = summary.window.end - Duration::days(1);
-        println!(
-            "{} {} → {}",
-            format!("{:?}", summary.scope).bright_cyan(),
-            summary.window.start,
-            end_display
+        let ledger = match self.current_ledger() {
+            Ok(ledger) => ledger,
+            Err(_) => {
+                println!("{}", "Ledger not loaded".red());
+                return;
+            }
+        };
+        let end_display = summary
+            .window
+            .end
+            .checked_sub_signed(Duration::days(1))
+            .unwrap_or(summary.window.end);
+        let header = format!(
+            "{:?} {} → {}",
+            summary.scope,
+            self.format_date(ledger, summary.window.start),
+            self.format_date(ledger, end_display)
         );
+        println!("{}", self.paint(ledger, header, |s| s.bright_cyan().bold()));
 
-        println!(
-            "{}",
-            format!(
-                "Budgeted: {budget:.2} | Real: {real:.2} | Remaining: {remain:.2} | Variance: {var:.2}",
-                budget = summary.totals.budgeted,
-                real = summary.totals.real,
-                remain = summary.totals.remaining,
-                var = summary.totals.variance
-            )
-            .bright_white()
+        let totals_line = format!(
+            "Budgeted: {} | Real: {} | Remaining: {} | Variance: {}",
+            self.format_amount(ledger, summary.totals.budgeted),
+            self.format_amount(ledger, summary.totals.real),
+            self.format_amount(ledger, summary.totals.remaining),
+            self.format_amount(ledger, summary.totals.variance)
         );
+        println!("{}", self.paint(ledger, totals_line, |s| s.bright_white()));
 
         if let Some(percent) = summary.totals.percent_used {
-            println!("{}", format!("Usage: {:.1}% ", percent).bright_white());
+            let usage = format!("Usage: {:.1}%", percent);
+            println!("{}", self.paint(ledger, usage, |s| s.bright_white()));
         }
 
-        let status_label = format!("{:?}", summary.totals.status);
-        let colored_status = match summary.totals.status {
-            BudgetStatus::OnTrack => status_label.green(),
-            BudgetStatus::UnderBudget => status_label.cyan(),
-            BudgetStatus::OverBudget => status_label.red(),
-            BudgetStatus::Empty => status_label.bright_black(),
-            BudgetStatus::Incomplete => status_label.yellow(),
+        let status_label = format!("Status: {:?}", summary.totals.status);
+        let status_text = if ledger.format.high_contrast_mode {
+            status_label
+        } else {
+            match summary.totals.status {
+                BudgetStatus::OnTrack => status_label.green().to_string(),
+                BudgetStatus::UnderBudget => status_label.cyan().to_string(),
+                BudgetStatus::OverBudget => status_label.red().to_string(),
+                BudgetStatus::Empty => status_label.bright_black().to_string(),
+                BudgetStatus::Incomplete => status_label.yellow().to_string(),
+            }
         };
-        println!("Status: {}", colored_status);
+        println!("{}", status_text);
 
         if summary.incomplete_transactions > 0 {
             println!(
-                "{}",
-                format!(
-                    "⚠️  {} incomplete transactions",
-                    summary.incomplete_transactions
-                )
-                .yellow()
+                "{} {} incomplete transactions",
+                self.warning_prefix(ledger),
+                summary.incomplete_transactions
             );
         }
 
         if summary.orphaned_transactions > 0 {
             println!(
-                "{}",
-                format!(
-                    "⚠️  {} transactions reference unknown accounts or categories",
-                    summary.orphaned_transactions
-                )
-                .yellow()
+                "{} {} transactions reference unknown accounts or categories",
+                self.warning_prefix(ledger),
+                summary.orphaned_transactions
             );
         }
 
         if summary.per_category.is_empty() {
-            println!("{}", "No category data for this window.".bright_black());
+            println!(
+                "{}",
+                self.paint(ledger, "No category data for this window.".into(), |s| {
+                    s.bright_black()
+                })
+            );
         } else {
-            println!("{}", "Categories:".bright_white().bold());
+            println!(
+                "{}",
+                self.paint(ledger, "Categories:".into(), |s| s.bright_white().bold())
+            );
             for cat in summary.per_category.iter().take(5) {
                 println!(
-                    "  {:<20} {:>8.2} budgeted / {:>8.2} real ({:?})",
-                    cat.name, cat.totals.budgeted, cat.totals.real, cat.totals.status
+                    "  {:<20} {} budgeted / {} real ({:?})",
+                    cat.name,
+                    self.format_amount(ledger, cat.totals.budgeted),
+                    self.format_amount(ledger, cat.totals.real),
+                    cat.totals.status
                 );
             }
             if summary.per_category.len() > 5 {
                 println!(
                     "{}",
-                    format!("  ... {} more categories", summary.per_category.len() - 5)
-                        .bright_black()
+                    self.paint(
+                        ledger,
+                        format!("  ... {} more categories", summary.per_category.len() - 5),
+                        |s| s.bright_black()
+                    )
                 );
             }
         }
 
         if !summary.per_account.is_empty() {
-            println!("{}", "Accounts:".bright_white().bold());
+            println!(
+                "{}",
+                self.paint(ledger, "Accounts:".into(), |s| s.bright_white().bold())
+            );
             for acct in summary.per_account.iter().take(5) {
                 println!(
-                    "  {:<20} {:>8.2} budgeted / {:>8.2} real ({:?})",
-                    acct.name, acct.totals.budgeted, acct.totals.real, acct.totals.status
+                    "  {:<20} {} budgeted / {} real ({:?})",
+                    acct.name,
+                    self.format_amount(ledger, acct.totals.budgeted),
+                    self.format_amount(ledger, acct.totals.real),
+                    acct.totals.status
                 );
             }
             if summary.per_account.len() > 5 {
                 println!(
                     "{}",
-                    format!("  ... {} more accounts", summary.per_account.len() - 5).bright_black()
+                    self.paint(
+                        ledger,
+                        format!("  ... {} more accounts", summary.per_account.len() - 5),
+                        |s| s.bright_black()
+                    )
                 );
+            }
+        }
+
+        if !summary.disclosures.is_empty() {
+            println!(
+                "{}",
+                self.paint(ledger, "Disclosures:".into(), |s| s.bright_white().bold())
+            );
+            for note in &summary.disclosures {
+                println!("  - {}", note);
             }
         }
     }
 
     fn print_simulation_impact(&self, impact: &SimulationBudgetImpact) {
+        let ledger = match self.current_ledger() {
+            Ok(ledger) => ledger,
+            Err(_) => {
+                println!("{}", "Ledger not loaded".red());
+                return;
+            }
+        };
         println!(
             "{}",
-            format!("Simulation `{}`", impact.simulation_name)
-                .bright_magenta()
-                .bold()
+            self.paint(
+                ledger,
+                format!("Simulation `{}`", impact.simulation_name),
+                |s| s.bright_magenta().bold()
+            )
         );
         println!("Base totals:");
         println!(
-            "  Budgeted: {:.2} | Real: {:.2} | Remaining: {:.2} | Variance: {:.2}",
-            impact.base.totals.budgeted,
-            impact.base.totals.real,
-            impact.base.totals.remaining,
-            impact.base.totals.variance
+            "  Budgeted: {} | Real: {} | Remaining: {} | Variance: {}",
+            self.format_amount(ledger, impact.base.totals.budgeted),
+            self.format_amount(ledger, impact.base.totals.real),
+            self.format_amount(ledger, impact.base.totals.remaining),
+            self.format_amount(ledger, impact.base.totals.variance)
         );
         println!("Simulated totals:");
         println!(
-            "  Budgeted: {:.2} | Real: {:.2} | Remaining: {:.2} | Variance: {:.2}",
-            impact.simulated.totals.budgeted,
-            impact.simulated.totals.real,
-            impact.simulated.totals.remaining,
-            impact.simulated.totals.variance
+            "  Budgeted: {} | Real: {} | Remaining: {} | Variance: {}",
+            self.format_amount(ledger, impact.simulated.totals.budgeted),
+            self.format_amount(ledger, impact.simulated.totals.real),
+            self.format_amount(ledger, impact.simulated.totals.remaining),
+            self.format_amount(ledger, impact.simulated.totals.variance)
         );
         println!("Delta:");
         println!(
-            "  Budgeted: {:+.2} | Real: {:+.2} | Remaining: {:+.2} | Variance: {:+.2}",
-            impact.delta.budgeted, impact.delta.real, impact.delta.remaining, impact.delta.variance
+            "  Budgeted: {} | Real: {} | Remaining: {} | Variance: {}",
+            self.format_amount(ledger, impact.delta.budgeted),
+            self.format_amount(ledger, impact.delta.real),
+            self.format_amount(ledger, impact.delta.remaining),
+            self.format_amount(ledger, impact.delta.variance)
         );
     }
 
@@ -1382,12 +1523,15 @@ impl CliApp {
         } else {
             "Forecast".into()
         };
-        let end_display = window.end - Duration::days(1);
+        let end_display = window
+            .end
+            .checked_sub_signed(Duration::days(1))
+            .unwrap_or(window.end);
         println!(
             "{} {} → {}",
-            header.bright_cyan().bold(),
-            window.start,
-            end_display
+            self.paint(ledger, header, |s| s.bright_cyan().bold()),
+            self.format_date(ledger, window.start),
+            self.format_date(ledger, end_display)
         );
 
         let totals = &report.forecast.totals;
@@ -1422,16 +1566,24 @@ impl CliApp {
             overdue, pending, future
         );
         println!(
-            "Projected totals → Inflow: {:+.2} | Outflow: {:+.2} | Net: {:+.2}",
-            totals.projected_inflow, totals.projected_outflow, totals.net
+            "Projected totals → Inflow: {} | Outflow: {} | Net: {}",
+            self.format_amount(ledger, totals.projected_inflow),
+            self.format_amount(ledger, totals.projected_outflow),
+            self.format_amount(ledger, totals.net)
         );
         println!(
-            "Budget impact → Budgeted: {:.2} | Real: {:.2} | Remaining: {:.2} | Variance: {:.2}",
-            report.summary.totals.budgeted,
-            report.summary.totals.real,
-            report.summary.totals.remaining,
-            report.summary.totals.variance
+            "Budget impact → Budgeted: {} | Real: {} | Remaining: {} | Variance: {}",
+            self.format_amount(ledger, report.summary.totals.budgeted),
+            self.format_amount(ledger, report.summary.totals.real),
+            self.format_amount(ledger, report.summary.totals.remaining),
+            self.format_amount(ledger, report.summary.totals.variance)
         );
+        if !report.summary.disclosures.is_empty() {
+            println!("{}", "Disclosures:".bright_white().bold());
+            for note in &report.summary.disclosures {
+                println!("  - {}", note);
+            }
+        }
 
         if report.forecast.transactions.is_empty() {
             println!(
@@ -1441,7 +1593,12 @@ impl CliApp {
             return;
         }
 
-        println!("{}", "Upcoming projections:".bright_white().bold());
+        println!(
+            "{}",
+            self.paint(ledger, "Upcoming projections:".into(), |s| s
+                .bright_white()
+                .bold())
+        );
         for item in report.forecast.transactions.iter().take(8) {
             let status = self.scheduled_status_label(item.status);
             let route = self.describe_transaction_route(ledger, &item.transaction);
@@ -1450,10 +1607,17 @@ impl CliApp {
                 .category_id
                 .and_then(|id| self.lookup_category_name(ledger, id))
                 .unwrap_or_else(|| "Uncategorized".into());
-            println!(
-                "  {} | {:>10.2} | {} | {}",
-                format!("{}", item.transaction.scheduled_date).bright_white(),
+            let txn_currency = ledger.transaction_currency(&item.transaction);
+            let amount = format_currency_value(
                 item.transaction.budgeted_amount,
+                &txn_currency,
+                &ledger.locale,
+                &ledger.format,
+            );
+            println!(
+                "  {} | {} | {} | {}",
+                self.format_date(ledger, item.transaction.scheduled_date),
+                amount,
                 status,
                 format!("{} ({})", route, category)
             );
@@ -1953,6 +2117,18 @@ fn build_commands() -> Vec<Command> {
         ),
         Command::new("save", "Save current ledger", "save [path]", cmd_save),
         Command::new(
+            "config",
+            "Configure currencies, locale, and valuation",
+            "config [show|base-currency|locale|negative-style|screen-reader|high-contrast|valuation]",
+            cmd_config,
+        ),
+        Command::new(
+            "fx",
+            "Manage FX rates",
+            "fx <list|add|remove|tolerance> ...",
+            cmd_fx,
+        ),
+        Command::new(
             "save-ledger",
             "Save current ledger by name in the persistence store",
             "save-ledger [name]",
@@ -2143,6 +2319,204 @@ fn cmd_save(app: &mut CliApp, args: &[&str]) -> CommandResult {
         }
     } else {
         Err(CommandError::InvalidArguments("usage: save <path>".into()))
+    }
+}
+
+fn cmd_fx(app: &mut CliApp, args: &[&str]) -> CommandResult {
+    if args.is_empty() {
+        return Err(CommandError::InvalidArguments(
+            "usage: fx <list|add|remove|tolerance> ...".into(),
+        ));
+    }
+    match args[0].to_lowercase().as_str() {
+        "list" => {
+            let ledger = app.current_ledger()?;
+            let rates = ledger.fx_book.all_rates();
+            if rates.is_empty() {
+                println!("{}", "No FX rates configured.".bright_black());
+            } else {
+                println!("{}", "FX rates:".bright_white().bold());
+                for rate in rates {
+                    println!(
+                        "  {} → {} on {} = {:.6} ({})",
+                        rate.from.as_str(),
+                        rate.to.as_str(),
+                        rate.date,
+                        rate.rate,
+                        rate.source.unwrap_or_else(|| "manual".into())
+                    );
+                }
+            }
+            Ok(())
+        }
+        "add" => {
+            if args.len() < 5 {
+                return Err(CommandError::InvalidArguments(
+                    "usage: fx add <from> <to> <YYYY-MM-DD> <rate> [source]".into(),
+                ));
+            }
+            let from = CurrencyCode::new(args[1]);
+            let to = CurrencyCode::new(args[2]);
+            let date = NaiveDate::parse_from_str(args[3], "%Y-%m-%d")
+                .map_err(|_| CommandError::InvalidArguments("invalid date".into()))?;
+            let rate: f64 = args[4]
+                .parse()
+                .map_err(|_| CommandError::InvalidArguments("invalid rate".into()))?;
+            let source = args.get(5).map(|s| s.to_string());
+            let ledger = app.current_ledger_mut()?;
+            ledger.fx_book.add_rate(FxRate {
+                from,
+                to,
+                date,
+                rate,
+                source,
+                notes: None,
+            });
+            println!("{}", "FX rate added".bright_green());
+            Ok(())
+        }
+        "remove" => {
+            if args.len() < 4 {
+                return Err(CommandError::InvalidArguments(
+                    "usage: fx remove <from> <to> <YYYY-MM-DD>".into(),
+                ));
+            }
+            let from = args[1];
+            let to = args[2];
+            let date = NaiveDate::parse_from_str(args[3], "%Y-%m-%d")
+                .map_err(|_| CommandError::InvalidArguments("invalid date".into()))?;
+            let ledger = app.current_ledger_mut()?;
+            ledger.fx_book.remove_rate(from, to, date);
+            println!("{}", "FX rate removed".bright_green());
+            Ok(())
+        }
+        "tolerance" => {
+            let days = args
+                .get(1)
+                .ok_or_else(|| CommandError::InvalidArguments("usage: fx tolerance <days>".into()))?
+                .parse::<i64>()
+                .map_err(|_| CommandError::InvalidArguments("invalid number".into()))?;
+            let ledger = app.current_ledger_mut()?;
+            ledger.fx_book.tolerance.days = days;
+            println!("{}", "FX tolerance updated".bright_green());
+            Ok(())
+        }
+        _ => Err(CommandError::InvalidArguments(
+            "usage: fx <list|add|remove|tolerance> ...".into(),
+        )),
+    }
+}
+
+fn locale_template(tag: &str) -> LocaleConfig {
+    match tag {
+        "fr-FR" => LocaleConfig {
+            language_tag: "fr-FR".into(),
+            decimal_separator: ',',
+            grouping_separator: ' ',
+            date_format: DateFormatStyle::Long,
+            first_weekday: Weekday::Mon,
+        },
+        "en-GB" => LocaleConfig {
+            language_tag: "en-GB".into(),
+            decimal_separator: '.',
+            grouping_separator: ',',
+            date_format: DateFormatStyle::Long,
+            first_weekday: Weekday::Mon,
+        },
+        _ => LocaleConfig::default(),
+    }
+}
+
+fn cmd_config(app: &mut CliApp, args: &[&str]) -> CommandResult {
+    if args.is_empty() || args[0].eq_ignore_ascii_case("show") {
+        app.show_config()?;
+        return Ok(());
+    }
+    match args[0].to_lowercase().as_str() {
+        "base-currency" => {
+            let code = args
+                .get(1)
+                .ok_or_else(|| CommandError::InvalidArguments("usage: config base-currency <ISO>".into()))?;
+            let ledger = app.current_ledger_mut()?;
+            ledger.base_currency = CurrencyCode::new(*code);
+            println!("{}", format!("Base currency set to {}", ledger.base_currency.as_str()).bright_green());
+            Ok(())
+        }
+        "locale" => {
+            let tag = args
+                .get(1)
+                .ok_or_else(|| CommandError::InvalidArguments("usage: config locale <tag>".into()))?;
+            let ledger = app.current_ledger_mut()?;
+            ledger.locale = locale_template(tag);
+            println!("{}", format!("Locale set to {}", ledger.locale.language_tag).bright_green());
+            Ok(())
+        }
+        "negative-style" => {
+            let style = args
+                .get(1)
+                .ok_or_else(|| CommandError::InvalidArguments("usage: config negative-style <sign|parentheses>".into()))?;
+            let ledger = app.current_ledger_mut()?;
+            ledger.format.negative_style = match style.to_lowercase().as_str() {
+                "sign" => NegativeStyle::Sign,
+                "parentheses" => NegativeStyle::Parentheses,
+                other => {
+                    return Err(CommandError::InvalidArguments(format!(
+                        "unknown negative style `{}`",
+                        other
+                    )))
+                }
+            };
+            println!("{}", "Negative style updated".bright_green());
+            Ok(())
+        }
+        "screen-reader" => {
+            let mode = args
+                .get(1)
+                .ok_or_else(|| CommandError::InvalidArguments("usage: config screen-reader <on|off>".into()))?;
+            let ledger = app.current_ledger_mut()?;
+            ledger.format.screen_reader_mode = matches!(mode.to_lowercase().as_str(), "on" | "true" | "yes");
+            println!("{}", "Screen reader mode updated".bright_green());
+            Ok(())
+        }
+        "high-contrast" => {
+            let mode = args
+                .get(1)
+                .ok_or_else(|| CommandError::InvalidArguments("usage: config high-contrast <on|off>".into()))?;
+            let ledger = app.current_ledger_mut()?;
+            ledger.format.high_contrast_mode = matches!(mode.to_lowercase().as_str(), "on" | "true" | "yes");
+            println!("{}", "Contrast preference updated".bright_green());
+            Ok(())
+        }
+        "valuation" => {
+            let policy = args
+                .get(1)
+                .ok_or_else(|| CommandError::InvalidArguments("usage: config valuation <transaction|report|custom> [YYYY-MM-DD]".into()))?;
+            let ledger = app.current_ledger_mut()?;
+            ledger.valuation_policy = match policy.to_lowercase().as_str() {
+                "transaction" => ValuationPolicy::TransactionDate,
+                "report" => ValuationPolicy::ReportDate,
+                "custom" => {
+                    let date_arg = args.get(2).ok_or_else(|| {
+                        CommandError::InvalidArguments("usage: config valuation custom <YYYY-MM-DD>".into())
+                    })?;
+                    let date = NaiveDate::parse_from_str(date_arg, "%Y-%m-%d").map_err(|_| {
+                        CommandError::InvalidArguments("invalid date (use YYYY-MM-DD)".into())
+                    })?;
+                    ValuationPolicy::CustomDate(date)
+                }
+                other => {
+                    return Err(CommandError::InvalidArguments(format!(
+                        "unknown valuation policy `{}`",
+                        other
+                    )))
+                }
+            };
+            println!("{}", "Valuation policy updated".bright_green());
+            Ok(())
+        }
+        _ => Err(CommandError::InvalidArguments(
+            "usage: config [show|base-currency|locale|negative-style|screen-reader|high-contrast|valuation]".into(),
+        )),
     }
 }
 

@@ -4,6 +4,7 @@
 //! that power higher level budgeting workflows and CLIs.
 
 pub mod cli;
+pub mod currency;
 pub mod errors;
 pub mod ledger;
 pub mod simulation;
