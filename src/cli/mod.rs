@@ -1,3 +1,4 @@
+mod commands;
 mod output;
 mod state;
 
@@ -33,6 +34,7 @@ use crate::{
     utils::{build_info, persistence::LedgerStore},
 };
 
+use commands::{CommandDefinition, CommandRegistry};
 use output::{error as output_error, warning as output_warning};
 use state::CliState;
 
@@ -76,37 +78,12 @@ pub(crate) enum LoopControl {
     Exit,
 }
 
-type CommandAction = fn(&mut CliApp, &[&str]) -> CommandResult;
 type CommandResult = Result<(), CommandError>;
-
-#[derive(Clone)]
-struct Command {
-    name: &'static str,
-    description: &'static str,
-    usage: &'static str,
-    action: CommandAction,
-}
-
-impl Command {
-    fn new(
-        name: &'static str,
-        description: &'static str,
-        usage: &'static str,
-        action: CommandAction,
-    ) -> Self {
-        Self {
-            name,
-            description,
-            usage,
-            action,
-        }
-    }
-}
 
 pub struct CliApp {
     mode: CliMode,
     rl: Option<DefaultEditor>,
-    commands: HashMap<&'static str, Command>,
+    registry: CommandRegistry,
     state: CliState,
     theme: ColorfulTheme,
     store: LedgerStore,
@@ -144,10 +121,7 @@ impl CliApp {
     }
 
     pub fn new(mode: CliMode) -> Result<Self, CliError> {
-        let mut commands = HashMap::new();
-        for command in build_commands() {
-            commands.insert(command.name, command);
-        }
+        let registry = CommandRegistry::new(build_commands());
 
         let rl = match mode {
             CliMode::Interactive => Some(DefaultEditor::new()?),
@@ -159,7 +133,7 @@ impl CliApp {
         let mut app = Self {
             mode,
             rl,
-            commands,
+            registry,
             state: CliState::new(),
             theme: ColorfulTheme::default(),
             store,
@@ -344,8 +318,9 @@ impl CliApp {
         let args_vec: Vec<&str> = tokens.iter().skip(1).map(String::as_str).collect();
 
         let cmd = command_name.to_lowercase();
-        if let Some(command) = self.commands.get(cmd.as_str()) {
-            match (command.action)(self, &args_vec) {
+        if let Some(command) = self.registry.get(cmd.as_str()) {
+            let handler = command.handler;
+            match handler(self, &args_vec) {
                 Ok(()) => Ok(LoopControl::Continue),
                 Err(CommandError::ExitRequested) => Ok(LoopControl::Exit),
                 Err(err) => Err(err),
@@ -363,9 +338,9 @@ impl CliApp {
         ));
 
         let mut suggestions: Vec<_> = self
-            .commands
-            .keys()
-            .map(|key| (levenshtein(key, input), *key))
+            .registry
+            .names()
+            .map(|key| (levenshtein(key, input), key))
             .collect();
         suggestions.sort_by_key(|(distance, _)| *distance);
 
@@ -439,13 +414,13 @@ impl CliApp {
         self.state.set_active_simulation(None);
     }
 
-    fn command(&self, name: &str) -> Option<&Command> {
-        self.commands.get(name)
+    fn command(&self, name: &str) -> Option<&CommandDefinition> {
+        self.registry.get(name)
     }
 
     fn command_names(&self) -> Vec<&'static str> {
-        let mut names: Vec<_> = self.commands.keys().copied().collect();
-        names.sort();
+        let mut names: Vec<_> = self.registry.names().collect();
+        names.sort_unstable();
         names
     }
 
@@ -2051,138 +2026,138 @@ impl CliApp {
     }
 }
 
-fn build_commands() -> Vec<Command> {
+fn build_commands() -> Vec<CommandDefinition> {
     vec![
-        Command::new(
+        CommandDefinition::new(
             "help",
             "Show available commands",
             "help [command]",
             cmd_help,
         ),
-        Command::new(
+        CommandDefinition::new(
             "new-ledger",
             "Create a new ledger",
             "new-ledger [name] [period]",
             cmd_new_ledger,
         ),
-        Command::new("version", "Show build metadata", "version", cmd_version),
-        Command::new("load", "Load a ledger from JSON", "load [path]", cmd_load),
-        Command::new(
+        CommandDefinition::new("version", "Show build metadata", "version", cmd_version),
+        CommandDefinition::new("load", "Load a ledger from JSON", "load [path]", cmd_load),
+        CommandDefinition::new(
             "load-ledger",
             "Load a ledger by name from the persistence store",
             "load-ledger <name>",
             cmd_load_named,
         ),
-        Command::new("save", "Save current ledger", "save [path]", cmd_save),
-        Command::new(
+        CommandDefinition::new("save", "Save current ledger", "save [path]", cmd_save),
+        CommandDefinition::new(
             "config",
             "Configure currencies, locale, and valuation",
             "config [show|base-currency|locale|negative-style|screen-reader|high-contrast|valuation]",
             cmd_config,
         ),
-        Command::new(
+        CommandDefinition::new(
             "save-ledger",
             "Save current ledger by name in the persistence store",
             "save-ledger [name]",
             cmd_save_named,
         ),
-        Command::new(
+        CommandDefinition::new(
             "backup-ledger",
             "Create a snapshot of the current ledger",
             "backup-ledger [name]",
             cmd_backup_ledger,
         ),
-        Command::new(
+        CommandDefinition::new(
             "list-backups",
             "List available snapshots for the current ledger",
             "list-backups [name]",
             cmd_list_backups,
         ),
-        Command::new(
+        CommandDefinition::new(
             "restore-ledger",
             "Restore a ledger from a snapshot",
             "restore-ledger <backup_index|pattern> [name]",
             cmd_restore_ledger,
         ),
-        Command::new(
+        CommandDefinition::new(
             "add",
             "Add an account, category, or transaction",
             "add [account|category|transaction]",
             cmd_add,
         ),
-        Command::new(
+        CommandDefinition::new(
             "list",
             "List accounts, categories, or transactions",
             "list [accounts|categories|transactions]",
             cmd_list,
         ),
-        Command::new(
+        CommandDefinition::new(
             "summary",
             "Show ledger summary",
             "summary [simulation_name] [past|future <n>] | summary custom <start YYYY-MM-DD> <end YYYY-MM-DD>",
             cmd_summary,
         ),
-        Command::new(
+        CommandDefinition::new(
             "forecast",
             "Forecast recurring activity",
             "forecast [simulation_name] [<number> <unit> | custom <start YYYY-MM-DD> <end YYYY-MM-DD>]",
             cmd_forecast,
         ),
-        Command::new(
+        CommandDefinition::new(
             "list-simulations",
             "List saved simulations",
             "list-simulations",
             cmd_list_simulations,
         ),
-        Command::new(
+        CommandDefinition::new(
             "create-simulation",
             "Create a new named simulation",
             "create-simulation [name]",
             cmd_create_simulation,
         ),
-        Command::new(
+        CommandDefinition::new(
             "enter-simulation",
             "Activate a simulation for editing",
             "enter-simulation <name>",
             cmd_enter_simulation,
         ),
-        Command::new(
+        CommandDefinition::new(
             "leave-simulation",
             "Leave the active simulation",
             "leave-simulation",
             cmd_leave_simulation,
         ),
-        Command::new(
+        CommandDefinition::new(
             "apply-simulation",
             "Apply a simulation to the ledger",
             "apply-simulation <name>",
             cmd_apply_simulation,
         ),
-        Command::new(
+        CommandDefinition::new(
             "discard-simulation",
             "Discard a simulation permanently",
             "discard-simulation <name>",
             cmd_discard_simulation,
         ),
-        Command::new(
+        CommandDefinition::new(
             "simulation",
             "Manage pending simulation changes",
             "simulation <changes|add|modify|exclude> [simulation_name]",
             cmd_simulation,
         ),
-        Command::new(
+        CommandDefinition::new(
             "recurring",
             "Manage recurring schedules",
             "recurring [list|edit|clear|pause|resume|skip|sync] ...",
             cmd_recurring,
         ),
-        Command::new(
+        CommandDefinition::new(
             "complete",
             "Mark a transaction as completed",
             "complete <transaction_index> <YYYY-MM-DD> <amount>",
             cmd_complete,
         ),
-        Command::new("exit", "Exit the shell", "exit", cmd_exit),
+        CommandDefinition::new("exit", "Exit the shell", "exit", cmd_exit),
     ]
 }
 
