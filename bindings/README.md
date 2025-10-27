@@ -16,3 +16,7 @@ Language-specific wrappers (Swift, Kotlin, C#) will live in subdirectories here 
 - Version checks using `ffi_core_version` / `ffi_version`.
 
 For now this directory only tracks documentation; CI will upload the generated headers and libraries as build artifacts.
+
+### Integration Tests
+
+The repository includes `tests/ffi_integration.rs`, which loads the compiled shared library via `libloading` and exercises the exported lifecycle functions. This provides a template for language-specific stubs—Swift, Kotlin, or C# can mirror the sequence (version check, create, snapshot, save/load, error handling) to verify their bindings.

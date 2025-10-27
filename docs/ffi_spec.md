@@ -134,6 +134,11 @@ Running `cargo build --features ffi` now produces:
 
 Artifacts are staged under `target/ffi/` so they can be packaged or uploaded by CI. Language-specific modules (Swift package, Kotlin/JNI wrapper, C# P/Invoke) will live under `bindings/` in later steps.
 
+## Automated Validation
+
+- `cargo test --features ffi` runs both the internal unit tests (`ffi_runtime_tests`) and a dynamic loading integration test (`tests/ffi_integration.rs`). The latter loads the compiled shared library via `libloading`, exercises the exported functions (`ffi_ledger_*`, error helpers), and confirms round-trip persistence works when invoked through the ABI—mimicking a foreign language client.
+- Future Swift/Kotlin/C# harnesses should follow the same steps: query versions, create/load/save a ledger, inspect JSON snapshots, and validate error handling via `ffi_last_error_*`.
+
 ## Next Steps
 
 1. Implement the `ffi` Rust module behind the `ffi` Cargo feature, providing the constants, type definitions, and function stubs described here.

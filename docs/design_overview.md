@@ -176,6 +176,7 @@ Script mode is deterministic: prompts are disabled, so each command must provide
 - **Versioning**: bindings must check both version strings at initialization to ensure compatibility. FFI version bumps only occur when the ABI changes, while core version bumps follow business logic changes.
 - **Error handling**: every exported function returns an integer code (see `FfiErrorCategory`). Bindings map these into their native Result/Exception mechanisms.
 - **Thread safety**: handles will wrap `Arc<Mutex<_>>` so that GUI threads can call into the core concurrently without data races.
+- **Integration testing**: `cargo test --features ffi` now runs dynamic-loading tests (`tests/ffi_integration.rs`) that mimic a foreign client by invoking the compiled shared library through `libloading`. Future language bindings should provide equivalent harnesses.
 
 A detailed API blueprint, memory-ownership rules, and serialization expectations live in `docs/ffi_spec.md`. Later implementation steps (Phase 9.2+) will flesh out the actual exported functions, generate language-specific bindings, and wire CI to publish the resulting artifacts.
 
