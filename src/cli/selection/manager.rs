@@ -2,6 +2,12 @@ use crate::cli::output::{info, warning};
 use crate::cli::selectors::{SelectionItem, SelectionOutcome, SelectionProvider};
 use dialoguer::{theme::ColorfulTheme, Select};
 
+#[derive(Debug)]
+pub enum SelectionError<E> {
+    Provider(E),
+    Interaction(dialoguer::Error),
+}
+
 pub struct SelectionManager<'a, P: SelectionProvider> {
     provider: P,
     theme: &'a ColorfulTheme,
@@ -11,14 +17,16 @@ impl<'a, P> SelectionManager<'a, P>
 where
     P: SelectionProvider,
     P::Id: Clone,
-    P::Error: From<dialoguer::Error>,
 {
     pub fn new(provider: P, theme: &'a ColorfulTheme) -> Self {
         Self { provider, theme }
     }
 
-    pub fn choose(mut self, prompt: &str) -> Result<SelectionOutcome<P::Id>, P::Error> {
-        let items = self.provider.items()?;
+    pub fn choose(
+        mut self,
+        prompt: &str,
+    ) -> Result<SelectionOutcome<P::Id>, SelectionError<P::Error>> {
+        let items = self.provider.items().map_err(SelectionError::Provider)?;
         if items.is_empty() {
             warning("No items available.");
             return Ok(SelectionOutcome::Cancelled);
@@ -31,7 +39,7 @@ where
             .items(&labels)
             .default(0)
             .interact_opt()
-            .map_err(P::Error::from)?;
+            .map_err(SelectionError::Interaction)?;
 
         if let Some(index) = selection {
             Ok(SelectionOutcome::Selected(items[index].id.clone()))
