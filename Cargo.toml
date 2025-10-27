@@ -23,6 +23,12 @@ strsim = "0.11"
 shell-words = "1.1"
 dirs = "5.0"
 
+[build-dependencies]
+cbindgen = "0.26"
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
 [dev-dependencies]
 assert_fs = "1.1"
 tempfile = "3.8"
