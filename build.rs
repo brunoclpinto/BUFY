@@ -54,7 +54,13 @@ fn git_dirty_suffix() -> String {
                 None
             }
         })
-        .map(|s| if s.trim().is_empty() { "clean" } else { "dirty" })
+        .map(|s| {
+            if s.trim().is_empty() {
+                "clean"
+            } else {
+                "dirty"
+            }
+        })
         .unwrap_or("unknown")
         .to_string()
 }

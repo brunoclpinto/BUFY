@@ -136,7 +136,6 @@ Persisted ledgers are deterministic, pretty-printed JSON documents. Every save i
 | `categories` | Array of `Category` | Each entry includes `id`, `name`, `kind`, optional `parent_id`. |
 | `transactions` | Array of `Transaction` | Fields include `id`, `from_account`, `to_account`, `category_id?`, `scheduled_date`, `actual_date?`, `budgeted_amount`, `actual_amount?`, `currency?`, `status`, `recurrence?`, `recurrence_series_id?`. |
 | `simulations` | Array of `Simulation` | Contains metadata (`status`, timestamps) and a list of `SimulationChange` deltas. |
-| `fx_book` | Object with `{ tolerance: { days }, rates: { "<from,to>": { "YYYY-MM-DD": FxRate } } }` | Stored with automatic inversion so that the original rate orientation is preserved. |
 | `created_at` / `updated_at` | RFC3339 timestamps | Always recorded in UTC. |
 | `schema_version` | Integer | Used by migrations to determine upgrade steps. |
 
@@ -158,7 +157,7 @@ The `Transaction.recurrence` object mirrors the in-memory type:
 }
 ```
 
-Unknown keys are preserved during round-trips so future schema versions can add fields without breaking older binaries. When `Ledger::migrate_from_schema` encounters missing values it initializes them with sensible defaults (e.g., populating `base_currency`, `locale`, or `fx_book` for legacy files).
+Unknown keys are preserved during round-trips so future schema versions can add fields without breaking older binaries. When `Ledger::migrate_from_schema` encounters missing values it initializes them with sensible defaults (e.g., populating `base_currency` or `locale` for legacy files).
 
 ### Data Lifecycle & Decision Rationale
 
@@ -178,24 +177,20 @@ Key decisions:
 - **Backups-per-save** – providing a rolling history removes the need for a separate “snapshot” command before risky operations and makes restore flows trivial.
 - **CLI-first UX** – building the feature set inside the CLI keeps the surface area small while making sure every workflow (interactive or automated) can exercise the same APIs.
 
-### Currency, FX, and Localization (Phase 8)
+### Currency & Localization (Phase 8)
 
 - **Configuration model**:
   - `CurrencyCode` and `FormatOptions` live on the ledger, while accounts/transactions store optional overrides so original units are preserved in JSON.
   - `LocaleConfig` drives number/date formatting plus the first weekday, keeping summaries aligned with local budgeting norms.
-  - `ValuationPolicy` (transaction date, report date, or explicit custom date) is evaluated through a `ConversionContext` passed to every aggregate.
-- **FX pipeline**:
-  - `FxBook` holds dated `FxRate` entries and a tolerance window; lookups fall back to the nearest prior rate within tolerance and error otherwise.
-  - Rates are always resolved relative to the base currency (with automatic inversion) to avoid long conversion chains; disclosures report the rate date/source.
+  - `ValuationPolicy` (transaction date, report date, or explicit custom date) is evaluated through a `ConversionContext` passed to every aggregate. With FX disabled, the policy only influences disclosure messaging.
 - **Aggregation & disclosure**:
-  - `Ledger::convert_amount` returns a `ConvertedAmount` used in budgeting, forecasting, and simulation overlays. Every conversion invites a disclosure entry (policy + rate provenance) stored on `BudgetSummary`.
-  - Summaries propagate these disclosures to the CLI, ensuring every reported number can explain “source currency, rate, date, policy, rounding”.
+  - `Ledger::convert_amount` now assumes ledger and transaction currencies match; mismatches raise `LedgerError::InvalidInput` so consumers can handle the failure explicitly.
+  - Successful conversions still emit parity disclosures (“base currency parity”) so reports remain auditable.
 - **Localization & accessibility**:
   - `format_currency_value` honors locale separators, currency style, and negative-style preferences while screen-reader mode replaces ambiguous symbols with readable phrases.
-- High-contrast mode disables ANSI color usage; warning prefixes automatically switch from emoji to text when assistive modes are enabled.
+  - High-contrast mode disables ANSI color usage; warning prefixes automatically switch from emoji to text when assistive modes are enabled.
 - **CLI controls**:
   - `config base-currency|locale|negative-style|screen-reader|high-contrast|valuation` persists preferences.
-  - `fx list|add|remove|tolerance` manages the offline FX store.
   - Transaction listings, summaries, forecasts, and simulations consume these settings automatically.
 
 ### Testing & Quality Infrastructure
@@ -205,7 +200,7 @@ Key decisions:
 - **Fault injection** – `tests/persistence_suite.rs::atomic_save_failure_preserves_original_file` validates that atomic saves never corrupt the primary ledger when temp-file creation fails; additional recovery scenarios are slated for future expansion.
 - **FFI regression** – `tests/ffi_integration.rs` dynamically loads the shared library, exercises thread-safe snapshotting, and verifies error propagation for invalid inputs.
 - **Benchmarks** – `cargo bench` (Criterion) covers load/save, summary generation, and forecasting. Results are documented in `docs/performance.md`, and each run emits HTML reports under `target/criterion`.
-- **Coverage policy** – new features are expected to land with tests that prove happy-path behavior plus relevant edge cases. Stress and benchmark suites should be extended when features affect performance-sensitive paths (recurrence, persistence, FX). See `docs/testing_strategy.md` for the current suite inventory and future reliability targets.
+- **Coverage policy** – new features are expected to land with tests that prove happy-path behavior plus relevant edge cases. Stress and benchmark suites should be extended when features affect performance-sensitive paths (recurrence, persistence, currency handling). See `docs/testing_strategy.md` for the current suite inventory and future reliability targets.
 
 ### CLI Usage: Interactive vs. Script
 
@@ -222,7 +217,7 @@ Script mode is deterministic: prompts are disabled, so each command must provide
 ### FFI Bridge (Phase 9)
 
 - **Goal**: expose the same ledger API to Swift, Kotlin, and C# via a stable C ABI. Rust remains the single source of truth; bindings only marshal data.
-- **Module structure**: the `ffi` feature (see `src/ffi/mod.rs`) hosts version identifiers (`CORE_VERSION`, `FFI_VERSION`), error categories, and forthcoming opaque handles (`LedgerHandle`, `ResultHandle`). The full API groups (ledger, accounts, transactions, reports, simulations, settings, FX) are described in `docs/ffi_spec.md`.
+- **Module structure**: the `ffi` feature (see `src/ffi/mod.rs`) hosts version identifiers (`CORE_VERSION`, `FFI_VERSION`), error categories, and forthcoming opaque handles (`LedgerHandle`, `ResultHandle`). The full API groups (ledger, accounts, transactions, reports, simulations, settings) are described in `docs/ffi_spec.md`.
 - **Versioning**: bindings must check both version strings at initialization to ensure compatibility. FFI version bumps only occur when the ABI changes, while core version bumps follow business logic changes.
 - **Error handling**: every exported function returns an integer code (see `FfiErrorCategory`). Bindings map these into their native Result/Exception mechanisms.
 - **Thread safety**: handles will wrap `Arc<Mutex<_>>` so that GUI threads can call into the core concurrently without data races.

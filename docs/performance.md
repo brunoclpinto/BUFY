@@ -26,7 +26,7 @@ Each benchmark records the elapsed time for the core computation only (file-syst
 
 ## Extending the Suite
 
-- Add additional functions to the `criterion_group!` in `benches/performance.rs` for simulations, FX conversions, or recurrence expansion.
+- Add additional functions to the `criterion_group!` in `benches/performance.rs` for simulations or recurrence expansion.
 - Use `criterion::BenchmarkGroup` to compare multiple ledger sizes (e.g., 1k vs 10k vs 50k transactions).
 - Capture baseline results and store them in release notes as part of the certification report.
 

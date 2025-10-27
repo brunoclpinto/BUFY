@@ -35,7 +35,7 @@ Use this template when drafting the v1.0 announcement and future releases. Repla
 
 ### 🌐 Integrations
 - Swift/Kotlin/C# bindings: [Supported versions, notable updates, link to integration guides]
-- FX rate updates or localization changes: [Details]
+- Localization changes: [Details]
 
 ### 📦 Artifacts
 - CLI binaries:

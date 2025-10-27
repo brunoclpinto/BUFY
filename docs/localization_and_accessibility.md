@@ -11,7 +11,7 @@ This guide captures the conventions used by Budget Core to present numbers, date
 | Negative style | `config negative-style <sign|parentheses>` | Controls how negative values are displayed (e.g., `-123.00` vs. `(123.00)`). |
 | Screen reader mode | `config screen-reader <on|off>` | Emits explicit wording (“minus 123 US dollars”) instead of symbols, and simplifies table layout for narration. |
 | High contrast mode | `config high-contrast <on|off>` | Disables ANSI colour/emoji usage so output remains legible on monochrome displays or terminals with limited palettes. |
-| Valuation policy | `config valuation <transaction|report|custom YYYY-MM-DD>` | Chooses the FX conversion date used for aggregates; disclosed in every summary footer. |
+| Valuation policy | `config valuation <transaction|report|custom YYYY-MM-DD>` | Controls the disclosure reference date; conversions must be handled manually if currencies differ. |
 
 All settings persist with the ledger JSON so users can customise per-ledger defaults. CLI commands accept overrides (for example, `forecast 90 days --screen-reader`) when temporary changes are required.
 
@@ -21,7 +21,7 @@ All settings persist with the ledger JSON so users can customise per-ledger defa
 2. **Grouping & decimal separators** – Derived from `LocaleConfig`. For unknown locales the CLI applies default separators (`.` decimal, `,` grouping) and prints a warning.
 3. **Date styles** – The locale determines the short date pattern shown in summaries (`YYYY-MM-DD` vs. `DD/MM/YYYY`). CLI output always includes four-digit years to avoid ambiguity.
 4. **Week anchors** – `LocaleConfig.first_weekday` informs weekly budget windows so totals align with the user’s cultural expectations.
-5. **Disclosures** – Budget summaries and forecasts include a footer listing: valuation policy, FX rate source/date, and any tolerance fallback that was invoked. This guarantees every total can be audited.
+5. **Disclosures** – Budget summaries and forecasts include a footer listing the active valuation policy (transaction/report/custom date) so readers understand the reporting context. FX rates are no longer stored or applied automatically.
 
 ## Screen Reader Conventions
 
@@ -51,13 +51,13 @@ Guidelines:
 ## Fallback Behaviour & Error Messages
 
 - **Unsupported locale tag** – The CLI logs `Locale 'xx-YY' is not registered; using default separators.` and continues with the default `LocaleConfig`.
-- **Unknown currency** – FX lookups surface `Missing FX rate for {code}`. Users can add manual rates (`fx add`) or change valuation policy.
+- **Unknown currency** – When a transaction currency differs from the ledger base, summaries mark the entry as incomplete. Convert the amount manually or align the account with the base currency.
 - **Screen reader disabled in script mode** – Script mode never auto-enables screen reader mode; tests must set it explicitly to keep outputs deterministic.
 - **High contrast request on terminals without ANSI support** – If ANSI detection fails, the CLI already emits plain text; enabling high contrast simply suppresses any remaining colour hints.
 
 ## Testing Accessibility Paths
 
-- `tests/currency_tests.rs` validates formatting options and FX tolerance.
+- `tests/currency_tests.rs` validates formatting options (decimal/grouping separators, negative styles).
 - `tests/cli_script.rs` exercises script-mode commands; extend it with new accessibility scenarios to ensure output remains deterministic.
 - Manual verification: `config screen-reader on`, run `summary`, `forecast 30 days`, and `recurring list`. Confirm narration order and wording match expectations.
 

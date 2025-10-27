@@ -26,7 +26,7 @@ Data exchange strategy:
 
 - CRUD inputs (accounts, transactions, categories) use JSON strings to avoid large struct surfaces. The format mirrors the persisted ledger schema.
 - Summaries, forecasts, simulations, configuration snapshots are also returned as JSON payloads.
-- Lightweight structs (FX tolerance, currency codes, locale settings) are exposed via dedicated POD structs when convenient.
+- Lightweight structs (currency codes, locale settings) are exposed via dedicated POD structs when convenient.
 
 ## Error Model
 
@@ -36,7 +36,7 @@ All functions return an `ffi_status` integer. Zero denotes success. Non-zero cod
 | --- | --- | --- |
 | `1` | Validation | Unknown account/category, bad arguments, missing fields. |
 | `2` | Persistence | IO errors, serialization failures. |
-| `3` | Currency | Missing FX rates, unsupported currency codes. |
+| `3` | Currency | Unsupported currency codes or attempts to mix currencies without manual conversion. |
 | `4` | Simulation | Invalid simulation references, non-editable simulation modifications. |
 | `5` | Internal | Unexpected panics caught at the boundary. |
 
@@ -86,11 +86,9 @@ Helper APIs already implemented:
 - `ffi_persistence_save_named(handle, name)` / `ffi_persistence_load_named(name, out_handle)`.
 - `ffi_backup_create(list, restore)` – wrappers around the existing store features.
 
-### Settings (Currency, Locale, FX)
--
-- `ffi_settings_get(handle, out_json)` – returns currency, locale, formatting opts, valuation policy, FX tolerance.
+### Settings (Currency & Locale)
+- `ffi_settings_get(handle, out_json)` – returns currency, locale, formatting opts, and valuation policy.
 - `ffi_settings_update(handle, settings_json)` – apply new settings.
-- `ffi_fx_add(handle, rate_json)` / `ffi_fx_remove(handle, from, to, date)` / `ffi_fx_list(handle, out_json)` / `ffi_fx_tolerance(handle, days)`.
 
 ## Thread Safety
 
@@ -108,8 +106,7 @@ Helper APIs already implemented:
   "base_currency": "USD",
   "locale": { "language_tag": "en-US", "decimal_separator": ".", ... },
   "format": { "currency_display": "symbol", "negative_style": "sign", ... },
-  "valuation_policy": { "kind": "transaction_date" },
-  "fx_tolerance_days": 5
+  "valuation_policy": { "kind": "transaction_date" }
 }
 ```
 
