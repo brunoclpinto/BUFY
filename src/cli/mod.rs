@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use crate::{
     currency::{
-        format_currency_value, format_date, CurrencyCode, DateFormatStyle, FxRate, LocaleConfig,
+        format_currency_value, format_date, CurrencyCode, DateFormatStyle, LocaleConfig,
         NegativeStyle, ValuationPolicy,
     },
     errors::LedgerError,
@@ -278,7 +278,6 @@ impl CliApp {
             }
         );
         println!("Valuation policy: {:?}", ledger.valuation_policy);
-        println!("FX tolerance: {} days", ledger.fx_book.tolerance.days);
         Ok(())
     }
 
@@ -2124,12 +2123,6 @@ fn build_commands() -> Vec<Command> {
             cmd_config,
         ),
         Command::new(
-            "fx",
-            "Manage FX rates",
-            "fx <list|add|remove|tolerance> ...",
-            cmd_fx,
-        ),
-        Command::new(
             "save-ledger",
             "Save current ledger by name in the persistence store",
             "save-ledger [name]",
@@ -2344,91 +2337,6 @@ fn cmd_save(app: &mut CliApp, args: &[&str]) -> CommandResult {
         }
     } else {
         Err(CommandError::InvalidArguments("usage: save <path>".into()))
-    }
-}
-
-fn cmd_fx(app: &mut CliApp, args: &[&str]) -> CommandResult {
-    if args.is_empty() {
-        return Err(CommandError::InvalidArguments(
-            "usage: fx <list|add|remove|tolerance> ...".into(),
-        ));
-    }
-    match args[0].to_lowercase().as_str() {
-        "list" => {
-            let ledger = app.current_ledger()?;
-            let rates = ledger.fx_book.all_rates();
-            if rates.is_empty() {
-                println!("{}", "No FX rates configured.".bright_black());
-            } else {
-                println!("{}", "FX rates:".bright_white().bold());
-                for rate in rates {
-                    println!(
-                        "  {} → {} on {} = {:.6} ({})",
-                        rate.from.as_str(),
-                        rate.to.as_str(),
-                        rate.date,
-                        rate.rate,
-                        rate.source.unwrap_or_else(|| "manual".into())
-                    );
-                }
-            }
-            Ok(())
-        }
-        "add" => {
-            if args.len() < 5 {
-                return Err(CommandError::InvalidArguments(
-                    "usage: fx add <from> <to> <YYYY-MM-DD> <rate> [source]".into(),
-                ));
-            }
-            let from = CurrencyCode::new(args[1]);
-            let to = CurrencyCode::new(args[2]);
-            let date = NaiveDate::parse_from_str(args[3], "%Y-%m-%d")
-                .map_err(|_| CommandError::InvalidArguments("invalid date".into()))?;
-            let rate: f64 = args[4]
-                .parse()
-                .map_err(|_| CommandError::InvalidArguments("invalid rate".into()))?;
-            let source = args.get(5).map(|s| s.to_string());
-            let ledger = app.current_ledger_mut()?;
-            ledger.fx_book.add_rate(FxRate {
-                from,
-                to,
-                date,
-                rate,
-                source,
-                notes: None,
-            });
-            println!("{}", "FX rate added".bright_green());
-            Ok(())
-        }
-        "remove" => {
-            if args.len() < 4 {
-                return Err(CommandError::InvalidArguments(
-                    "usage: fx remove <from> <to> <YYYY-MM-DD>".into(),
-                ));
-            }
-            let from = args[1];
-            let to = args[2];
-            let date = NaiveDate::parse_from_str(args[3], "%Y-%m-%d")
-                .map_err(|_| CommandError::InvalidArguments("invalid date".into()))?;
-            let ledger = app.current_ledger_mut()?;
-            ledger.fx_book.remove_rate(from, to, date);
-            println!("{}", "FX rate removed".bright_green());
-            Ok(())
-        }
-        "tolerance" => {
-            let days = args
-                .get(1)
-                .ok_or_else(|| CommandError::InvalidArguments("usage: fx tolerance <days>".into()))?
-                .parse::<i64>()
-                .map_err(|_| CommandError::InvalidArguments("invalid number".into()))?;
-            let ledger = app.current_ledger_mut()?;
-            ledger.fx_book.tolerance.days = days;
-            println!("{}", "FX tolerance updated".bright_green());
-            Ok(())
-        }
-        _ => Err(CommandError::InvalidArguments(
-            "usage: fx <list|add|remove|tolerance> ...".into(),
-        )),
     }
 }
 

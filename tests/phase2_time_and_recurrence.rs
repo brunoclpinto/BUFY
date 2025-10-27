@@ -197,10 +197,7 @@ fn test_materialize_and_forecast_flow() {
 fn materialize_handles_backlog_across_multiple_periods() {
     let mut ledger = Ledger::new("Backlog", BudgetPeriod::default());
     let from = ledger.add_account(Account::new("Operating", AccountKind::Bank));
-    let to = ledger.add_account(Account::new(
-        "Rent",
-        AccountKind::ExpenseDestination,
-    ));
+    let to = ledger.add_account(Account::new("Rent", AccountKind::ExpenseDestination));
 
     let start = NaiveDate::from_ymd_opt(2025, 1, 1).unwrap();
     let mut template = Transaction::new(from, to, None, start, 1500.0);
@@ -233,10 +230,8 @@ fn materialize_handles_backlog_across_multiple_periods() {
     ]
     .into_iter()
     .collect();
-    let actual_dates: std::collections::BTreeSet<_> = generated
-        .iter()
-        .map(|txn| txn.scheduled_date)
-        .collect();
+    let actual_dates: std::collections::BTreeSet<_> =
+        generated.iter().map(|txn| txn.scheduled_date).collect();
     assert_eq!(actual_dates, expected_dates);
 
     let template = ledger

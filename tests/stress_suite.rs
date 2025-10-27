@@ -47,17 +47,15 @@ fn seed_ledger() -> Ledger {
     ledger.add_transaction(rent);
 
     // Weekly groceries recurrence.
-    let mut groceries_txn =
-        Transaction::new(checking, grocer, Some(groceries), start, 200.0);
-    groceries_txn
-        .set_recurrence(Some(budget_core::ledger::transaction::Recurrence::new(
-            start,
-            TimeInterval {
-                every: 1,
-                unit: TimeUnit::Week,
-            },
-            budget_core::ledger::transaction::RecurrenceMode::FixedSchedule,
-        )));
+    let mut groceries_txn = Transaction::new(checking, grocer, Some(groceries), start, 200.0);
+    groceries_txn.set_recurrence(Some(budget_core::ledger::transaction::Recurrence::new(
+        start,
+        TimeInterval {
+            every: 1,
+            unit: TimeUnit::Week,
+        },
+        budget_core::ledger::transaction::RecurrenceMode::FixedSchedule,
+    )));
     ledger.add_transaction(groceries_txn);
 
     // Salary income transactions for three months.
@@ -67,8 +65,7 @@ fn seed_ledger() -> Ledger {
             unit: TimeUnit::Month,
         }
         .add_to(start, month);
-        let mut paycheck =
-            Transaction::new(employer, checking, Some(income), payday, -4000.0);
+        let mut paycheck = Transaction::new(employer, checking, Some(income), payday, -4000.0);
         paycheck.actual_amount = Some(-4000.0);
         paycheck.actual_date = Some(payday);
         ledger.add_transaction(paycheck);
@@ -137,8 +134,7 @@ fn stress_repeated_save_load_and_forecast_cycles() {
         if let Ok(impact) = ledger.summarize_simulation_current("Scenario") {
             assert_eq!(impact.simulation_name, "Scenario");
             assert!(
-                impact.simulated.totals.budgeted
-                    >= impact.base.totals.budgeted - 200.0,
+                impact.simulated.totals.budgeted >= impact.base.totals.budgeted - 200.0,
                 "simulation budget should not drift unexpectedly"
             );
         }

@@ -122,14 +122,10 @@ fn dynamic_load_and_round_trip() {
 fn ffi_parallel_snapshots_are_thread_safe() {
     let lib = unsafe { Library::new(lib_path()) }.expect("load budget_core cdylib");
 
-    let ffi_create: Symbol<FfiCreateFn> =
-        unsafe { lib.get(b"ffi_ledger_create").unwrap() };
-    let ffi_snapshot: Symbol<FfiSnapshotFn> =
-        unsafe { lib.get(b"ffi_ledger_snapshot").unwrap() };
-    let ffi_free: Symbol<FfiFreeFn> =
-        unsafe { lib.get(b"ffi_ledger_free").unwrap() };
-    let ffi_string_free: Symbol<FfiStringFreeFn> =
-        unsafe { lib.get(b"ffi_string_free").unwrap() };
+    let ffi_create: Symbol<FfiCreateFn> = unsafe { lib.get(b"ffi_ledger_create").unwrap() };
+    let ffi_snapshot: Symbol<FfiSnapshotFn> = unsafe { lib.get(b"ffi_ledger_snapshot").unwrap() };
+    let ffi_free: Symbol<FfiFreeFn> = unsafe { lib.get(b"ffi_ledger_free").unwrap() };
+    let ffi_string_free: Symbol<FfiStringFreeFn> = unsafe { lib.get(b"ffi_string_free").unwrap() };
 
     let create_fn: FfiCreateFn = *ffi_create;
     let snapshot_fn: FfiSnapshotFn = *ffi_snapshot;

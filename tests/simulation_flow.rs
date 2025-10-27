@@ -83,10 +83,7 @@ fn simulation_exclusion_updates_budget_impact() {
         }),
     );
     let from = ledger.add_account(Account::new("Checking", AccountKind::Bank));
-    let to = ledger.add_account(Account::new(
-        "Housing",
-        AccountKind::ExpenseDestination,
-    ));
+    let to = ledger.add_account(Account::new("Housing", AccountKind::ExpenseDestination));
     let housing_category = ledger.add_category(budget_core::ledger::Category::new(
         "Housing",
         CategoryKind::Expense,

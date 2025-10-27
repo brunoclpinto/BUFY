@@ -16,8 +16,7 @@ use super::{
 };
 use crate::{
     currency::{
-        policy_date, ConvertedAmount, CurrencyCode, FormatOptions, FxBook, LocaleConfig,
-        ValuationPolicy,
+        policy_date, ConvertedAmount, CurrencyCode, FormatOptions, LocaleConfig, ValuationPolicy,
     },
     errors::LedgerError,
 };
@@ -274,8 +273,6 @@ pub struct Ledger {
     pub updated_at: DateTime<Utc>,
     #[serde(default = "Ledger::schema_version_default")]
     pub schema_version: u8,
-    #[serde(default)]
-    pub fx_book: FxBook,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -314,7 +311,6 @@ impl Ledger {
             created_at: now,
             updated_at: now,
             schema_version: CURRENT_SCHEMA_VERSION,
-            fx_book: FxBook::default(),
         }
     }
 
@@ -356,23 +352,16 @@ impl Ledger {
                 amount,
                 rate_used: 1.0,
                 rate_date: ctx.effective_date(txn_date),
-                source: "parity".into(),
+                source: "base currency parity".into(),
                 from: from.clone(),
                 to: target.clone(),
             });
         }
-        let effective_date = ctx.effective_date(txn_date);
-        let lookup = self
-            .fx_book
-            .lookup_rate(from.as_str(), target.as_str(), effective_date)?;
-        Ok(ConvertedAmount {
-            amount: amount * lookup.rate,
-            rate_used: lookup.rate,
-            rate_date: lookup.date,
-            source: lookup.source,
-            from: from.clone(),
-            to: target.clone(),
-        })
+        Err(LedgerError::InvalidInput(format!(
+            "cannot convert from {} to {}: FX rates are disabled",
+            from.as_str(),
+            target.as_str()
+        )))
     }
 
     pub fn add_account(&mut self, account: Account) -> Uuid {
@@ -450,7 +439,6 @@ impl Ledger {
             }
             self.format = FormatOptions::default();
             self.valuation_policy = ValuationPolicy::TransactionDate;
-            self.fx_book = FxBook::default();
             notes.push("initialized currency/localization defaults for schema v4".into());
         }
         self.schema_version = CURRENT_SCHEMA_VERSION;
