@@ -105,6 +105,14 @@ Every save produces pretty JSON for human inspection, and backups are pruned acc
 - **Locale & formatting** – `config locale <tag>` adjusts decimal/grouping separators, date formats, and the first weekday; `config negative-style`, `config screen-reader`, and `config high-contrast` tune CLI output for accessibility.
 - **Disclosures** – Budget summaries and forecasts include a disclosure footer listing valuation policy, FX sources, and fallback usage so reports stay auditable.
 
+### Accessibility & Internationalization
+
+- **Screen reader mode** (`config screen-reader on`) replaces ambiguous glyphs with explicit words (for example, `-` becomes “minus”) and ensures tables are narratable top-to-bottom. Disable again with `config screen-reader off`.
+- **High-contrast mode** (`config high-contrast on`) removes ANSI color and emoji reliance so totals remain legible in monochrome terminals. It is safe to enable alongside screen reader mode.
+- **Locale fallbacks** – When an unsupported `language_tag` is provided, the CLI keeps the requested tag but emits a warning while reverting to default separators. Adjust the decimal or grouping character manually with `config locale`.
+- **Date formatting** – Locale changes also update the first weekday so weekly/monthly summaries align with regional expectations. Use `config locale en-GB` (Monday week start) vs. `en-US` (Sunday).
+- See `docs/localization_and_accessibility.md` for deeper guidance on translation, formatting rules, and output conventions.
+
 ## Development Conventions
 
 - Crate edition: Rust 2021.
@@ -114,8 +122,20 @@ Every save produces pretty JSON for human inspection, and backups are pruned acc
 ## Testing & CI
 
 - `cargo test` exercises unit, integration, CLI-script, currency/FX, and persistence suites.
+- `cargo test --features ffi` repeats the suite against the shared library to ensure ABI stability.
 - `cargo nextest run` and `cargo clippy --all-targets -- -D warnings` keep execution fast in CI.
 - CLI scenarios in `tests/cli_script.rs` demonstrate script mode pipelines; `tests/persistence_suite.rs` guards backup/restore flows.
+- `cargo test --test stress_suite` runs the soak test that iterates through recurrence materialization, simulations, forecasts, and save/load cycles.
+- `cargo bench` runs Criterion benchmarks (see `docs/performance.md`) for load/save, summary, and forecast workloads. Generated reports live under `target/criterion`.
+
+## Troubleshooting
+
+- **Missing FX rates** – Use `fx list` to confirm coverage. When the requested date is missing, import the nearest rate (`fx add EUR USD 2025-01-10 1.1 ECB`) or adjust tolerance (`fx tolerance 7`).
+- **Schema migrations** – After upgrading, run `load-ledger <name>`; migration notes are echoed in the CLI. If a load fails, restore from `list-backups` and inspect the JSON diff.
+- **Atomic save failures** – Errors mentioning temp files indicate filesystem permissions or disk space issues. Verify write access to `~/.budget_core` (or set `BUDGET_CORE_HOME`) and rerun `save-ledger`.
+- **Recurrence drift** – Run `recurring sync <YYYY-MM-DD>` to backfill overdue instances before generating forecasts. The command emits a summary of newly materialized transactions.
+- **Accessibility output** – If screen readers skip totals, ensure `config screen-reader on` is set; the CLI will re-render with explicit wording.
+- Additional developer-focused notes, schema references, and integration steps for Swift/Kotlin/C# live in `docs/design_overview.md` and `docs/integration_guides.md`.
 
 ## License
 
