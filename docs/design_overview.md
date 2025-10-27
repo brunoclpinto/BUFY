@@ -119,6 +119,47 @@ Error handling:
 
 The combination of atomic writes, JSON readability, migration hooks, and CLI feedback ensures we can evolve the schema without breaking older ledgers or requiring manual interventions.
 
+### JSON Schema Reference
+
+Persisted ledgers are deterministic, pretty-printed JSON documents. Every save includes the following top-level structure:
+
+| Key | Type | Notes |
+| --- | --- | --- |
+| `id` | UUID string | Stable ledger identifier (never regenerated). |
+| `name` | String | Human-friendly ledger label. |
+| `budget_period` | Object `{ "every": u32, "unit": "Day\\|Week\\|Month\\|Year" }` | Drives reporting window calculations. |
+| `base_currency` | ISO 4217 code (string) | Reporting currency; defaults to `USD`. |
+| `locale` | Object `{ language_tag, decimal_separator, grouping_separator, date_format, first_weekday }` | Determines formatting defaults. |
+| `format` | Object `{ currency_display, negative_style, screen_reader_mode?, high_contrast_mode? }` | Optional; omitted when matches defaults. |
+| `valuation_policy` | Object `{ "kind": "transaction_date\\|report_date", "custom_date"?: "YYYY-MM-DD" }` | Policy name plus optional explicit date. |
+| `accounts` | Array of `Account` | Each entry contains `id`, `name`, `kind`, optional `category_id`, optional `currency`. |
+| `categories` | Array of `Category` | Each entry includes `id`, `name`, `kind`, optional `parent_id`. |
+| `transactions` | Array of `Transaction` | Fields include `id`, `from_account`, `to_account`, `category_id?`, `scheduled_date`, `actual_date?`, `budgeted_amount`, `actual_amount?`, `currency?`, `status`, `recurrence?`, `recurrence_series_id?`. |
+| `simulations` | Array of `Simulation` | Contains metadata (`status`, timestamps) and a list of `SimulationChange` deltas. |
+| `fx_book` | Object with `{ tolerance: { days }, rates: { "<from,to>": { "YYYY-MM-DD": FxRate } } }` | Stored with automatic inversion so that the original rate orientation is preserved. |
+| `created_at` / `updated_at` | RFC3339 timestamps | Always recorded in UTC. |
+| `schema_version` | Integer | Used by migrations to determine upgrade steps. |
+
+The `Transaction.recurrence` object mirrors the in-memory type:
+
+```json
+{
+  "series_id": "UUID",
+  "start_date": "2025-01-01",
+  "interval": { "every": 1, "unit": "Month" },
+  "mode": "FixedSchedule",
+  "end": { "type": "Never" },
+  "exceptions": ["2025-02-01"],
+  "status": "Active",
+  "last_generated": "2025-03-01",
+  "last_completed": "2025-03-01",
+  "generated_occurrences": 2,
+  "next_scheduled": "2025-04-01"
+}
+```
+
+Unknown keys are preserved during round-trips so future schema versions can add fields without breaking older binaries. When `Ledger::migrate_from_schema` encounters missing values it initializes them with sensible defaults (e.g., populating `base_currency`, `locale`, or `fx_book` for legacy files).
+
 ### Data Lifecycle & Decision Rationale
 
 | Stage | Description | Why it matters |
@@ -151,11 +192,20 @@ Key decisions:
   - Summaries propagate these disclosures to the CLI, ensuring every reported number can explain “source currency, rate, date, policy, rounding”.
 - **Localization & accessibility**:
   - `format_currency_value` honors locale separators, currency style, and negative-style preferences while screen-reader mode replaces ambiguous symbols with readable phrases.
-  - High-contrast mode disables ANSI color usage; warning prefixes automatically switch from emoji to text when assistive modes are enabled.
+- High-contrast mode disables ANSI color usage; warning prefixes automatically switch from emoji to text when assistive modes are enabled.
 - **CLI controls**:
   - `config base-currency|locale|negative-style|screen-reader|high-contrast|valuation` persists preferences.
   - `fx list|add|remove|tolerance` manages the offline FX store.
   - Transaction listings, summaries, forecasts, and simulations consume these settings automatically.
+
+### Testing & Quality Infrastructure
+
+- **Unit & integration tests** – `cargo test` executes suites covering budgeting math, recurrence scheduling, currency conversions, CLI script flows, persistence, simulations, and the FFI boundary. Tests are organized by concern (`tests/phase2_time_and_recurrence.rs`, `tests/currency_tests.rs`, etc.).
+- **Stress harness** – `tests/stress_suite.rs` simulates months of ledger activity, repeatedly running recurrence materialization, forecasts, simulations, and persistence save/load cycles to guard against drift and IO regressions.
+- **Fault injection** – `tests/persistence_suite.rs::atomic_save_failure_preserves_original_file` validates that atomic saves never corrupt the primary ledger when temp-file creation fails; additional recovery scenarios are slated for future expansion.
+- **FFI regression** – `tests/ffi_integration.rs` dynamically loads the shared library, exercises thread-safe snapshotting, and verifies error propagation for invalid inputs.
+- **Benchmarks** – `cargo bench` (Criterion) covers load/save, summary generation, and forecasting. Results are documented in `docs/performance.md`, and each run emits HTML reports under `target/criterion`.
+- **Coverage policy** – new features are expected to land with tests that prove happy-path behavior plus relevant edge cases. Stress and benchmark suites should be extended when features affect performance-sensitive paths (recurrence, persistence, FX). See `docs/testing_strategy.md` for the current suite inventory and future reliability targets.
 
 ### CLI Usage: Interactive vs. Script
 
@@ -178,7 +228,7 @@ Script mode is deterministic: prompts are disabled, so each command must provide
 - **Thread safety**: handles will wrap `Arc<Mutex<_>>` so that GUI threads can call into the core concurrently without data races.
 - **Integration testing**: `cargo test --features ffi` now runs dynamic-loading tests (`tests/ffi_integration.rs`) that mimic a foreign client by invoking the compiled shared library through `libloading`. Future language bindings should provide equivalent harnesses.
 
-A detailed API blueprint, memory-ownership rules, and serialization expectations live in `docs/ffi_spec.md`. Later implementation steps (Phase 9.2+) will flesh out the actual exported functions, generate language-specific bindings, and wire CI to publish the resulting artifacts.
+A detailed API blueprint, memory-ownership rules, and serialization expectations live in `docs/ffi_spec.md`, while platform-specific import guidance is captured in `docs/integration_guides.md`. Later implementation steps (Phase 9.2+) will flesh out the actual exported functions, generate language-specific bindings, and wire CI to publish the resulting artifacts.
 
 ### `errors`
 
@@ -199,3 +249,4 @@ CLI helpers map these into `CommandError`, allowing interactive sessions to prov
 5. Wire additional tooling (benchmarks, fuzzing) as the codebase
    deepens.
 6. Phase 9 follow-ups: implement the FFI modules per `docs/ffi_spec.md`, generate bindings, and expand cross-platform test coverage.
+7. Phase 11 performance tracking: maintain the Criterion harness (`benches/performance.rs`) and record benchmark results (see `docs/performance.md`).
