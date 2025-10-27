@@ -6,6 +6,8 @@
 pub mod cli;
 pub mod currency;
 pub mod errors;
+#[cfg(feature = "ffi")]
+pub mod ffi;
 pub mod ledger;
 pub mod simulation;
 pub mod utils;

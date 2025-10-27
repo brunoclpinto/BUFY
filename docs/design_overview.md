@@ -169,6 +169,16 @@ Key decisions:
 
 Script mode is deterministic: prompts are disabled, so each command must provide all required arguments. This keeps CI fixtures repeatable (see `tests/cli_script.rs`).
 
+### FFI Bridge (Phase 9)
+
+- **Goal**: expose the same ledger API to Swift, Kotlin, and C# via a stable C ABI. Rust remains the single source of truth; bindings only marshal data.
+- **Module structure**: the `ffi` feature (see `src/ffi/mod.rs`) hosts version identifiers (`CORE_VERSION`, `FFI_VERSION`), error categories, and forthcoming opaque handles (`LedgerHandle`, `ResultHandle`). The full API groups (ledger, accounts, transactions, reports, simulations, settings, FX) are described in `docs/ffi_spec.md`.
+- **Versioning**: bindings must check both version strings at initialization to ensure compatibility. FFI version bumps only occur when the ABI changes, while core version bumps follow business logic changes.
+- **Error handling**: every exported function returns an integer code (see `FfiErrorCategory`). Bindings map these into their native Result/Exception mechanisms.
+- **Thread safety**: handles will wrap `Arc<Mutex<_>>` so that GUI threads can call into the core concurrently without data races.
+
+A detailed API blueprint, memory-ownership rules, and serialization expectations live in `docs/ffi_spec.md`. Later implementation steps (Phase 9.2+) will flesh out the actual exported functions, generate language-specific bindings, and wire CI to publish the resulting artifacts.
+
 ### `errors`
 
 `LedgerError` is the single error enum exposed by domain/persistence APIs. Major variants:
@@ -187,3 +197,4 @@ CLI helpers map these into `CommandError`, allowing interactive sessions to prov
 4. Extend persistence with alternate backends (SQLite/cloud) once JSON parity is battle-tested.
 5. Wire additional tooling (benchmarks, fuzzing) as the codebase
    deepens.
+6. Phase 9 follow-ups: implement the FFI modules per `docs/ffi_spec.md`, generate bindings, and expand cross-platform test coverage.

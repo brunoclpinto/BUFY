@@ -4,6 +4,10 @@ version = "0.0.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
+[features]
+default = []
+ffi = []
+
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
