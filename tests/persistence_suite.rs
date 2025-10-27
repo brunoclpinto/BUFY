@@ -4,6 +4,8 @@ use budget_core::{
 };
 use chrono::NaiveDate;
 use serde_json;
+use std::fs;
+use std::path::Path;
 use tempfile::tempdir;
 
 fn sample_transaction(ledger: &mut Ledger, amount: f64) {
@@ -17,6 +19,66 @@ fn sample_transaction(ledger: &mut Ledger, amount: f64) {
         amount,
     );
     ledger.add_transaction(txn);
+}
+
+fn tmp_path_for(path: &Path) -> std::path::PathBuf {
+    let mut tmp = path.to_path_buf();
+    let ext = match path.extension().and_then(|ext| ext.to_str()) {
+        Some(existing) => format!("{}.tmp", existing),
+        None => String::from("tmp"),
+    };
+    tmp.set_extension(ext);
+    tmp
+}
+
+#[test]
+fn atomic_save_failure_preserves_original_file() {
+    let temp = tempdir().unwrap();
+    let store = LedgerStore::new(Some(temp.path().to_path_buf()), Some(2)).unwrap();
+
+    let mut ledger = Ledger::new("Reliable", BudgetPeriod::default());
+    sample_transaction(&mut ledger, 42.0);
+
+    let path = store
+        .save_named(&mut ledger, "reliable-ledger")
+        .expect("initial save");
+    let original = fs::read_to_string(&path).expect("read original file");
+
+    // Create directory that collides with the temp file name to force File::create to fail.
+    let tmp_path = tmp_path_for(&path);
+    fs::create_dir_all(&tmp_path).unwrap();
+
+    // Mutate ledger to ensure new JSON would differ if the save succeeded.
+    sample_transaction(&mut ledger, 99.0);
+    let result = store.save_to_path(&mut ledger, &path);
+    assert!(
+        result.is_err(),
+        "expected save_to_path to fail when temp path is a directory"
+    );
+
+    let current = fs::read_to_string(&path).expect("read after failure");
+    assert_eq!(
+        current, original,
+        "atomic save failure must not corrupt the original file"
+    );
+
+    let backups = store.list_backups("reliable-ledger").unwrap();
+    assert!(
+        !backups.is_empty(),
+        "backup should be created before attempting the write"
+    );
+    assert!(
+        backups.iter().any(|info| {
+            info.path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| name.ends_with(".json.bak"))
+                .unwrap_or(false)
+        }),
+        "backup filename should retain .json.bak suffix"
+    );
+
+    let _ = fs::remove_dir_all(&tmp_path);
 }
 
 #[test]
