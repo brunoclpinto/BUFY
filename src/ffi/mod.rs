@@ -24,6 +24,9 @@ use crate::{
 const CORE_VERSION_STR: &str = env!("CARGO_PKG_VERSION");
 const FFI_VERSION_STR: &str = "0.1.0";
 
+pub const CORE_VERSION: &str = CORE_VERSION_STR;
+pub const FFI_VERSION: &str = FFI_VERSION_STR;
+
 #[repr(i32)]
 #[derive(Debug, Clone, Copy)]
 pub enum FfiErrorCategory {

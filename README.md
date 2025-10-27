@@ -57,6 +57,7 @@ For architectural background see `docs/design_overview.md`.
 | Forecasting | `forecast [simulation] [<n> <unit> | custom <start> <end>]` | Produces future inflow/outflow projections plus window-specific budget summaries. |
 | Simulations | `create-simulation`, `enter-simulation`, `simulation add/modify/exclude`, `list-simulations`, `summary <simulation>`, `apply-simulation`, `discard-simulation` | Enables “what-if” comparisons against the base ledger. |
 | Summaries | `summary [past|future <n> | custom <start> <end>]` | Default view shows the active budget period; optional simulation overlay highlights deltas. |
+| Meta | `version` | Print build metadata (crate version, git hash, target, rustc, FFI version when available). |
 
 Use `BUDGET_CORE_HOME=/custom/path` to relocate the managed store. `save-ledger <name>` remembers the canonical filename and enables quick resaves without re-entering the path.
 

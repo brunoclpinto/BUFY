@@ -27,7 +27,7 @@ use crate::{
         SimulationBudgetImpact, SimulationChange, SimulationStatus, SimulationTransactionPatch,
         TimeInterval, TimeUnit, Transaction,
     },
-    utils::persistence::LedgerStore,
+    utils::{build_info, persistence::LedgerStore},
 };
 
 const PROMPT_ARROW: &str = "⮞";
@@ -2108,6 +2108,7 @@ fn build_commands() -> Vec<Command> {
             "new-ledger [name] [period]",
             cmd_new_ledger,
         ),
+        Command::new("version", "Show build metadata", "version", cmd_version),
         Command::new("load", "Load a ledger from JSON", "load [path]", cmd_load),
         Command::new(
             "load-ledger",
@@ -2232,6 +2233,30 @@ fn build_commands() -> Vec<Command> {
         ),
         Command::new("exit", "Exit the shell", "exit", cmd_exit),
     ]
+}
+
+fn cmd_version(_app: &mut CliApp, _args: &[&str]) -> CommandResult {
+    let meta = build_info::current();
+    println!(
+        "{}",
+        format!("Budget Core {}", meta.version)
+            .bright_white()
+            .bold()
+    );
+    println!(
+        "  Build hash   : {} ({})",
+        meta.git_hash.bright_cyan(),
+        meta.git_status
+    );
+    println!("  Built at     : {}", meta.timestamp);
+    println!("  Target       : {}", meta.target);
+    println!("  Profile      : {}", meta.profile);
+    println!("  Rustc        : {}", meta.rustc);
+    #[cfg(feature = "ffi")]
+    {
+        println!("  FFI version  : {}", crate::ffi::FFI_VERSION);
+    }
+    Ok(())
 }
 
 fn cmd_help(app: &mut CliApp, args: &[&str]) -> CommandResult {

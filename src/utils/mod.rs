@@ -1,3 +1,4 @@
+pub mod build_info;
 pub mod persistence;
 
 use std::{io, sync::Once};
