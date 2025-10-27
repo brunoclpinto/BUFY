@@ -192,3 +192,65 @@ fn test_materialize_and_forecast_flow() {
         "should generate at least two future projections"
     );
 }
+
+#[test]
+fn materialize_handles_backlog_across_multiple_periods() {
+    let mut ledger = Ledger::new("Backlog", BudgetPeriod::default());
+    let from = ledger.add_account(Account::new("Operating", AccountKind::Bank));
+    let to = ledger.add_account(Account::new(
+        "Rent",
+        AccountKind::ExpenseDestination,
+    ));
+
+    let start = NaiveDate::from_ymd_opt(2025, 1, 1).unwrap();
+    let mut template = Transaction::new(from, to, None, start, 1500.0);
+    template.set_recurrence(Some(Recurrence::new(
+        start,
+        TimeInterval {
+            every: 1,
+            unit: TimeUnit::Month,
+        },
+        RecurrenceMode::FixedSchedule,
+    )));
+    ledger.add_transaction(template);
+
+    let reference = NaiveDate::from_ymd_opt(2025, 5, 1).unwrap();
+    let created = ledger.materialize_due_recurrences(reference);
+    assert_eq!(created, 4, "expected Feb-May materializations");
+
+    let generated: Vec<_> = ledger
+        .transactions
+        .iter()
+        .filter(|txn| txn.recurrence.is_none() && txn.recurrence_series_id.is_some())
+        .collect();
+    assert_eq!(generated.len(), 4);
+
+    let expected_dates: std::collections::BTreeSet<_> = [
+        NaiveDate::from_ymd_opt(2025, 2, 1).unwrap(),
+        NaiveDate::from_ymd_opt(2025, 3, 1).unwrap(),
+        NaiveDate::from_ymd_opt(2025, 4, 1).unwrap(),
+        NaiveDate::from_ymd_opt(2025, 5, 1).unwrap(),
+    ]
+    .into_iter()
+    .collect();
+    let actual_dates: std::collections::BTreeSet<_> = generated
+        .iter()
+        .map(|txn| txn.scheduled_date)
+        .collect();
+    assert_eq!(actual_dates, expected_dates);
+
+    let template = ledger
+        .transactions
+        .iter()
+        .find(|txn| txn.recurrence.is_some())
+        .expect("template");
+    let next_due = template
+        .recurrence
+        .as_ref()
+        .and_then(|rule| rule.next_scheduled);
+    assert_eq!(
+        next_due,
+        Some(NaiveDate::from_ymd_opt(2025, 6, 1).unwrap()),
+        "metadata should advance to the next future period"
+    );
+}
