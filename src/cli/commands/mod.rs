@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use super::{CliApp, CommandResult};
+use crate::cli::shell::{CliApp, CommandResult};
 
 pub type CommandHandler = fn(&mut CliApp, &[&str]) -> CommandResult;
 
@@ -27,7 +27,6 @@ impl CommandDefinition {
         }
     }
 
-    #[allow(dead_code)]
     pub fn execute(&self, app: &mut CliApp, args: &[&str]) -> CommandResult {
         (self.handler)(app, args)
     }
@@ -53,7 +52,6 @@ impl CommandRegistry {
         self.commands.get(name)
     }
 
-    #[allow(dead_code)]
     pub fn iter(&self) -> impl Iterator<Item = &CommandDefinition> {
         self.order
             .iter()
