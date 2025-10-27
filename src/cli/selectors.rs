@@ -1,18 +1,60 @@
-//! Placeholder module for future selection utilities.
+//! Generic selection data contracts used by the CLI auto-selection framework.
 //!
-//! During Phase 13 this module will host interactive auto-selection
-//! helpers. For now we define the expected interface so command
-//! handlers can depend on it without implementation details.
+//! Phase 13 wires these definitions into a reusable selection manager. The
+//! traits and structures declared here focus on the *shape* of selectable
+//! items so command handlers and future providers can share a common
+//! vocabulary and behave consistently.
 
-/// Describes the contract for presenting a list of items and capturing a choice.
+/// Minimal data required to render a selectable item to the user.
+#[derive(Debug, Clone)]
+pub struct SelectionItem<ID> {
+    /// Stable identifier returned to the caller when the entry is chosen.
+    pub id: ID,
+    /// Primary label displayed in the list (name, title, etc.).
+    pub label: String,
+    /// Optional secondary context (balance, date, category, …).
+    pub subtitle: Option<String>,
+    /// Optional grouping key for categorized displays.
+    pub category: Option<String>,
+}
+
+impl<ID> SelectionItem<ID> {
+    pub fn new(id: ID, label: impl Into<String>) -> Self {
+        Self {
+            id,
+            label: label.into(),
+            subtitle: None,
+            category: None,
+        }
+    }
+
+    pub fn with_subtitle(mut self, subtitle: impl Into<String>) -> Self {
+        self.subtitle = Some(subtitle.into());
+        self
+    }
+
+    pub fn with_category(mut self, category: impl Into<String>) -> Self {
+        self.category = Some(category.into());
+        self
+    }
+}
+
+/// Outcome of a selection attempt.
+pub enum SelectionOutcome<ID> {
+    Selected(ID),
+    Cancelled,
+}
+
+/// Contract implemented by providers that surface selectable items.
 pub trait SelectionProvider {
-    type Item;
+    type Id;
     type Error;
 
-    /// Presents `items` to the user and returns the selected entry.
-    ///
-    /// Implementations should block for user input and provide an accessible
-    /// display by default. Errors should communicate why the selection failed
-    /// (for example, no items available or the user aborted).
-    fn select(&mut self, items: &[Self::Item]) -> Result<Self::Item, Self::Error>;
+    /// Fetches the current list of selectable items using CLI state.
+    fn items(&mut self) -> Result<Vec<SelectionItem<Self::Id>>, Self::Error>;
+
+    /// Runs the selection workflow (render items, collect input) and returns
+    /// either the chosen identifier or [`SelectionOutcome::Cancelled`] when the
+    /// user aborts.
+    fn select(&mut self) -> Result<SelectionOutcome<Self::Id>, Self::Error>;
 }
