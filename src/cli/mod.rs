@@ -1,3 +1,6 @@
+mod output;
+mod state;
+
 use std::{
     cmp::Ordering,
     collections::HashMap,
@@ -29,6 +32,9 @@ use crate::{
     },
     utils::{build_info, persistence::LedgerStore},
 };
+
+use output::{error as output_error, warning as output_warning};
+use state::CliState;
 
 const PROMPT_ARROW: &str = "⮞";
 
@@ -104,54 +110,6 @@ pub struct CliApp {
     state: CliState,
     theme: ColorfulTheme,
     store: LedgerStore,
-}
-
-pub(crate) struct CliState {
-    ledger: Option<Ledger>,
-    ledger_path: Option<PathBuf>,
-    ledger_name: Option<String>,
-    active_simulation: Option<String>,
-}
-
-impl CliState {
-    fn new() -> Self {
-        Self {
-            ledger: None,
-            ledger_path: None,
-            ledger_name: None,
-            active_simulation: None,
-        }
-    }
-
-    fn set_ledger(&mut self, ledger: Ledger, path: Option<PathBuf>, name: Option<String>) {
-        self.ledger = Some(ledger);
-        self.ledger_path = path;
-        self.ledger_name = name;
-        self.active_simulation = None;
-    }
-
-    fn set_path(&mut self, path: Option<PathBuf>) {
-        self.ledger_path = path;
-        if self.ledger_path.is_some() {
-            self.ledger_name = None;
-        }
-    }
-
-    fn set_named(&mut self, name: Option<String>) {
-        self.ledger_name = name;
-    }
-
-    fn active_simulation(&self) -> Option<&str> {
-        self.active_simulation.as_deref()
-    }
-
-    fn set_active_simulation(&mut self, name: Option<String>) {
-        self.active_simulation = name;
-    }
-
-    fn ledger_name(&self) -> Option<&str> {
-        self.ledger_name.as_deref()
-    }
 }
 
 impl CliApp {
@@ -443,11 +401,11 @@ impl CliApp {
     }
 
     fn print_error(&self, message: &str) {
-        println!("{} {}", "⚠️".bright_yellow(), message.bright_red());
+        output_error(format!("{} {}", "⚠️".bright_yellow(), message));
     }
 
     fn print_warning(&self, message: &str) {
-        println!("{} {}", "⚠️".bright_yellow(), message.bright_yellow());
+        output_warning(format!("{} {}", "⚠️".bright_yellow(), message));
     }
 
     fn current_ledger(&self) -> Result<&Ledger, CommandError> {
