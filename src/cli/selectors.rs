@@ -52,9 +52,4 @@ pub trait SelectionProvider {
 
     /// Fetches the current list of selectable items using CLI state.
     fn items(&mut self) -> Result<Vec<SelectionItem<Self::Id>>, Self::Error>;
-
-    /// Runs the selection workflow (render items, collect input) and returns
-    /// either the chosen identifier or [`SelectionOutcome::Cancelled`] when the
-    /// user aborts.
-    fn select(&mut self) -> Result<SelectionOutcome<Self::Id>, Self::Error>;
 }
