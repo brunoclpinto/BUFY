@@ -202,6 +202,18 @@ Key decisions:
 - **Benchmarks** – `cargo bench` (Criterion) covers load/save, summary generation, and forecasting. Results are documented in `docs/performance.md`, and each run emits HTML reports under `target/criterion`.
 - **Coverage policy** – new features are expected to land with tests that prove happy-path behavior plus relevant edge cases. Stress and benchmark suites should be extended when features affect performance-sensitive paths (recurrence, persistence, currency handling). See `docs/testing_strategy.md` for the current suite inventory and future reliability targets.
 
+### CLI Architecture (Phase 12)
+
+The CLI is now split into focused modules so future interactive features can plug in cleanly:
+
+- `cli::shell` – owns the REPL loop, command parsing, history management, and shared state wiring. It delegates work via a command registry.
+- `cli::commands` – declares `CommandDefinition` metadata (name, description, usage) and the registry that maps identifiers to handler functions.
+- `cli::state` – central storage for loaded ledger, persistence metadata, and active simulation context.
+- `cli::output` – unified helpers for info/warning/error/success messaging so future selectors/forms can render consistently.
+- `cli::selectors` & `cli::forms` – placeholder interfaces for upcoming auto-selection and wizard flows. Later phases will provide concrete implementations without altering existing handlers.
+
+Command handlers still live alongside the shell for now, but they interact with the registry/state/output instead of writing directly to stdout or poking global variables. Script mode continues to use the same entry point (`run_cli`) and benefits from the new modular boundary.
+
 ### CLI Usage: Interactive vs. Script
 
 | Workflow | Interactive Mode | Script Mode |
