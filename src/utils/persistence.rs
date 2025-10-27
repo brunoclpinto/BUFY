@@ -19,6 +19,23 @@ const STATE_FILE: &str = "state.json";
 const TMP_SUFFIX: &str = "tmp";
 const DEFAULT_RETENTION: usize = 5;
 
+/// Writes the provided ledger to disk atomically.
+pub fn save_ledger_to_file(ledger: &Ledger, path: &Path) -> Result<(), LedgerError> {
+    let json = serde_json::to_string_pretty(ledger)?;
+    fs::write(path, json)?;
+    Ok(())
+}
+
+/// Loads a ledger snapshot directly from disk.
+pub fn load_ledger_from_file(path: &Path) -> Result<Ledger, LedgerError> {
+    let data = fs::read_to_string(path)?;
+    let mut ledger: Ledger = serde_json::from_str(&data)?;
+    let original_version = ledger.schema_version;
+    ledger.migrate_from_schema(original_version);
+    ledger.refresh_recurrence_metadata();
+    Ok(ledger)
+}
+
 /// Metadata describing a restored ledger load.
 #[derive(Debug)]
 pub struct LoadReport {

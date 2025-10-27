@@ -41,6 +41,11 @@ All functions return an `ffi_status` integer. Zero denotes success. Non-zero cod
 | `5` | Internal | Unexpected panics caught at the boundary. |
 
 On error, callers must retrieve the last error via `ffi_error_message(out_buffer)` which copies the human-readable message into a caller-provided buffer. (Bindings will wrap this in Result/Exception types.)
+Helper APIs already implemented:
+
+- `ffi_last_error_category() -> int` — returns the numeric category of the most recent error (or `0` if none).
+- `ffi_last_error_message(char* buffer, size_t len) -> int` — writes the human-readable error into the provided buffer, returning the byte count.
+- `ffi_string_free(char*)` — releases strings allocated by the core (e.g., JSON snapshots).
 
 ## Module Groups & Operations
 
@@ -122,4 +127,3 @@ To avoid leaks each allocation has a paired free function:
 
 1. Implement the `ffi` Rust module behind the `ffi` Cargo feature, providing the constants, type definitions, and function stubs described here.
 2. Add unit tests around the core API surface to validate JSON contracts and error propagation before generating language-specific bindings.
-
