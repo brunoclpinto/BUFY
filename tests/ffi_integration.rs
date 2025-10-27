@@ -4,6 +4,7 @@ use libloading::{Library, Symbol};
 use std::ffi::{CStr, CString};
 use std::path::PathBuf;
 use std::ptr;
+use std::thread;
 use tempfile::NamedTempFile;
 
 type FfiStatus = i32;
@@ -28,19 +29,14 @@ type FfiSnapshotFn = unsafe extern "C" fn(
 type FfiFreeFn = unsafe extern "C" fn(handle: *mut std::os::raw::c_void);
 type FfiStringFreeFn = unsafe extern "C" fn(ptr: *mut std::os::raw::c_char);
 
-type FfiLastErrorMessageFn = unsafe extern "C" fn(
-    buffer: *mut std::os::raw::c_char,
-    length: usize,
-) -> FfiStatus;
+type FfiLastErrorMessageFn =
+    unsafe extern "C" fn(buffer: *mut std::os::raw::c_char, length: usize) -> FfiStatus;
 
 type FfiLastErrorCategoryFn = unsafe extern "C" fn() -> FfiStatus;
 
 fn lib_path() -> PathBuf {
     let exe = std::env::current_exe().expect("current exe");
-    let debug_dir = exe
-        .parent()
-        .and_then(|p| p.parent())
-        .expect("debug dir");
+    let debug_dir = exe.parent().and_then(|p| p.parent()).expect("debug dir");
     let mut path = debug_dir.to_path_buf();
     let libname = if cfg!(target_os = "macos") {
         "libbudget_core.dylib"
@@ -120,4 +116,52 @@ fn dynamic_load_and_round_trip() {
         let message = CStr::from_ptr(buffer.as_ptr()).to_str().unwrap();
         assert!(message.contains("path pointer was null"));
     }
+}
+
+#[test]
+fn ffi_parallel_snapshots_are_thread_safe() {
+    let lib = unsafe { Library::new(lib_path()) }.expect("load budget_core cdylib");
+
+    let ffi_create: Symbol<FfiCreateFn> =
+        unsafe { lib.get(b"ffi_ledger_create").unwrap() };
+    let ffi_snapshot: Symbol<FfiSnapshotFn> =
+        unsafe { lib.get(b"ffi_ledger_snapshot").unwrap() };
+    let ffi_free: Symbol<FfiFreeFn> =
+        unsafe { lib.get(b"ffi_ledger_free").unwrap() };
+    let ffi_string_free: Symbol<FfiStringFreeFn> =
+        unsafe { lib.get(b"ffi_string_free").unwrap() };
+
+    let create_fn: FfiCreateFn = *ffi_create;
+    let snapshot_fn: FfiSnapshotFn = *ffi_snapshot;
+    let free_fn: FfiFreeFn = *ffi_free;
+    let string_free_fn: FfiStringFreeFn = *ffi_string_free;
+
+    let name = CString::new("FFI Concurrent").unwrap();
+    let mut handle: *mut std::os::raw::c_void = ptr::null_mut();
+    assert_eq!(unsafe { create_fn(name.as_ptr(), &mut handle) }, 0);
+    assert!(!handle.is_null());
+
+    let handle_addr = handle as usize;
+    let mut threads = Vec::new();
+    for _ in 0..8 {
+        let snapshot_fn = snapshot_fn;
+        let string_free_fn = string_free_fn;
+        let handle_addr = handle_addr;
+        threads.push(thread::spawn(move || {
+            let handle_ptr = handle_addr as *mut std::os::raw::c_void;
+            for _ in 0..16 {
+                let mut json_ptr: *mut std::os::raw::c_char = ptr::null_mut();
+                let status = unsafe { snapshot_fn(handle_ptr, &mut json_ptr) };
+                assert_eq!(status, 0);
+                assert!(!json_ptr.is_null());
+                unsafe { string_free_fn(json_ptr) };
+            }
+        }));
+    }
+
+    for th in threads {
+        th.join().expect("thread join");
+    }
+
+    unsafe { free_fn(handle) };
 }
