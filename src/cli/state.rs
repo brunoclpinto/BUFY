@@ -57,4 +57,12 @@ impl CliState {
     pub fn active_simulation(&self) -> Option<&str> {
         self.active_simulation.as_deref()
     }
+
+    pub fn ledger(&self) -> Option<&Ledger> {
+        self.ledger.as_ref()
+    }
+
+    pub fn ledger_mut(&mut self) -> Option<&mut Ledger> {
+        self.ledger.as_mut()
+    }
 }
