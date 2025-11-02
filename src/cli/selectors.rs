@@ -1,9 +1,10 @@
 //! Generic selection data contracts used by the CLI auto-selection framework.
 //!
-//! Phase 13 wires these definitions into a reusable selection manager. The
-//! traits and structures declared here focus on the *shape* of selectable
-//! items so command handlers and future providers can share a common
-//! vocabulary and behave consistently.
+//! The concrete manager/provides live in `cli::selection`, but the core data
+//! structures remain in this module so command handlers, providers, and future
+//! front ends can share a common vocabulary. Every provider surfaces
+//! `SelectionItem`s and command handlers receive uniform `SelectionOutcome`s
+//! regardless of the underlying domain.
 
 /// Minimal data required to render a selectable item to the user.
 #[derive(Debug, Clone)]

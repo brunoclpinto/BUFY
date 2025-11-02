@@ -210,9 +210,18 @@ The CLI is now split into focused modules so future interactive features can plu
 - `cli::commands` – declares `CommandDefinition` metadata (name, description, usage) and the registry that maps identifiers to handler functions.
 - `cli::state` – central storage for loaded ledger, persistence metadata, and active simulation context.
 - `cli::output` – unified helpers for info/warning/error/success messaging so future selectors/forms can render consistently.
-- `cli::selectors` & `cli::forms` – placeholder interfaces for upcoming auto-selection and wizard flows. Later phases will provide concrete implementations without altering existing handlers.
+- `cli::selectors` – shared data contracts (`SelectionItem`, `SelectionOutcome`, `SelectionProvider`).
+- `cli::selection` – manager + providers that surface auto-selection lists when commands are missing identifiers. Providers cover accounts, categories, transactions, simulations, and backups; the manager uses Dialoguer by default and supports scripted/test overrides.
+- `cli::forms` – placeholder interfaces for upcoming wizard flows (Phase 14).
 
 Command handlers still live alongside the shell for now, but they interact with the registry/state/output instead of writing directly to stdout or poking global variables. Script mode continues to use the same entry point (`run_cli`) and benefits from the new modular boundary.
+
+When a required argument is omitted in interactive mode, the handler calls into
+`CliApp::select_with`, which delegates to the appropriate provider and prompts
+the user to choose an entry. Cancelling simply returns control to the prompt;
+supplying a value proceeds exactly as if it had been typed initially. Tests can
+exercise the same code paths by queueing deterministic selections via the
+`SelectionOverride` helper, keeping script-mode fixtures repeatable.
 
 ### CLI Usage: Interactive vs. Script
 

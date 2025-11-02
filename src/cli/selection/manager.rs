@@ -8,24 +8,27 @@ pub enum SelectionError<E> {
     Interaction(dialoguer::Error),
 }
 
-pub struct SelectionManager<'a, P: SelectionProvider> {
+pub struct SelectionManager<P: SelectionProvider> {
     provider: P,
-    theme: &'a ColorfulTheme,
 }
 
-impl<'a, P> SelectionManager<'a, P>
+impl<P> SelectionManager<P>
 where
     P: SelectionProvider,
     P::Id: Clone,
 {
-    pub fn new(provider: P, theme: &'a ColorfulTheme) -> Self {
-        Self { provider, theme }
+    pub fn new(provider: P) -> Self {
+        Self { provider }
     }
 
-    pub fn choose(
+    pub fn choose_with<F>(
         mut self,
         prompt: &str,
-    ) -> Result<SelectionOutcome<P::Id>, SelectionError<P::Error>> {
+        mut selector: F,
+    ) -> Result<SelectionOutcome<P::Id>, SelectionError<P::Error>>
+    where
+        F: FnMut(&str, &[String]) -> Result<Option<usize>, dialoguer::Error>,
+    {
         let items = self.provider.items().map_err(SelectionError::Provider)?;
         if items.is_empty() {
             warning("No items available.");
@@ -35,17 +38,27 @@ where
         info(prompt);
         let labels: Vec<String> = items.iter().map(render_label).collect();
 
-        let selection = Select::with_theme(self.theme)
-            .items(&labels)
-            .default(0)
-            .interact_opt()
-            .map_err(SelectionError::Interaction)?;
+        let selection = selector(prompt, &labels).map_err(SelectionError::Interaction)?;
 
         if let Some(index) = selection {
             Ok(SelectionOutcome::Selected(items[index].id.clone()))
         } else {
             Ok(SelectionOutcome::Cancelled)
         }
+    }
+
+    pub fn choose_with_dialoguer(
+        self,
+        prompt: &str,
+        theme: &ColorfulTheme,
+    ) -> Result<SelectionOutcome<P::Id>, SelectionError<P::Error>> {
+        self.choose_with(prompt, |prompt, labels| {
+            Select::with_theme(theme)
+                .with_prompt(prompt)
+                .items(labels)
+                .default(0)
+                .interact_opt()
+        })
     }
 }
 

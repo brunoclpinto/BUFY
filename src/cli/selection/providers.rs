@@ -1,8 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
 
-use uuid::Uuid;
-
 use crate::{
     cli::selectors::{SelectionItem, SelectionProvider},
     ledger::{Account, Category, Simulation, Transaction},
@@ -34,7 +32,7 @@ impl<'a> AccountSelectionProvider<'a> {
 }
 
 impl<'a> SelectionProvider for AccountSelectionProvider<'a> {
-    type Id = Uuid;
+    type Id = usize;
     type Error = ProviderError;
 
     fn items(&mut self) -> Result<Vec<SelectionItem<Self::Id>>, Self::Error> {
@@ -42,7 +40,12 @@ impl<'a> SelectionProvider for AccountSelectionProvider<'a> {
             .state
             .ledger_ref()
             .ok_or(ProviderError::MissingLedger)?;
-        Ok(ledger.accounts.iter().map(account_item).collect())
+        Ok(ledger
+            .accounts
+            .iter()
+            .enumerate()
+            .map(|(idx, account)| account_item(idx, account))
+            .collect())
     }
 }
 
@@ -57,7 +60,7 @@ impl<'a> CategorySelectionProvider<'a> {
 }
 
 impl<'a> SelectionProvider for CategorySelectionProvider<'a> {
-    type Id = Uuid;
+    type Id = usize;
     type Error = ProviderError;
 
     fn items(&mut self) -> Result<Vec<SelectionItem<Self::Id>>, Self::Error> {
@@ -65,7 +68,12 @@ impl<'a> SelectionProvider for CategorySelectionProvider<'a> {
             .state
             .ledger_ref()
             .ok_or(ProviderError::MissingLedger)?;
-        Ok(ledger.categories.iter().map(category_item).collect())
+        Ok(ledger
+            .categories
+            .iter()
+            .enumerate()
+            .map(|(idx, category)| category_item(idx, category))
+            .collect())
     }
 }
 
@@ -80,7 +88,7 @@ impl<'a> TransactionSelectionProvider<'a> {
 }
 
 impl<'a> SelectionProvider for TransactionSelectionProvider<'a> {
-    type Id = Uuid;
+    type Id = usize;
     type Error = ProviderError;
 
     fn items(&mut self) -> Result<Vec<SelectionItem<Self::Id>>, Self::Error> {
@@ -88,7 +96,12 @@ impl<'a> SelectionProvider for TransactionSelectionProvider<'a> {
             .state
             .ledger_ref()
             .ok_or(ProviderError::MissingLedger)?;
-        Ok(ledger.transactions.iter().map(transaction_item).collect())
+        Ok(ledger
+            .transactions
+            .iter()
+            .enumerate()
+            .map(|(idx, txn)| transaction_item(idx, txn))
+            .collect())
     }
 }
 
@@ -179,13 +192,12 @@ impl<'a> SelectionProvider for ConfigBackupSelectionProvider<'a> {
     }
 }
 
-fn account_item(account: &Account) -> SelectionItem<Uuid> {
-    SelectionItem::new(account.id, account.name.clone())
-        .with_subtitle(format!("{:?}", account.kind))
+fn account_item(index: usize, account: &Account) -> SelectionItem<usize> {
+    SelectionItem::new(index, account.name.clone()).with_subtitle(format!("{:?}", account.kind))
 }
 
-fn category_item(category: &Category) -> SelectionItem<Uuid> {
-    let mut item = SelectionItem::new(category.id, category.name.clone())
+fn category_item(index: usize, category: &Category) -> SelectionItem<usize> {
+    let mut item = SelectionItem::new(index, category.name.clone())
         .with_subtitle(format!("{:?}", category.kind));
     if let Some(parent) = category.parent_id {
         item = item.with_category(format!("parent: {}", parent));
@@ -193,14 +205,14 @@ fn category_item(category: &Category) -> SelectionItem<Uuid> {
     item
 }
 
-fn transaction_item(txn: &Transaction) -> SelectionItem<Uuid> {
+fn transaction_item(index: usize, txn: &Transaction) -> SelectionItem<usize> {
     let label = txn
         .recurrence
         .as_ref()
         .map(|_| format!("{} • recurring", txn.scheduled_date))
         .unwrap_or_else(|| txn.scheduled_date.to_string());
     let amount = txn.actual_amount.unwrap_or(txn.budgeted_amount);
-    SelectionItem::new(txn.id, label).with_subtitle(format!("{:.2}", amount))
+    SelectionItem::new(index, label).with_subtitle(format!("{:.2}", amount))
 }
 
 fn simulation_item(sim: &Simulation) -> SelectionItem<String> {

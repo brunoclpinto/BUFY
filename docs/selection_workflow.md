@@ -1,23 +1,55 @@
-# CLI Selection Workflow (Phase 13 Draft)
+# CLI Selection Workflow (Phase 13)
 
-This note summarizes the selection architecture introduced in Phase 13.
+Phase 13 turns the placeholder selection APIs into a concrete pipeline that
+automatically resolves missing identifiers (account/category/transaction ids,
+simulation names, backup references) before executing a command. The flow is
+deliberately modular so future UI surfaces can reuse it without coupling to the
+current CLI implementation.
 
-1. **SelectionItem** – common data structure describing each option:
-   - `id`: identifier returned to the caller
-   - `label`: primary display string
-   - `subtitle` and `category` (optional) for context/grouping
+## Building Blocks
 
-2. **SelectionOutcome** – result of a selection attempt: either `Selected(id)`
-   or `Cancelled`.
+1. **`SelectionItem`** – shared data structure that every provider emits. Each
+   entry carries a stable identifier (`id`), a primary `label`, and optional
+   `subtitle`/`category` fields that the shell can render for additional
+   context.
+2. **`SelectionOutcome`** – indicates whether the user picked a value or
+   cancelled the prompt. Command handlers can react uniformly regardless of the
+   underlying domain.
+3. **`SelectionProvider`** – domain-specific adapters responsible for gathering
+   items from the current CLI state (`CliState`). Providers exist for accounts,
+   categories, transactions, simulations, ledger backups, and configuration
+   backups. Each provider returns domain-appropriate ids (e.g. list indices for
+   ledger collections, `PathBuf` for backup files) while reusing the shared
+   presentation shape.
+4. **`SelectionManager`** – orchestrates user interaction. Providers hand their
+   items to the manager, which renders labels and delegates the actual choice to
+   a selector function. The default selector uses `dialoguer::Select`, while
+   tests can inject deterministic selectors via `CliApp::set_selection_choices`
+   (which feeds a queue consumed by `SelectionManager::choose_with`).
 
-3. **SelectionProvider** – trait implemented per domain (accounts,
-   categories, transactions, simulations, backups). Providers must:
-   - produce the current `SelectionItem` list via `items()`
-   - execute the interaction via `select()`, returning the appropriate
-     outcome or a domain specific error
+## Runtime Flow
 
-4. **Dispatcher integration** (planned) – command handlers request values from
-   the selection manager when required arguments are absent. The dispatcher
-   remains agnostic of domain specifics.
+1. **Detection** – command handlers call helper methods such as
+   `CliApp::transaction_index_from_arg` or `CliApp::resolve_simulation_name`.
+   These detect missing arguments and trigger a selection only when interactive
+   input (or a queued test override) is available.
+2. **Enumeration** – the appropriate provider (`AccountSelectionProvider`,
+   `TransactionSelectionProvider`, etc.) captures the latest state via
+   `SelectionProvider::items()`.
+3. **Display** – `SelectionManager` renders labels and uses either the Dialoguer
+   selector (`choose_with_dialoguer`) or the queued override to obtain a
+   selected index.
+4. **Continuation** – command handlers receive the resulting identifier. If the
+   user cancels, the command simply aborts without side effects; otherwise, the
+   handler proceeds as if the argument had been supplied explicitly.
 
-This document will evolve as the implementation progresses.
+The same code path is used across domains, which keeps the dispatcher/registry
+agnostic of domain specifics and makes it trivial to add new providers later.
+
+## Testing Hooks
+
+Script mode remains non-interactive, but unit tests can still exercise
+selection-driven branches by pushing `Option<usize>` values into the
+`SelectionOverride` queue (`CliApp::set_selection_choices`). This bypasses the
+Dialoguer TTY requirements, keeps command behaviour deterministic, and ensures
+that cancel flows are covered alongside the happy paths.

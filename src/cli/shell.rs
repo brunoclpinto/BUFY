@@ -1,6 +1,7 @@
 use std::{
+    cell::RefCell,
     cmp::Ordering,
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     fmt,
     io::{self, BufRead},
     path::{Path, PathBuf},
@@ -29,6 +30,15 @@ use crate::{
     },
     utils::{build_info, persistence::LedgerStore},
 };
+
+use crate::cli::selection::{
+    providers::{
+        LedgerBackupSelectionProvider, ProviderError, SimulationSelectionProvider,
+        TransactionSelectionProvider,
+    },
+    SelectionError, SelectionManager,
+};
+use crate::cli::selectors::{SelectionOutcome, SelectionProvider};
 
 use super::commands::{CommandDefinition, CommandRegistry};
 use super::output::{error as output_error, info as output_info, warning as output_warning};
@@ -68,6 +78,31 @@ pub enum CliMode {
     Script,
 }
 
+#[derive(Default)]
+struct SelectionOverride {
+    queue: RefCell<VecDeque<Option<usize>>>,
+}
+
+impl SelectionOverride {
+    #[cfg(test)]
+    fn push(&self, choice: Option<usize>) {
+        self.queue.borrow_mut().push_back(choice);
+    }
+
+    fn pop(&self) -> Option<Option<usize>> {
+        self.queue.borrow_mut().pop_front()
+    }
+
+    fn has_choices(&self) -> bool {
+        !self.queue.borrow().is_empty()
+    }
+
+    #[cfg(test)]
+    fn clear(&self) {
+        self.queue.borrow_mut().clear();
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LoopControl {
     Continue,
@@ -83,6 +118,7 @@ pub struct CliApp {
     state: CliState,
     theme: ColorfulTheme,
     store: LedgerStore,
+    selection_override: Option<SelectionOverride>,
 }
 
 impl CliApp {
@@ -133,6 +169,7 @@ impl CliApp {
             state: CliState::new(),
             theme: ColorfulTheme::default(),
             store,
+            selection_override: None,
         };
 
         app.auto_load_last()?;
@@ -401,12 +438,87 @@ impl CliApp {
         self.state.active_simulation()
     }
 
-    fn require_active_simulation(&self) -> Result<&str, CommandError> {
-        self.active_simulation_name().ok_or_else(|| {
-            CommandError::InvalidArguments(
-                "No active simulation. Use `enter-simulation <name>` first.".into(),
-            )
-        })
+    fn can_prompt(&self) -> bool {
+        if self.mode == CliMode::Interactive {
+            return true;
+        }
+        self.selection_override
+            .as_ref()
+            .map_or(false, |override_data| override_data.has_choices())
+    }
+
+    fn select_with<P>(&self, provider: P, prompt: &str) -> Result<Option<P::Id>, CommandError>
+    where
+        P: SelectionProvider,
+        P::Id: Clone,
+        CommandError: From<P::Error>,
+    {
+        let manager = SelectionManager::new(provider);
+        let selection_choice = self
+            .selection_override
+            .as_ref()
+            .and_then(|override_data| override_data.pop());
+        let outcome = if let Some(choice) = selection_choice {
+            manager.choose_with(prompt, move |_, _| Ok(choice))
+        } else {
+            manager.choose_with_dialoguer(prompt, &self.theme)
+        };
+        match outcome {
+            Ok(SelectionOutcome::Selected(id)) => Ok(Some(id)),
+            Ok(SelectionOutcome::Cancelled) => Ok(None),
+            Err(SelectionError::Provider(err)) => Err(err.into()),
+            Err(SelectionError::Interaction(err)) => Err(CommandError::Dialoguer(err)),
+        }
+    }
+
+    fn select_transaction_index(&self, prompt: &str) -> Result<Option<usize>, CommandError> {
+        self.select_with(TransactionSelectionProvider::new(&self.state), prompt)
+    }
+
+    fn select_simulation_name(&self, prompt: &str) -> Result<Option<String>, CommandError> {
+        self.select_with(SimulationSelectionProvider::new(&self.state), prompt)
+    }
+
+    fn select_ledger_backup(&self, prompt: &str) -> Result<Option<PathBuf>, CommandError> {
+        self.select_with(
+            LedgerBackupSelectionProvider::new(&self.state, &self.store),
+            prompt,
+        )
+    }
+
+    fn transaction_index_from_arg(
+        &self,
+        arg: Option<&str>,
+        usage: &str,
+        prompt: &str,
+    ) -> Result<Option<usize>, CommandError> {
+        if let Some(raw) = arg {
+            let index = raw.parse::<usize>().map_err(|_| {
+                CommandError::InvalidArguments("transaction_index must be numeric".into())
+            })?;
+            Ok(Some(index))
+        } else if self.can_prompt() {
+            self.select_transaction_index(prompt)
+        } else {
+            Err(CommandError::InvalidArguments(usage.into()))
+        }
+    }
+
+    #[cfg(test)]
+    fn set_selection_choices(&mut self, choices: impl IntoIterator<Item = Option<usize>>) {
+        let override_data = self
+            .selection_override
+            .get_or_insert_with(SelectionOverride::default);
+        for choice in choices {
+            override_data.push(choice);
+        }
+    }
+
+    #[cfg(test)]
+    fn reset_selection_choices(&mut self) {
+        if let Some(override_data) = &self.selection_override {
+            override_data.clear();
+        }
     }
 
     fn set_ledger(&mut self, ledger: Ledger, path: Option<PathBuf>, name: Option<String>) {
@@ -693,6 +805,10 @@ impl CliApp {
                 })?;
             matching.path.clone()
         };
+        self.restore_backup_from_path(name, target)
+    }
+
+    fn restore_backup_from_path(&mut self, name: &str, target: PathBuf) -> CommandResult {
         let confirm = if self.mode == CliMode::Interactive {
             Confirm::with_theme(&self.theme)
                 .with_prompt(format!(
@@ -1816,20 +1932,61 @@ impl CliApp {
         Ok(())
     }
 
-    fn resolve_simulation_name(&self, arg: Option<&str>) -> Result<String, CommandError> {
-        let name = if let Some(name) = arg {
-            name.to_string()
-        } else {
-            self.require_active_simulation()?.to_string()
+    fn resolve_simulation_name(
+        &self,
+        arg: Option<&str>,
+        prompt: &str,
+        fallback_active: bool,
+        usage: &str,
+    ) -> Result<Option<String>, CommandError> {
+        let mut attempted_prompt = false;
+        let candidate = match arg {
+            Some(name) => Some(name.to_string()),
+            None => {
+                if fallback_active {
+                    match self.active_simulation_name() {
+                        Some(active) => Some(active.to_string()),
+                        None => {
+                            if self.can_prompt() {
+                                attempted_prompt = true;
+                                self.select_simulation_name(prompt)?
+                            } else {
+                                return Err(CommandError::InvalidArguments(
+                                    "No active simulation. Use `enter-simulation <name>` first."
+                                        .into(),
+                                ));
+                            }
+                        }
+                    }
+                } else if self.can_prompt() {
+                    attempted_prompt = true;
+                    self.select_simulation_name(prompt)?
+                } else {
+                    None
+                }
+            }
         };
-        let ledger = self.current_ledger()?;
-        if ledger.simulation(&name).is_none() {
-            return Err(CommandError::InvalidArguments(format!(
-                "simulation `{}` not found",
-                name
-            )));
+
+        match candidate {
+            Some(name) => {
+                let ledger = self.current_ledger()?;
+                if ledger.simulation(&name).is_none() {
+                    Err(CommandError::InvalidArguments(format!(
+                        "simulation `{}` not found",
+                        name
+                    )))
+                } else {
+                    Ok(Some(name))
+                }
+            }
+            None => {
+                if attempted_prompt || self.can_prompt() {
+                    Ok(None)
+                } else {
+                    Err(CommandError::InvalidArguments(usage.into()))
+                }
+            }
         }
-        Ok(name)
     }
 
     fn print_simulation_changes(&self, sim_name: &str) -> CommandResult {
@@ -2439,18 +2596,37 @@ fn cmd_list_backups(app: &mut CliApp, args: &[&str]) -> CommandResult {
 }
 
 fn cmd_restore_ledger(app: &mut CliApp, args: &[&str]) -> CommandResult {
-    if args.is_empty() {
-        return Err(CommandError::InvalidArguments(
+    match args.len() {
+        0 => {
+            if !app.can_prompt() {
+                return Err(CommandError::InvalidArguments(
+                    "usage: restore-ledger <backup_reference> [name]".into(),
+                ));
+            }
+            let name = {
+                let named = app.require_named_ledger()?;
+                named.to_string()
+            };
+            let selection = app.select_ledger_backup("Select a backup to restore:")?;
+            let Some(path) = selection else {
+                return Ok(());
+            };
+            app.restore_backup_from_path(&name, path)
+        }
+        1 => {
+            let reference = args[0];
+            let name = app.require_named_ledger()?.to_string();
+            app.restore_backup(&name, reference)
+        }
+        2 => {
+            let reference = args[0];
+            let name = args[1].to_string();
+            app.restore_backup(&name, reference)
+        }
+        _ => Err(CommandError::InvalidArguments(
             "usage: restore-ledger <backup_reference> [name]".into(),
-        ));
+        )),
     }
-    let reference = args[0];
-    let name = if args.len() > 1 {
-        args[1].to_string()
-    } else {
-        app.require_named_ledger()?.to_string()
-    };
-    app.restore_backup(&name, reference)
 }
 
 fn cmd_add(app: &mut CliApp, args: &[&str]) -> CommandResult {
@@ -2596,11 +2772,17 @@ fn cmd_create_simulation(app: &mut CliApp, args: &[&str]) -> CommandResult {
 }
 
 fn cmd_enter_simulation(app: &mut CliApp, args: &[&str]) -> CommandResult {
-    let name = args
-        .first()
-        .ok_or_else(|| CommandError::InvalidArguments("usage: enter-simulation <name>".into()))?;
+    let name = match app.resolve_simulation_name(
+        args.first().copied(),
+        "Select a simulation to enter:",
+        false,
+        "usage: enter-simulation <name>",
+    )? {
+        Some(name) => name,
+        None => return Ok(()),
+    };
     let ledger = app.current_ledger()?;
-    let sim = ledger.simulation(name).ok_or_else(|| {
+    let sim = ledger.simulation(&name).ok_or_else(|| {
         CommandError::InvalidArguments(format!("simulation `{}` not found", name))
     })?;
     if sim.status != SimulationStatus::Pending {
@@ -2631,15 +2813,21 @@ fn cmd_leave_simulation(app: &mut CliApp, _args: &[&str]) -> CommandResult {
 }
 
 fn cmd_apply_simulation(app: &mut CliApp, args: &[&str]) -> CommandResult {
-    let name = args
-        .first()
-        .ok_or_else(|| CommandError::InvalidArguments("usage: apply-simulation <name>".into()))?;
+    let name = match app.resolve_simulation_name(
+        args.first().copied(),
+        "Select a simulation to apply:",
+        false,
+        "usage: apply-simulation <name>",
+    )? {
+        Some(name) => name,
+        None => return Ok(()),
+    };
     app.current_ledger_mut()?
-        .apply_simulation(name)
+        .apply_simulation(&name)
         .map_err(CommandError::from_ledger)?;
     if app
         .active_simulation_name()
-        .map(|active| active.eq_ignore_ascii_case(name))
+        .map(|active| active.eq_ignore_ascii_case(&name))
         .unwrap_or(false)
     {
         app.state.set_active_simulation(None);
@@ -2652,9 +2840,15 @@ fn cmd_apply_simulation(app: &mut CliApp, args: &[&str]) -> CommandResult {
 }
 
 fn cmd_discard_simulation(app: &mut CliApp, args: &[&str]) -> CommandResult {
-    let name = args
-        .first()
-        .ok_or_else(|| CommandError::InvalidArguments("usage: discard-simulation <name>".into()))?;
+    let name = match app.resolve_simulation_name(
+        args.first().copied(),
+        "Select a simulation to discard:",
+        false,
+        "usage: discard-simulation <name>",
+    )? {
+        Some(name) => name,
+        None => return Ok(()),
+    };
     if app.mode == CliMode::Interactive {
         let confirm = Confirm::with_theme(&app.theme)
             .with_prompt(format!("Discard simulation `{}`?", name))
@@ -2666,11 +2860,11 @@ fn cmd_discard_simulation(app: &mut CliApp, args: &[&str]) -> CommandResult {
         }
     }
     app.current_ledger_mut()?
-        .discard_simulation(name)
+        .discard_simulation(&name)
         .map_err(CommandError::from_ledger)?;
     if app
         .active_simulation_name()
-        .map(|active| active.eq_ignore_ascii_case(name))
+        .map(|active| active.eq_ignore_ascii_case(&name))
         .unwrap_or(false)
     {
         app.state.set_active_simulation(None);
@@ -2689,22 +2883,54 @@ fn cmd_simulation(app: &mut CliApp, args: &[&str]) -> CommandResult {
         ));
     }
     let sub = args[0].to_lowercase();
-    let target_name = if args.len() > 1 { Some(args[1]) } else { None };
+    let target_name = args.get(1).copied();
     match sub.as_str() {
         "changes" => {
-            let name = app.resolve_simulation_name(target_name)?;
+            let name = match app.resolve_simulation_name(
+                target_name,
+                "Select a simulation to inspect:",
+                true,
+                "usage: simulation changes [simulation_name]",
+            )? {
+                Some(name) => name,
+                None => return Ok(()),
+            };
             app.print_simulation_changes(&name)
         }
         "add" => {
-            let name = app.resolve_simulation_name(target_name)?;
+            let name = match app.resolve_simulation_name(
+                target_name,
+                "Select a simulation to add a transaction to:",
+                true,
+                "usage: simulation add [simulation_name]",
+            )? {
+                Some(name) => name,
+                None => return Ok(()),
+            };
             app.simulation_add_transaction(&name)
         }
         "exclude" => {
-            let name = app.resolve_simulation_name(target_name)?;
+            let name = match app.resolve_simulation_name(
+                target_name,
+                "Select a simulation to exclude a transaction from:",
+                true,
+                "usage: simulation exclude [simulation_name]",
+            )? {
+                Some(name) => name,
+                None => return Ok(()),
+            };
             app.simulation_exclude_transaction(&name)
         }
         "modify" => {
-            let name = app.resolve_simulation_name(target_name)?;
+            let name = match app.resolve_simulation_name(
+                target_name,
+                "Select a simulation to modify:",
+                true,
+                "usage: simulation modify [simulation_name]",
+            )? {
+                Some(name) => name,
+                None => return Ok(()),
+            };
             app.simulation_modify_transaction(&name)
         }
         _ => Err(CommandError::InvalidArguments(format!(
@@ -2724,71 +2950,71 @@ fn cmd_recurring(app: &mut CliApp, args: &[&str]) -> CommandResult {
             app.list_recurrences(filter)
         }
         "edit" => {
-            let idx = args
-                .get(1)
-                .ok_or_else(|| {
-                    CommandError::InvalidArguments(
-                        "usage: recurring edit <transaction_index>".into(),
-                    )
-                })?
-                .parse()
-                .map_err(|_| {
-                    CommandError::InvalidArguments("transaction_index must be numeric".into())
-                })?;
+            let idx = match app.transaction_index_from_arg(
+                args.get(1).copied(),
+                "usage: recurring edit <transaction_index>",
+                "Select a transaction to edit recurrence:",
+            )? {
+                Some(idx) => idx,
+                None => return Ok(()),
+            };
             app.recurrence_edit(idx)
         }
         "clear" => {
-            let idx = args
-                .get(1)
-                .ok_or_else(|| {
-                    CommandError::InvalidArguments(
-                        "usage: recurring clear <transaction_index>".into(),
-                    )
-                })?
-                .parse()
-                .map_err(|_| {
-                    CommandError::InvalidArguments("transaction_index must be numeric".into())
-                })?;
+            let idx = match app.transaction_index_from_arg(
+                args.get(1).copied(),
+                "usage: recurring clear <transaction_index>",
+                "Select a transaction to clear recurrence:",
+            )? {
+                Some(idx) => idx,
+                None => return Ok(()),
+            };
             app.recurrence_clear(idx)
         }
         "pause" => {
-            let idx = args
-                .get(1)
-                .ok_or_else(|| {
-                    CommandError::InvalidArguments(
-                        "usage: recurring pause <transaction_index>".into(),
-                    )
-                })?
-                .parse()
-                .map_err(|_| {
-                    CommandError::InvalidArguments("transaction_index must be numeric".into())
-                })?;
+            let idx = match app.transaction_index_from_arg(
+                args.get(1).copied(),
+                "usage: recurring pause <transaction_index>",
+                "Select a transaction to pause recurrence:",
+            )? {
+                Some(idx) => idx,
+                None => return Ok(()),
+            };
             app.recurrence_set_status(idx, RecurrenceStatus::Paused)
         }
         "resume" => {
-            let idx = args
-                .get(1)
-                .ok_or_else(|| {
-                    CommandError::InvalidArguments(
-                        "usage: recurring resume <transaction_index>".into(),
-                    )
-                })?
-                .parse()
-                .map_err(|_| {
-                    CommandError::InvalidArguments("transaction_index must be numeric".into())
-                })?;
+            let idx = match app.transaction_index_from_arg(
+                args.get(1).copied(),
+                "usage: recurring resume <transaction_index>",
+                "Select a transaction to resume recurrence:",
+            )? {
+                Some(idx) => idx,
+                None => return Ok(()),
+            };
             app.recurrence_set_status(idx, RecurrenceStatus::Active)
         }
         "skip" => {
-            if args.len() < 3 {
+            let idx = match app.transaction_index_from_arg(
+                args.get(1).copied(),
+                "usage: recurring skip <transaction_index> <YYYY-MM-DD>",
+                "Select a transaction to skip a scheduled date:",
+            )? {
+                Some(idx) => idx,
+                None => return Ok(()),
+            };
+            let date = if args.len() > 2 {
+                parse_date(args[2])?
+            } else if app.mode == CliMode::Interactive {
+                let input = Input::<String>::with_theme(&app.theme)
+                    .with_prompt("Date to skip (YYYY-MM-DD)")
+                    .interact_text()
+                    .map_err(CommandError::from)?;
+                parse_date(input.trim())?
+            } else {
                 return Err(CommandError::InvalidArguments(
                     "usage: recurring skip <transaction_index> <YYYY-MM-DD>".into(),
                 ));
-            }
-            let idx: usize = args[1].parse().map_err(|_| {
-                CommandError::InvalidArguments("transaction_index must be numeric".into())
-            })?;
-            let date = parse_date(args[2])?;
+            };
             app.recurrence_skip_date(idx, date)
         }
         "sync" => {
@@ -2811,19 +3037,69 @@ fn cmd_exit(_app: &mut CliApp, _args: &[&str]) -> CommandResult {
 }
 
 fn cmd_complete(app: &mut CliApp, args: &[&str]) -> CommandResult {
-    if args.len() < 3 {
+    app.ensure_base_mode("Completion")?;
+    let idx: usize = if let Some(raw) = args.get(0) {
+        raw.parse().map_err(|_| {
+            CommandError::InvalidArguments("transaction_index must be numeric".into())
+        })?
+    } else if app.mode == CliMode::Interactive {
+        match app.select_transaction_index("Select a transaction to complete:")? {
+            Some(index) => index,
+            None => return Ok(()),
+        }
+    } else {
         return Err(CommandError::InvalidArguments(
             "usage: complete <transaction_index> <YYYY-MM-DD> <amount>".into(),
         ));
-    }
-    app.ensure_base_mode("Completion")?;
-    let idx: usize = args[0]
-        .parse()
-        .map_err(|_| CommandError::InvalidArguments("transaction_index must be numeric".into()))?;
-    let actual_date = parse_date(args[1])?;
-    let amount: f64 = args[2]
-        .parse()
-        .map_err(|_| CommandError::InvalidArguments("amount must be numeric".into()))?;
+    };
+
+    let (scheduled_default, budget_default) = {
+        let ledger = app.current_ledger()?;
+        let txn = ledger.transactions.get(idx).ok_or_else(|| {
+            CommandError::InvalidArguments("transaction index out of range".into())
+        })?;
+        (
+            txn.scheduled_date,
+            txn.actual_amount.unwrap_or(txn.budgeted_amount),
+        )
+    };
+
+    let actual_date = if let Some(raw) = args.get(1) {
+        parse_date(raw)?
+    } else if app.mode == CliMode::Interactive {
+        let prompt = format!("Completion date for transaction {} (YYYY-MM-DD)", idx);
+        let input = Input::<String>::with_theme(&app.theme)
+            .with_prompt(prompt)
+            .with_initial_text(scheduled_default.to_string())
+            .interact_text()
+            .map_err(CommandError::from)?;
+        parse_date(input.trim())?
+    } else {
+        return Err(CommandError::InvalidArguments(
+            "usage: complete <transaction_index> <YYYY-MM-DD> <amount>".into(),
+        ));
+    };
+
+    let amount: f64 = if let Some(raw) = args.get(2) {
+        raw.parse()
+            .map_err(|_| CommandError::InvalidArguments("amount must be numeric".into()))?
+    } else if app.mode == CliMode::Interactive {
+        let prompt = format!("Actual amount for transaction {}", idx);
+        let input = Input::<String>::with_theme(&app.theme)
+            .with_prompt(prompt)
+            .with_initial_text(format!("{:.2}", budget_default))
+            .interact_text()
+            .map_err(CommandError::from)?;
+        input
+            .trim()
+            .parse()
+            .map_err(|_| CommandError::InvalidArguments("amount must be numeric".into()))?
+    } else {
+        return Err(CommandError::InvalidArguments(
+            "usage: complete <transaction_index> <YYYY-MM-DD> <amount>".into(),
+        ));
+    };
+
     let ledger = app.current_ledger_mut()?;
     let txn = ledger
         .transactions
@@ -3094,6 +3370,15 @@ impl CommandError {
     }
 }
 
+impl From<ProviderError> for CommandError {
+    fn from(err: ProviderError) -> Self {
+        match err {
+            ProviderError::MissingLedger => CommandError::LedgerNotLoaded,
+            ProviderError::Store(message) => CommandError::Message(message),
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn process_script(lines: &[&str]) -> Result<CliState, CliError> {
     let mut app = CliApp::new(CliMode::Script)?;
@@ -3116,7 +3401,16 @@ impl CliState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::NamedTempFile;
+    use crate::cli::selection::providers::{
+        AccountSelectionProvider, CategorySelectionProvider, ConfigBackupSelectionProvider,
+        LedgerBackupSelectionProvider, TransactionSelectionProvider,
+    };
+    use crate::cli::selection::SelectionManager;
+    use crate::cli::selectors::SelectionOutcome;
+    use crate::ledger::Simulation;
+    use chrono::{NaiveDate, Utc};
+    use std::fs;
+    use tempfile::{tempdir, NamedTempFile};
 
     #[test]
     fn parse_line_handles_quotes() {
@@ -3180,5 +3474,164 @@ mod tests {
     fn parse_interval_rejects_zero() {
         let err = super::parse_time_interval_str("0 days").unwrap_err();
         matches!(err, CommandError::InvalidArguments(_));
+    }
+
+    fn sample_ledger() -> Ledger {
+        let mut ledger = Ledger::new("Sample", BudgetPeriod::monthly());
+        let bank = ledger.add_account(Account::new("Checking", AccountKind::Bank));
+        let savings = ledger.add_account(Account::new("Savings", AccountKind::Savings));
+
+        let category = Category::new("Household", CategoryKind::Expense);
+        let category_id = category.id;
+        ledger.add_category(category);
+
+        let date = NaiveDate::from_ymd_opt(2024, 1, 1).unwrap();
+        let mut txn = Transaction::new(bank, savings, Some(category_id), date, 100.0);
+        let interval = TimeInterval {
+            every: 1,
+            unit: TimeUnit::Month,
+        };
+        let recurrence = Recurrence::new(date, interval, RecurrenceMode::FixedSchedule);
+        txn.set_recurrence(Some(recurrence));
+        ledger.add_transaction(txn);
+
+        let now = Utc::now();
+        ledger.simulations.push(Simulation {
+            name: "Scenario".into(),
+            notes: None,
+            status: SimulationStatus::Pending,
+            created_at: now,
+            updated_at: now,
+            applied_at: None,
+            changes: Vec::new(),
+        });
+
+        ledger
+    }
+
+    fn state_with_ledger() -> CliState {
+        let mut state = CliState::new();
+        let ledger = sample_ledger();
+        state.set_ledger(ledger, None, Some("sample".into()));
+        state
+    }
+
+    #[test]
+    fn account_selection_positive() {
+        let state = state_with_ledger();
+        let outcome = SelectionManager::new(AccountSelectionProvider::new(&state))
+            .choose_with("Select account", |_, _| Ok(Some(1)))
+            .unwrap();
+        match outcome {
+            SelectionOutcome::Selected(id) => assert_eq!(id, 1),
+            _ => panic!("expected account selection"),
+        }
+    }
+
+    #[test]
+    fn account_selection_cancelled() {
+        let state = state_with_ledger();
+        let outcome = SelectionManager::new(AccountSelectionProvider::new(&state))
+            .choose_with("Select account", |_, _| Ok(None))
+            .unwrap();
+        assert!(matches!(outcome, SelectionOutcome::Cancelled));
+    }
+
+    #[test]
+    fn category_selection_paths() {
+        let state = state_with_ledger();
+        let outcome = SelectionManager::new(CategorySelectionProvider::new(&state))
+            .choose_with("Select category", |_, _| Ok(Some(0)))
+            .unwrap();
+        assert!(matches!(outcome, SelectionOutcome::Selected(0)));
+
+        let outcome = SelectionManager::new(CategorySelectionProvider::new(&state))
+            .choose_with("Select category", |_, _| Ok(None))
+            .unwrap();
+        assert!(matches!(outcome, SelectionOutcome::Cancelled));
+    }
+
+    #[test]
+    fn transaction_selection_paths() {
+        let state = state_with_ledger();
+        let outcome = SelectionManager::new(TransactionSelectionProvider::new(&state))
+            .choose_with("Select transaction", |_, _| Ok(Some(0)))
+            .unwrap();
+        assert!(matches!(outcome, SelectionOutcome::Selected(0)));
+
+        let outcome = SelectionManager::new(TransactionSelectionProvider::new(&state))
+            .choose_with("Select transaction", |_, _| Ok(None))
+            .unwrap();
+        assert!(matches!(outcome, SelectionOutcome::Cancelled));
+    }
+
+    #[test]
+    fn simulation_selection_via_resolver() {
+        let mut app = CliApp::new(CliMode::Script).unwrap();
+        let ledger = sample_ledger();
+        app.state.set_ledger(ledger, None, Some("sample".into()));
+
+        app.set_selection_choices([Some(0)]);
+        let selected = app
+            .resolve_simulation_name(None, "Select simulation", false, "usage")
+            .unwrap();
+        assert_eq!(selected.as_deref(), Some("Scenario"));
+
+        app.reset_selection_choices();
+        app.set_selection_choices([None]);
+        let cancel = app
+            .resolve_simulation_name(None, "Select simulation", false, "usage")
+            .unwrap();
+        assert!(cancel.is_none());
+    }
+
+    #[test]
+    fn ledger_backup_selection_paths() {
+        let temp = tempdir().unwrap();
+        let store = LedgerStore::new(Some(temp.path().to_path_buf()), Some(5)).unwrap();
+        let mut state = state_with_ledger();
+        state.set_named(Some("Sample".into()));
+
+        let backup_dir = store.base_dir().join("backups").join("sample");
+        fs::create_dir_all(&backup_dir).unwrap();
+        let backup_path = backup_dir.join("2024-01-01T00-00-00.json.bak");
+        fs::write(&backup_path, "{}").unwrap();
+
+        let outcome = SelectionManager::new(LedgerBackupSelectionProvider::new(&state, &store))
+            .choose_with("Select backup", |_, _| Ok(Some(0)))
+            .unwrap();
+        match outcome {
+            SelectionOutcome::Selected(path) => assert_eq!(path, backup_path),
+            _ => panic!("expected backup selection"),
+        }
+
+        let outcome = SelectionManager::new(LedgerBackupSelectionProvider::new(&state, &store))
+            .choose_with("Select backup", |_, _| Ok(None))
+            .unwrap();
+        assert!(matches!(outcome, SelectionOutcome::Cancelled));
+    }
+
+    #[test]
+    fn config_backup_selection_paths() {
+        let temp = tempdir().unwrap();
+        let store = LedgerStore::new(Some(temp.path().to_path_buf()), Some(5)).unwrap();
+
+        let config_dir = store.base_dir().join("state-backups");
+        fs::create_dir_all(&config_dir).unwrap();
+        let config_path = config_dir.join("config-2024.json");
+        fs::write(&config_path, "{}").unwrap();
+
+        let outcome = SelectionManager::new(ConfigBackupSelectionProvider::new(&store))
+            .choose_with("Select config", |_, _| Ok(Some(0)))
+            .unwrap();
+        match outcome {
+            SelectionOutcome::Selected(path) => assert_eq!(path, config_path),
+            _ => panic!("expected config selection"),
+        }
+
+        let outcome = SelectionManager::new(ConfigBackupSelectionProvider::new(&store))
+            .choose_with("Select config", |_, _| Ok(None))
+            .unwrap();
+        assert!(matches!(outcome, SelectionOutcome::Cancelled));
     }
 }
