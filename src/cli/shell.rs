@@ -1,7 +1,7 @@
 use std::{
     cell::RefCell,
     cmp::Ordering,
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     fmt,
     io::{self, BufRead},
     path::{Path, PathBuf},
@@ -31,17 +31,24 @@ use crate::{
     utils::{build_info, persistence::LedgerStore},
 };
 
+use crate::cli::forms::{
+    AccountFormData, AccountInitialData, AccountWizard, CategoryFormData, CategoryInitialData,
+    CategoryWizard, DialoguerInteraction, FormEngine, FormResult,
+};
 use crate::cli::selection::{
     providers::{
-        LedgerBackupSelectionProvider, ProviderError, SimulationSelectionProvider,
-        TransactionSelectionProvider,
+        AccountSelectionProvider, CategorySelectionProvider, LedgerBackupSelectionProvider,
+        ProviderError, SimulationSelectionProvider, TransactionSelectionProvider,
     },
     SelectionError, SelectionManager,
 };
 use crate::cli::selectors::{SelectionOutcome, SelectionProvider};
 
 use super::commands::{CommandDefinition, CommandRegistry};
-use super::output::{error as output_error, info as output_info, warning as output_warning};
+use super::output::{
+    error as output_error, info as output_info, success as output_success,
+    warning as output_warning,
+};
 use super::state::CliState;
 
 const PROMPT_ARROW: &str = "⮞";
@@ -486,6 +493,284 @@ impl CliApp {
         )
     }
 
+    fn select_account_index(&self, prompt: &str) -> Result<Option<usize>, CommandError> {
+        self.select_with(AccountSelectionProvider::new(&self.state), prompt)
+    }
+
+    fn select_category_index(&self, prompt: &str) -> Result<Option<usize>, CommandError> {
+        self.select_with(CategorySelectionProvider::new(&self.state), prompt)
+    }
+
+    fn account_category_options(&self, ledger: &Ledger) -> Vec<(String, Option<Uuid>)> {
+        ledger
+            .categories
+            .iter()
+            .map(|category| {
+                (
+                    format!(
+                        "{} ({:?}) [{}]",
+                        category.name,
+                        category.kind,
+                        short_id(category.id)
+                    ),
+                    Some(category.id),
+                )
+            })
+            .collect()
+    }
+
+    fn category_parent_options(
+        &self,
+        ledger: &Ledger,
+        exclude: &HashSet<Uuid>,
+    ) -> Vec<(String, Option<Uuid>)> {
+        ledger
+            .categories
+            .iter()
+            .filter(|category| !exclude.contains(&category.id))
+            .map(|category| {
+                (
+                    format!(
+                        "{} ({:?}) [{}]",
+                        category.name,
+                        category.kind,
+                        short_id(category.id)
+                    ),
+                    Some(category.id),
+                )
+            })
+            .collect()
+    }
+
+    fn category_descendants(&self, ledger: &Ledger, root: Uuid) -> HashSet<Uuid> {
+        let mut descendants = HashSet::new();
+        let mut stack = vec![root];
+        while let Some(current) = stack.pop() {
+            for category in ledger
+                .categories
+                .iter()
+                .filter(|c| c.parent_id == Some(current))
+            {
+                if descendants.insert(category.id) {
+                    stack.push(category.id);
+                }
+            }
+        }
+        descendants
+    }
+
+    fn apply_account_form(&mut self, data: AccountFormData) -> CommandResult {
+        match data.id {
+            Some(id) => {
+                let ledger = self.current_ledger_mut()?;
+                let updated_name = {
+                    let account = ledger.account_mut(id).ok_or_else(|| {
+                        CommandError::InvalidArguments("Account not found".into())
+                    })?;
+                    account.name = data.name.clone();
+                    account.kind = data.kind;
+                    account.category_id = data.category_id;
+                    account.opening_balance = data.opening_balance;
+                    account.notes = data.notes;
+                    account.name.clone()
+                };
+                ledger.touch();
+                output_success(format!("Account `{}` updated.", updated_name));
+            }
+            None => {
+                let mut account = Account::new(data.name.clone(), data.kind);
+                account.category_id = data.category_id;
+                account.opening_balance = data.opening_balance;
+                account.notes = data.notes;
+                self.current_ledger_mut()?.add_account(account);
+                output_success(format!("Account `{}` added.", data.name));
+            }
+        }
+        Ok(())
+    }
+
+    fn apply_category_form(&mut self, data: CategoryFormData) -> CommandResult {
+        match data.id {
+            Some(id) => {
+                let ledger = self.current_ledger_mut()?;
+                let updated_name = {
+                    let category = ledger.category_mut(id).ok_or_else(|| {
+                        CommandError::InvalidArguments("Category not found".into())
+                    })?;
+                    category.name = data.name.clone();
+                    category.kind = data.kind;
+                    category.parent_id = data.parent_id;
+                    category.is_custom = data.is_custom;
+                    category.notes = data.notes;
+                    category.name.clone()
+                };
+                ledger.touch();
+                output_success(format!("Category `{}` updated.", updated_name));
+            }
+            None => {
+                let mut category = Category::new(data.name.clone(), data.kind);
+                category.parent_id = data.parent_id;
+                category.is_custom = data.is_custom;
+                category.notes = data.notes;
+                self.current_ledger_mut()?.add_category(category);
+                output_success(format!("Category `{}` added.", data.name));
+            }
+        }
+        Ok(())
+    }
+
+    fn run_account_add_wizard(&mut self) -> CommandResult {
+        self.ensure_base_mode("Account creation")?;
+        if self.mode != CliMode::Interactive {
+            return Err(CommandError::InvalidArguments(
+                "usage: add account <name> <kind>".into(),
+            ));
+        }
+
+        let (existing_names, category_options) = {
+            let ledger = self.current_ledger()?;
+            let names: HashSet<String> = ledger.accounts.iter().map(|a| a.name.clone()).collect();
+            let categories = self.account_category_options(ledger);
+            (names, categories)
+        };
+
+        let wizard = AccountWizard::new_create(existing_names, category_options);
+        let mut interaction = DialoguerInteraction::new(&self.theme);
+        match FormEngine::new(&wizard).run(&mut interaction).unwrap() {
+            FormResult::Cancelled => {
+                output_info("Account creation cancelled.");
+                Ok(())
+            }
+            FormResult::Completed(data) => self.apply_account_form(data),
+        }
+    }
+
+    fn run_account_edit_wizard(&mut self, index: usize) -> CommandResult {
+        self.ensure_base_mode("Account editing")?;
+        if self.mode != CliMode::Interactive {
+            return Err(CommandError::InvalidArguments(
+                "usage: account edit <index>".into(),
+            ));
+        }
+
+        let (existing_names, category_options, initial) = {
+            let ledger = self.current_ledger()?;
+            if index >= ledger.accounts.len() {
+                return Err(CommandError::InvalidArguments(
+                    "account index out of range".into(),
+                ));
+            }
+            let account = &ledger.accounts[index];
+            let names: HashSet<String> = ledger.accounts.iter().map(|a| a.name.clone()).collect();
+            let categories = self.account_category_options(ledger);
+            let initial = AccountInitialData {
+                id: account.id,
+                name: account.name.clone(),
+                kind: account.kind.clone(),
+                category_id: account.category_id,
+                opening_balance: account.opening_balance,
+                notes: account.notes.clone(),
+            };
+            (names, categories, initial)
+        };
+
+        let wizard = AccountWizard::new_edit(existing_names, initial, category_options);
+        let mut interaction = DialoguerInteraction::new(&self.theme);
+        match FormEngine::new(&wizard).run(&mut interaction).unwrap() {
+            FormResult::Cancelled => {
+                output_info("Account update cancelled.");
+                Ok(())
+            }
+            FormResult::Completed(data) => self.apply_account_form(data),
+        }
+    }
+
+    fn run_category_add_wizard(&mut self) -> CommandResult {
+        self.ensure_base_mode("Category creation")?;
+        if self.mode != CliMode::Interactive {
+            return Err(CommandError::InvalidArguments(
+                "usage: add category <name> <kind>".into(),
+            ));
+        }
+
+        let (existing_names, parent_options) = {
+            let ledger = self.current_ledger()?;
+            let names: HashSet<String> = ledger.categories.iter().map(|c| c.name.clone()).collect();
+            let parents = self.category_parent_options(ledger, &HashSet::new());
+            (names, parents)
+        };
+
+        let wizard = CategoryWizard::new_create(existing_names, parent_options);
+        let mut interaction = DialoguerInteraction::new(&self.theme);
+        match FormEngine::new(&wizard).run(&mut interaction).unwrap() {
+            FormResult::Cancelled => {
+                output_info("Category creation cancelled.");
+                Ok(())
+            }
+            FormResult::Completed(data) => self.apply_category_form(data),
+        }
+    }
+
+    fn run_category_edit_wizard(&mut self, index: usize) -> CommandResult {
+        self.ensure_base_mode("Category editing")?;
+        if self.mode != CliMode::Interactive {
+            return Err(CommandError::InvalidArguments(
+                "usage: category edit <index>".into(),
+            ));
+        }
+
+        let (existing_names, parent_options, initial, allow_kind_change, allow_custom_change) = {
+            let ledger = self.current_ledger()?;
+            if index >= ledger.categories.len() {
+                return Err(CommandError::InvalidArguments(
+                    "category index out of range".into(),
+                ));
+            }
+            let category = &ledger.categories[index];
+            let names: HashSet<String> = ledger.categories.iter().map(|c| c.name.clone()).collect();
+            let mut exclude = self.category_descendants(ledger, category.id);
+            exclude.insert(category.id);
+            let parents = self.category_parent_options(ledger, &exclude);
+            let initial = CategoryInitialData {
+                id: category.id,
+                name: category.name.clone(),
+                kind: category.kind.clone(),
+                parent_id: category.parent_id,
+                is_custom: category.is_custom,
+                notes: category.notes.clone(),
+            };
+            let allow_kind_change = category.is_custom;
+            let allow_custom_change = category.is_custom;
+            (
+                names,
+                parents,
+                initial,
+                allow_kind_change,
+                allow_custom_change,
+            )
+        };
+
+        if !allow_kind_change || !allow_custom_change {
+            output_info("Note: predefined categories cannot change their type or custom flag.");
+        }
+
+        let wizard = CategoryWizard::new_edit(
+            existing_names,
+            initial,
+            parent_options,
+            allow_kind_change,
+            allow_custom_change,
+        );
+        let mut interaction = DialoguerInteraction::new(&self.theme);
+        match FormEngine::new(&wizard).run(&mut interaction).unwrap() {
+            FormResult::Cancelled => {
+                output_info("Category update cancelled.");
+                Ok(())
+            }
+            FormResult::Completed(data) => self.apply_category_form(data),
+        }
+    }
+
     fn transaction_index_from_arg(
         &self,
         arg: Option<&str>,
@@ -833,30 +1118,7 @@ impl CliApp {
     }
 
     fn add_account_interactive(&mut self) -> CommandResult {
-        if self.active_simulation_name().is_some() {
-            return Err(CommandError::InvalidArguments(
-                "Leave simulation mode before editing accounts".into(),
-            ));
-        }
-        let name: String = Input::with_theme(&self.theme)
-            .with_prompt("Account name")
-            .interact_text()
-            .map_err(CommandError::from)?;
-
-        let kinds = account_kind_options();
-        let selection = Select::with_theme(&self.theme)
-            .with_prompt("Account type")
-            .items(kinds)
-            .default(0)
-            .interact()
-            .map_err(CommandError::from)?;
-        let kind = parse_account_kind(kinds[selection])?;
-
-        let account = Account::new(name, kind);
-        let ledger = self.current_ledger_mut()?;
-        ledger.add_account(account);
-        println!("{}", "Account added".bright_green());
-        Ok(())
+        self.run_account_add_wizard()
     }
 
     fn add_account_script(&mut self, args: &[&str]) -> CommandResult {
@@ -881,30 +1143,7 @@ impl CliApp {
     }
 
     fn add_category_interactive(&mut self) -> CommandResult {
-        if self.active_simulation_name().is_some() {
-            return Err(CommandError::InvalidArguments(
-                "Leave simulation mode before editing categories".into(),
-            ));
-        }
-        let name: String = Input::with_theme(&self.theme)
-            .with_prompt("Category name")
-            .interact_text()
-            .map_err(CommandError::from)?;
-
-        let kinds = category_kind_options();
-        let selection = Select::with_theme(&self.theme)
-            .with_prompt("Category type")
-            .items(kinds)
-            .default(0)
-            .interact()
-            .map_err(CommandError::from)?;
-        let kind = parse_category_kind(kinds[selection])?;
-
-        let category = Category::new(name, kind);
-        let ledger = self.current_ledger_mut()?;
-        ledger.add_category(category);
-        println!("{}", "Category added".bright_green());
-        Ok(())
+        self.run_category_add_wizard()
     }
 
     fn add_category_script(&mut self, args: &[&str]) -> CommandResult {
@@ -2243,10 +2482,22 @@ fn build_commands() -> Vec<CommandDefinition> {
             cmd_add,
         ),
         CommandDefinition::new(
+            "account",
+            "Manage accounts via wizard flows",
+            "account <add|edit|list>",
+            cmd_account,
+        ),
+        CommandDefinition::new(
             "list",
             "List accounts, categories, or transactions",
             "list [accounts|categories|transactions]",
             cmd_list,
+        ),
+        CommandDefinition::new(
+            "category",
+            "Manage categories via wizard flows",
+            "category <add|edit|list>",
+            cmd_category,
         ),
         CommandDefinition::new(
             "summary",
@@ -2688,6 +2939,88 @@ fn cmd_list(app: &mut CliApp, args: &[&str]) -> CommandResult {
         Err(CommandError::InvalidArguments(
             "usage: list <accounts|categories|transactions>".into(),
         ))
+    }
+}
+
+fn cmd_account(app: &mut CliApp, args: &[&str]) -> CommandResult {
+    if args.is_empty() {
+        return Err(CommandError::InvalidArguments(
+            "usage: account <add|edit|list>".into(),
+        ));
+    }
+
+    match args[0].to_lowercase().as_str() {
+        "add" => {
+            if app.mode == CliMode::Interactive && args.len() == 1 {
+                app.run_account_add_wizard()
+            } else {
+                app.add_account_script(&args[1..])
+            }
+        }
+        "edit" => {
+            if app.mode != CliMode::Interactive {
+                return Err(CommandError::InvalidArguments(
+                    "account edit is only available in interactive mode".into(),
+                ));
+            }
+            let index = if args.len() > 1 {
+                args[1].parse::<usize>().map_err(|_| {
+                    CommandError::InvalidArguments("account index must be numeric".into())
+                })?
+            } else {
+                match app.select_account_index("Select an account to edit:")? {
+                    Some(index) => index,
+                    None => return Ok(()),
+                }
+            };
+            app.run_account_edit_wizard(index)
+        }
+        "list" => app.list_accounts(),
+        other => Err(CommandError::InvalidArguments(format!(
+            "unknown account subcommand `{}`",
+            other
+        ))),
+    }
+}
+
+fn cmd_category(app: &mut CliApp, args: &[&str]) -> CommandResult {
+    if args.is_empty() {
+        return Err(CommandError::InvalidArguments(
+            "usage: category <add|edit|list>".into(),
+        ));
+    }
+
+    match args[0].to_lowercase().as_str() {
+        "add" => {
+            if app.mode == CliMode::Interactive && args.len() == 1 {
+                app.run_category_add_wizard()
+            } else {
+                app.add_category_script(&args[1..])
+            }
+        }
+        "edit" => {
+            if app.mode != CliMode::Interactive {
+                return Err(CommandError::InvalidArguments(
+                    "category edit is only available in interactive mode".into(),
+                ));
+            }
+            let index = if args.len() > 1 {
+                args[1].parse::<usize>().map_err(|_| {
+                    CommandError::InvalidArguments("category index must be numeric".into())
+                })?
+            } else {
+                match app.select_category_index("Select a category to edit:")? {
+                    Some(index) => index,
+                    None => return Ok(()),
+                }
+            };
+            app.run_category_edit_wizard(index)
+        }
+        "list" => app.list_categories(),
+        other => Err(CommandError::InvalidArguments(format!(
+            "unknown category subcommand `{}`",
+            other
+        ))),
     }
 }
 
@@ -3192,17 +3525,6 @@ fn parse_time_interval_str(input: &str) -> Result<TimeInterval, CommandError> {
     Ok(TimeInterval { every, unit })
 }
 
-fn account_kind_options() -> &'static [&'static str] {
-    &[
-        "Bank",
-        "Cash",
-        "Savings",
-        "ExpenseDestination",
-        "IncomeSource",
-        "Unknown",
-    ]
-}
-
 fn parse_account_kind(input: &str) -> Result<AccountKind, CommandError> {
     match input.to_lowercase().as_str() {
         "bank" => Ok(AccountKind::Bank),
@@ -3216,10 +3538,6 @@ fn parse_account_kind(input: &str) -> Result<AccountKind, CommandError> {
             other
         ))),
     }
-}
-
-fn category_kind_options() -> &'static [&'static str] {
-    &["Expense", "Income", "Transfer"]
 }
 
 fn parse_category_kind(input: &str) -> Result<CategoryKind, CommandError> {
@@ -3319,6 +3637,12 @@ fn parse_date(input: &str) -> Result<NaiveDate, CommandError> {
     NaiveDate::parse_from_str(input, "%Y-%m-%d").map_err(|_| {
         CommandError::InvalidArguments(format!("invalid date `{}` (use YYYY-MM-DD)", input))
     })
+}
+
+fn short_id(id: Uuid) -> String {
+    let mut short = id.simple().to_string();
+    short.truncate(8);
+    short
 }
 
 #[derive(Debug)]

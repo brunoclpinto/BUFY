@@ -9,6 +9,8 @@ pub struct Category {
     pub kind: CategoryKind,
     pub parent_id: Option<Uuid>,
     pub is_custom: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
 }
 
 impl Category {
@@ -19,6 +21,7 @@ impl Category {
             kind,
             parent_id: None,
             is_custom: true,
+            notes: None,
         }
     }
 }

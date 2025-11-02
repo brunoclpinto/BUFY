@@ -394,6 +394,20 @@ impl Ledger {
         self.accounts.iter().find(|account| account.id == id)
     }
 
+    pub fn account_mut(&mut self, id: Uuid) -> Option<&mut Account> {
+        self.accounts.iter_mut().find(|account| account.id == id)
+    }
+
+    pub fn category(&self, id: Uuid) -> Option<&Category> {
+        self.categories.iter().find(|category| category.id == id)
+    }
+
+    pub fn category_mut(&mut self, id: Uuid) -> Option<&mut Category> {
+        self.categories
+            .iter_mut()
+            .find(|category| category.id == id)
+    }
+
     pub fn simulations(&self) -> &[Simulation] {
         &self.simulations
     }

@@ -18,8 +18,8 @@ The ledger module owns the core domain types. Each struct is `serde`-friendly an
 
 | Type | Purpose | Key Fields | Design Rationale |
 | --- | --- | --- | --- |
-| `Account` | Represents an asset, liability, or logical bucket. | `id`, `name`, `kind` (`AccountKind`). | IDs are UUIDs for cross-file stability; `kind` drives reporting semantics but does not strictly enforce debit/credit rules, keeping the domain flexible. |
-| `Category` | Labels transactions for budgeting and reporting. | `id`, `name`, `kind` (`CategoryKind`), optional parent. | Nested parents let us do future roll-ups; `Option<Uuid>` avoids enforcing hierarchies before the UI needs them. |
+| `Account` | Represents an asset, liability, or logical bucket. | `id`, `name`, `kind` (`AccountKind`), optional `category_id`, optional `currency`, optional `opening_balance`, optional `notes`. | UUIDs keep references stable across persistence. Optional metadata lets the CLI capture wizard-supplied context without forcing every caller to populate it; unfilled fields default to `null` so older ledgers remain backward compatible. |
+| `Category` | Labels transactions for budgeting and reporting. | `id`, `name`, `kind` (`CategoryKind`), optional parent, `is_custom`, optional `notes`. | Nested parents enable future roll-ups while `is_custom` tracks predefined categories whose kind/custom flag is locked by the wizard. Notes provide lightweight documentation for reporting, but the field stays optional for legacy JSON. |
 | `Budget` | Expresses recurring spending guardrails. | `limit_amount`, `recurrence: TimeInterval`, `is_active`. | Reuses the same interval math as transactions so schedules stay consistent. |
 | `TimeInterval` / `TimeUnit` | Date math helper with “next/previous/add” APIs. | `every`, `unit`. | Keeps period calculations centralized and testable, including tricky month/year shifts and leap days. |
 | `Transaction` | Authoritative record of budgeted vs. real movement. | `from_account`, `to_account`, `category_id`, `scheduled_date`, `actual_*`, `recurrence`, `recurrence_series_id`, `status`. | Bundling recurrence metadata with the template transaction removes the need for a separate recurrence table and keeps JSON intuitive (“this transaction repeats monthly…”). `recurrence_series_id` decouples generated instances from their template while maintaining referential integrity. |
@@ -226,6 +226,14 @@ flows use the same philosophy: future entity forms will instantiate the shared
 `FormEngine`, letting the dialogue layer consume queued responses during tests
 and dialoguer prompts in interactive sessions.
 
+### Account & Category Wizards (Phase 15)
+
+- `account add` and `account edit` invoke the wizard when the shell runs in interactive mode. Script mode continues to accept positional parameters (`account add <name> <kind>`); if a user runs `account edit` without arguments, the selection manager surfaces the account list and aborts cleanly on cancel.
+- Account forms capture **Name** (required, case-insensitive uniqueness), **Type** (`Bank`, `Cash`, `Savings`, `Expense destination`, `Income source`, `Unknown`), **Linked category** (optional; “None” remains the default), **Opening balance** (optional numeric, accepts negative values), and **Notes** (optional, trimmed to 512 characters). Edit flows pre-populate defaults so pressing Enter keeps the stored value.
+- `category add` / `category edit` mirror the pattern with fields for **Name**, **Kind** (`Expense`, `Income`, `Transfer`), **Parent category** (optional; the candidate list excludes the category being edited and its descendants to prevent cycles), **Custom vs. Predefined** flag, and **Notes**. Predefined categories automatically lock both the kind and custom flag while still allowing renames, parent reassignment, and note updates.
+- Confirmation commits the result through the ledger’s mutation APIs (additions allocate new UUIDs, edits mutate in place and call `touch()`). Cancellation or validation failures leave the ledger unchanged, keeping persistence semantics identical to the pre-wizard implementation.
+- Selection (Phase 13) provides the missing identifiers for `account edit` and `category edit` when the user omits them, displaying names, kinds, and short ids in the list. Cancel returns to the REPL without side effects.
+
 ### CLI Usage: Interactive vs. Script
 
 | Workflow | Interactive Mode | Script Mode |
@@ -233,6 +241,7 @@ and dialoguer prompts in interactive sessions.
 | Start session | `cargo run --bin budget_core_cli` (auto-load last ledger). | `BUDGET_CORE_CLI_SCRIPT=1 cargo run --bin budget_core_cli -- < commands.txt` |
 | Create ledger | `new-ledger Demo monthly` (prompts for name/period if omitted). | `new-ledger Demo every 2 weeks` |
 | Work with recurrences | `recurring edit 3`, `recurring list overdue`, `complete 5 2025-02-01 1200`. | scripted commands: `recurring sync 2025-03-01` etc. |
+| Manage accounts/categories | `account add/edit/list`, `category add/edit/list` (wizard prompts + selection fallback). | `account add <name> <kind>`, `category add <name> <kind>`; `account edit <index> ...` remains interactive-only. |
 | Save/backup | `save-ledger household`, `backup-ledger`. | `save-ledger household` (no prompts). |
 | Restore | CLI asks for confirmation and reloads automatically. | `restore-ledger 0 household` (non-interactive; assumes the reference is either index or substring). |
 

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Represents a financial account tracked within the ledger.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Account {
     pub id: Uuid,
     pub name: String,
@@ -10,6 +10,10 @@ pub struct Account {
     pub category_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub currency: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opening_balance: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
 }
 
 impl Account {
@@ -21,6 +25,8 @@ impl Account {
             kind,
             category_id: None,
             currency: None,
+            opening_balance: None,
+            notes: None,
         }
     }
 

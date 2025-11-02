@@ -105,3 +105,11 @@ Future phases will:
   ensuring all prompts funnel through the central output helpers.
 - Extend validators and field kinds as new domain requirements arise (e.g.,
   currency selectors, recurrence templates).
+
+## Account & Category Implementations (Phase 15)
+
+The first concrete wizards build on this framework:
+
+- **Account wizard** – used by `account add`/`edit`. Fields include Name (required, unique), Type (choice among the `AccountKind` variants), Linked Category (optional; “None” default), Opening Balance (optional numeric), and Notes (optional, trimmed to 512 chars). The edit mode pre-populates defaults from the selected account; the validator prevents renaming collisions and resolves category selections into UUIDs.
+- **Category wizard** – used by `category add`/`edit`. Fields cover Name, Kind, Parent Category (optional; candidate list excludes the category being edited and its descendants), Custom vs. Predefined flag, and Notes. Predefined categories lock kind/custom while still allowing parent and note updates.
+- Both wizards feed into helper methods (`CliApp::apply_account_form`, `CliApp::apply_category_form`) that either create new domain objects or mutate existing ones, invoke `Ledger::touch()`, and surface success/cancel messages via the shared output helpers. Selection providers from Phase 13 supply the target entity when an `edit` command omits the ID.

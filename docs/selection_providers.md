@@ -9,7 +9,7 @@ knowing domain details.
 
 | Provider | Identifier | Label / Context | Notes |
 | --- | --- | --- | --- |
-| `AccountSelectionProvider` | `usize` (ledger index) | Account name with the account kind as subtitle | Indices keep the prompt stable even if accounts are reordered in memory. Handlers convert the index back into the original account id as needed. |
+| `AccountSelectionProvider` | `usize` (ledger index) | Account name with kind and optional balance in the subtitle | Indices keep the prompt stable even if accounts are reordered in memory. Handlers convert the index back into the original account id as needed. |
 | `CategorySelectionProvider` | `usize` | Category name with kind, optional parent marker in the category field | Parent ids are shown in the `category` field to disambiguate similarly named sub-categories. |
 | `TransactionSelectionProvider` | `usize` | Scheduled date (`YYYY-MM-DD`), budgeted/actual amount in subtitle, recurrence hint in label | Labels call out recurring entries (`• recurring`) to make schedule-driven selections easier. |
 | `SimulationSelectionProvider` | `String` (simulation name) | Simulation name with status subtitle | Names remain the authoritative handle for simulations, matching CLI commands and persistence. |

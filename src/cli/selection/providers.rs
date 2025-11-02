@@ -193,7 +193,11 @@ impl<'a> SelectionProvider for ConfigBackupSelectionProvider<'a> {
 }
 
 fn account_item(index: usize, account: &Account) -> SelectionItem<usize> {
-    SelectionItem::new(index, account.name.clone()).with_subtitle(format!("{:?}", account.kind))
+    let mut subtitle = format!("{:?}", account.kind);
+    if let Some(balance) = account.opening_balance {
+        subtitle.push_str(&format!(" • balance {:.2}", balance));
+    }
+    SelectionItem::new(index, account.name.clone()).with_subtitle(subtitle)
 }
 
 fn category_item(index: usize, category: &Category) -> SelectionItem<usize> {

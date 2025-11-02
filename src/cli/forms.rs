@@ -5,13 +5,17 @@
 //! framework in subsequent phases by describing their fields and leveraging the
 //! generic form engine implemented here.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::convert::Infallible;
 use std::fmt;
 use std::sync::Arc;
 
 use chrono::{NaiveDate, NaiveTime};
+use dialoguer::{theme::ColorfulTheme, Input};
+use uuid::Uuid;
 
 use crate::cli::output;
+use crate::ledger::{AccountKind, CategoryKind};
 
 /// High-level lifecycle states emitted by the form runner.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -198,6 +202,668 @@ impl FormDescriptor {
     }
 }
 
+/// Utility to present menu-style choices while allowing the user to enter
+/// either the display label or its numeric index.
+#[derive(Clone)]
+struct ChoiceMapper<T: Clone + PartialEq + Send + Sync> {
+    display: Vec<String>,
+    values: Vec<T>,
+    alias_to_index: HashMap<String, usize>,
+}
+
+impl<T: Clone + PartialEq + Send + Sync> ChoiceMapper<T> {
+    fn from_pairs(pairs: Vec<(String, T)>) -> Self {
+        let mut display = Vec::new();
+        let mut values = Vec::new();
+        let mut alias_to_index = HashMap::new();
+
+        for (idx, (label, value)) in pairs.into_iter().enumerate() {
+            let index = idx + 1;
+            let display_label = format!("[{}] {}", index, label);
+            alias_to_index.insert(index.to_string(), idx);
+            alias_to_index.insert(label.to_ascii_lowercase(), idx);
+            alias_to_index.insert(display_label.to_ascii_lowercase(), idx);
+            if label.eq_ignore_ascii_case("none") {
+                alias_to_index.insert("none".into(), idx);
+            }
+            display.push(display_label);
+            values.push(value);
+        }
+
+        Self {
+            display,
+            values,
+            alias_to_index,
+        }
+    }
+
+    fn options(&self) -> Vec<String> {
+        self.display.clone()
+    }
+
+    fn resolve(&self, input: &str) -> Option<String> {
+        let key = input.trim().to_ascii_lowercase();
+        self.alias_to_index
+            .get(&key)
+            .map(|index| self.display[*index].clone())
+    }
+
+    fn value_for_display(&self, display: &str) -> Option<&T> {
+        self.display
+            .iter()
+            .position(|candidate| candidate == display)
+            .and_then(|index| self.values.get(index))
+    }
+
+    fn display_for_value(&self, value: &T) -> Option<String> {
+        self.values
+            .iter()
+            .position(|candidate| candidate == value)
+            .map(|index| self.display[index].clone())
+    }
+}
+
+fn normalize_name(name: &str) -> String {
+    name.trim().to_ascii_lowercase()
+}
+
+fn make_name_validator(existing: HashSet<String>) -> Validator {
+    Validator::Custom(Arc::new(move |input| {
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
+            return Err("Name is required".into());
+        }
+        let normalized = normalize_name(trimmed);
+        if existing.contains(&normalized) {
+            Err(format!("Name already exists: `{}`", trimmed))
+        } else {
+            Ok(trimmed.to_string())
+        }
+    }))
+}
+
+fn make_optional_decimal_validator() -> Validator {
+    Validator::Custom(Arc::new(|input| {
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
+            Ok(String::new())
+        } else {
+            trimmed
+                .parse::<f64>()
+                .map(|value| value.to_string())
+                .map_err(|_| "Enter a numeric amount".into())
+        }
+    }))
+}
+
+fn make_notes_validator(max_len: usize) -> Validator {
+    Validator::Custom(Arc::new(move |input| {
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
+            Ok(String::new())
+        } else if trimmed.len() > max_len {
+            Err(format!(
+                "Notes cannot exceed {} characters (got {})",
+                max_len,
+                trimmed.len()
+            ))
+        } else {
+            Ok(trimmed.to_string())
+        }
+    }))
+}
+
+fn make_choice_validator<T: Clone + PartialEq + Send + Sync + 'static>(
+    mapper: ChoiceMapper<T>,
+    field_label: &'static str,
+) -> Validator {
+    let options = mapper.options();
+    let lookup = mapper.clone();
+    Validator::Custom(Arc::new(move |input| {
+        if let Some(display) = lookup.resolve(input) {
+            Ok(display)
+        } else {
+            Err(format!(
+                "Select a valid {} (options: {})",
+                field_label,
+                options.join(", ")
+            ))
+        }
+    }))
+}
+
+fn parse_optional_f64(value: &str) -> Option<f64> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        trimmed.parse::<f64>().ok()
+    }
+}
+
+fn format_amount(value: f64) -> String {
+    if (value.fract()).abs() < f64::EPSILON {
+        format!("{:.0}", value)
+    } else {
+        format!("{:.2}", value)
+    }
+}
+
+fn sanitize_notes(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AccountFormData {
+    pub id: Option<Uuid>,
+    pub name: String,
+    pub kind: AccountKind,
+    pub category_id: Option<Uuid>,
+    pub opening_balance: Option<f64>,
+    pub notes: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct AccountInitialData {
+    pub id: Uuid,
+    pub name: String,
+    pub kind: AccountKind,
+    pub category_id: Option<Uuid>,
+    pub opening_balance: Option<f64>,
+    pub notes: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+enum AccountWizardMode {
+    Create,
+    Edit { id: Uuid },
+}
+
+pub struct AccountWizard {
+    descriptor: FormDescriptor,
+    defaults: BTreeMap<String, String>,
+    mode: AccountWizardMode,
+    kind_choices: ChoiceMapper<AccountKind>,
+    category_choices: ChoiceMapper<Option<Uuid>>,
+}
+
+impl AccountWizard {
+    pub fn new_create(
+        existing_names: HashSet<String>,
+        categories: Vec<(String, Option<Uuid>)>,
+    ) -> Self {
+        Self::build(existing_names, None, categories)
+    }
+
+    pub fn new_edit(
+        existing_names: HashSet<String>,
+        initial: AccountInitialData,
+        categories: Vec<(String, Option<Uuid>)>,
+    ) -> Self {
+        Self::build(existing_names, Some(initial), categories)
+    }
+
+    fn build(
+        existing_names: HashSet<String>,
+        initial: Option<AccountInitialData>,
+        categories: Vec<(String, Option<Uuid>)>,
+    ) -> Self {
+        let mut name_set: HashSet<String> = existing_names
+            .into_iter()
+            .map(|value| value.to_ascii_lowercase())
+            .collect();
+
+        if let Some(data) = &initial {
+            name_set.remove(&normalize_name(&data.name));
+        }
+
+        let name_validator = make_name_validator(name_set);
+
+        let kind_pairs = vec![
+            ("Bank".to_string(), AccountKind::Bank),
+            ("Cash".to_string(), AccountKind::Cash),
+            ("Savings".to_string(), AccountKind::Savings),
+            (
+                "Expense destination".to_string(),
+                AccountKind::ExpenseDestination,
+            ),
+            ("Income source".to_string(), AccountKind::IncomeSource),
+            ("Unknown".to_string(), AccountKind::Unknown),
+        ];
+        let kind_choices = ChoiceMapper::from_pairs(kind_pairs);
+        let kind_validator = make_choice_validator(kind_choices.clone(), "account type");
+
+        let mut category_pairs = Vec::new();
+        category_pairs.push(("None".to_string(), None));
+        for (label, id) in categories {
+            category_pairs.push((label, id));
+        }
+        let category_choices = ChoiceMapper::from_pairs(category_pairs);
+        let category_validator = make_choice_validator(category_choices.clone(), "linked category");
+
+        let mut fields = Vec::new();
+        fields.push(FieldDescriptor::new(
+            "name",
+            "Account name",
+            FieldKind::Text,
+            name_validator,
+        ));
+        fields.push(FieldDescriptor::new(
+            "kind",
+            "Account type",
+            FieldKind::Choice(kind_choices.options()),
+            kind_validator,
+        ));
+        fields.push(
+            FieldDescriptor::new(
+                "category",
+                "Linked category",
+                FieldKind::Choice(category_choices.options()),
+                category_validator,
+            )
+            .with_optional(),
+        );
+        fields.push(
+            FieldDescriptor::new(
+                "opening_balance",
+                "Opening balance",
+                FieldKind::Decimal,
+                make_optional_decimal_validator(),
+            )
+            .with_optional(),
+        );
+        fields.push(
+            FieldDescriptor::new("notes", "Notes", FieldKind::Text, make_notes_validator(512))
+                .with_optional(),
+        );
+
+        let mut defaults = BTreeMap::new();
+        let mode = if let Some(data) = initial {
+            defaults.insert("name".into(), data.name.clone());
+            if let Some(display) = kind_choices.display_for_value(&data.kind) {
+                defaults.insert("kind".into(), display);
+            }
+            if let Some(display) = category_choices.display_for_value(&data.category_id) {
+                defaults.insert("category".into(), display);
+            }
+            if let Some(balance) = data.opening_balance {
+                defaults.insert("opening_balance".into(), format_amount(balance));
+            }
+            if let Some(notes) = data.notes {
+                defaults.insert("notes".into(), notes);
+            }
+            AccountWizardMode::Edit { id: data.id }
+        } else {
+            if let Some(display) = kind_choices.display_for_value(&AccountKind::Bank) {
+                defaults.insert("kind".into(), display);
+            }
+            if let Some(display) = category_choices.display_for_value(&None) {
+                defaults.insert("category".into(), display);
+            }
+            AccountWizardMode::Create
+        };
+
+        Self {
+            descriptor: FormDescriptor::new("account", fields),
+            defaults,
+            mode,
+            kind_choices,
+            category_choices,
+        }
+    }
+}
+
+impl FormFlow for AccountWizard {
+    type Output = AccountFormData;
+    type Error = Infallible;
+
+    fn descriptor(&self) -> &FormDescriptor {
+        &self.descriptor
+    }
+
+    fn defaults(&self) -> BTreeMap<String, String> {
+        self.defaults.clone()
+    }
+
+    fn commit(&self, values: BTreeMap<String, String>) -> Result<Self::Output, Self::Error> {
+        let name = values.get("name").cloned().unwrap_or_default();
+
+        let kind_display = values
+            .get("kind")
+            .cloned()
+            .or_else(|| self.defaults.get("kind").cloned())
+            .or_else(|| self.kind_choices.display_for_value(&AccountKind::Bank))
+            .unwrap_or_else(|| "Bank".into());
+        let kind = self
+            .kind_choices
+            .value_for_display(&kind_display)
+            .cloned()
+            .unwrap_or(AccountKind::Bank);
+
+        let category_display = values
+            .get("category")
+            .cloned()
+            .or_else(|| self.defaults.get("category").cloned())
+            .or_else(|| self.category_choices.display_for_value(&None))
+            .unwrap_or_else(|| "None".into());
+        let category_id = self
+            .category_choices
+            .value_for_display(&category_display)
+            .cloned()
+            .unwrap_or(None);
+
+        let opening_balance = values
+            .get("opening_balance")
+            .and_then(|val| parse_optional_f64(val));
+        let notes = values.get("notes").and_then(|val| sanitize_notes(val));
+
+        let id = match self.mode {
+            AccountWizardMode::Create => None,
+            AccountWizardMode::Edit { id } => Some(id),
+        };
+
+        Ok(AccountFormData {
+            id,
+            name,
+            kind,
+            category_id,
+            opening_balance,
+            notes,
+        })
+    }
+
+    fn cancel(&self) -> Self::Error {
+        unreachable!()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CategoryFormData {
+    pub id: Option<Uuid>,
+    pub name: String,
+    pub kind: CategoryKind,
+    pub parent_id: Option<Uuid>,
+    pub is_custom: bool,
+    pub notes: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct CategoryInitialData {
+    pub id: Uuid,
+    pub name: String,
+    pub kind: CategoryKind,
+    pub parent_id: Option<Uuid>,
+    pub is_custom: bool,
+    pub notes: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+enum CategoryWizardMode {
+    Create,
+    Edit {
+        id: Uuid,
+        locked_kind: CategoryKind,
+        locked_custom: bool,
+    },
+}
+
+pub struct CategoryWizard {
+    descriptor: FormDescriptor,
+    defaults: BTreeMap<String, String>,
+    mode: CategoryWizardMode,
+    kind_choices: Option<ChoiceMapper<CategoryKind>>,
+    parent_choices: ChoiceMapper<Option<Uuid>>,
+    custom_choices: Option<ChoiceMapper<bool>>,
+}
+
+impl CategoryWizard {
+    pub fn new_create(
+        existing_names: HashSet<String>,
+        parent_options: Vec<(String, Option<Uuid>)>,
+    ) -> Self {
+        Self::build(existing_names, None, parent_options, true, true)
+    }
+
+    pub fn new_edit(
+        existing_names: HashSet<String>,
+        initial: CategoryInitialData,
+        parent_options: Vec<(String, Option<Uuid>)>,
+        allow_kind_change: bool,
+        allow_custom_change: bool,
+    ) -> Self {
+        Self::build(
+            existing_names,
+            Some(initial),
+            parent_options,
+            allow_kind_change,
+            allow_custom_change,
+        )
+    }
+
+    fn build(
+        existing_names: HashSet<String>,
+        initial: Option<CategoryInitialData>,
+        parent_options: Vec<(String, Option<Uuid>)>,
+        allow_kind_change: bool,
+        allow_custom_change: bool,
+    ) -> Self {
+        let mut name_set: HashSet<String> = existing_names
+            .into_iter()
+            .map(|value| value.to_ascii_lowercase())
+            .collect();
+
+        if let Some(data) = &initial {
+            name_set.remove(&normalize_name(&data.name));
+        }
+
+        let name_validator = make_name_validator(name_set);
+
+        let kind_pairs = vec![
+            ("Expense".to_string(), CategoryKind::Expense),
+            ("Income".to_string(), CategoryKind::Income),
+            ("Transfer".to_string(), CategoryKind::Transfer),
+        ];
+        let kind_choices = if allow_kind_change {
+            Some(ChoiceMapper::from_pairs(kind_pairs))
+        } else {
+            None
+        };
+
+        let mut parent_pairs = Vec::new();
+        parent_pairs.push(("None".to_string(), None));
+        for (label, id) in parent_options {
+            parent_pairs.push((label, id));
+        }
+        let parent_choices = ChoiceMapper::from_pairs(parent_pairs);
+
+        let custom_pairs = vec![
+            ("Custom (user-defined)".to_string(), true),
+            ("Predefined (protected)".to_string(), false),
+        ];
+        let custom_choices = if allow_custom_change {
+            Some(ChoiceMapper::from_pairs(custom_pairs))
+        } else {
+            None
+        };
+
+        let mut fields = Vec::new();
+        fields.push(FieldDescriptor::new(
+            "name",
+            "Category name",
+            FieldKind::Text,
+            name_validator,
+        ));
+
+        if let Some(mapper) = kind_choices.clone() {
+            fields.push(FieldDescriptor::new(
+                "kind",
+                "Category type",
+                FieldKind::Choice(mapper.options()),
+                make_choice_validator(mapper, "category type"),
+            ));
+        }
+
+        fields.push(
+            FieldDescriptor::new(
+                "parent",
+                "Parent category",
+                FieldKind::Choice(parent_choices.options()),
+                make_choice_validator(parent_choices.clone(), "parent category"),
+            )
+            .with_optional(),
+        );
+
+        if let Some(mapper) = custom_choices.clone() {
+            fields.push(FieldDescriptor::new(
+                "custom",
+                "Custom or predefined",
+                FieldKind::Choice(mapper.options()),
+                make_choice_validator(mapper, "custom flag"),
+            ));
+        }
+
+        fields.push(
+            FieldDescriptor::new("notes", "Notes", FieldKind::Text, make_notes_validator(512))
+                .with_optional(),
+        );
+
+        let mut defaults = BTreeMap::new();
+        let mode = if let Some(data) = initial {
+            defaults.insert("name".into(), data.name.clone());
+            if let Some(mapper) = &kind_choices {
+                if let Some(display) = mapper.display_for_value(&data.kind) {
+                    defaults.insert("kind".into(), display);
+                }
+            }
+            if let Some(display) = parent_choices.display_for_value(&data.parent_id) {
+                defaults.insert("parent".into(), display);
+            }
+            if let Some(mapper) = &custom_choices {
+                if let Some(display) = mapper.display_for_value(&data.is_custom) {
+                    defaults.insert("custom".into(), display);
+                }
+            }
+            if let Some(notes) = data.notes {
+                defaults.insert("notes".into(), notes);
+            }
+            CategoryWizardMode::Edit {
+                id: data.id,
+                locked_kind: data.kind,
+                locked_custom: data.is_custom,
+            }
+        } else {
+            if let Some(mapper) = &kind_choices {
+                if let Some(display) = mapper.display_for_value(&CategoryKind::Expense) {
+                    defaults.insert("kind".into(), display);
+                }
+            }
+            if let Some(display) = parent_choices.display_for_value(&None) {
+                defaults.insert("parent".into(), display);
+            }
+            if let Some(mapper) = &custom_choices {
+                if let Some(display) = mapper.display_for_value(&true) {
+                    defaults.insert("custom".into(), display);
+                }
+            }
+            CategoryWizardMode::Create
+        };
+
+        Self {
+            descriptor: FormDescriptor::new("category", fields),
+            defaults,
+            mode,
+            kind_choices,
+            parent_choices,
+            custom_choices,
+        }
+    }
+}
+
+impl FormFlow for CategoryWizard {
+    type Output = CategoryFormData;
+    type Error = Infallible;
+
+    fn descriptor(&self) -> &FormDescriptor {
+        &self.descriptor
+    }
+
+    fn defaults(&self) -> BTreeMap<String, String> {
+        self.defaults.clone()
+    }
+
+    fn commit(&self, values: BTreeMap<String, String>) -> Result<Self::Output, Self::Error> {
+        let name = values.get("name").cloned().unwrap_or_default();
+
+        let kind = if let Some(mapper) = &self.kind_choices {
+            let display = values
+                .get("kind")
+                .cloned()
+                .or_else(|| self.defaults.get("kind").cloned())
+                .and_then(|value| mapper.value_for_display(&value).cloned())
+                .unwrap_or(CategoryKind::Expense);
+            display
+        } else {
+            match self.mode {
+                CategoryWizardMode::Edit {
+                    ref locked_kind, ..
+                } => locked_kind.clone(),
+                CategoryWizardMode::Create => CategoryKind::Expense,
+            }
+        };
+
+        let parent_display = values
+            .get("parent")
+            .cloned()
+            .or_else(|| self.defaults.get("parent").cloned())
+            .or_else(|| self.parent_choices.display_for_value(&None))
+            .unwrap_or_else(|| "None".into());
+        let parent_id = self
+            .parent_choices
+            .value_for_display(&parent_display)
+            .cloned()
+            .unwrap_or(None);
+
+        let is_custom = if let Some(mapper) = &self.custom_choices {
+            values
+                .get("custom")
+                .cloned()
+                .or_else(|| self.defaults.get("custom").cloned())
+                .and_then(|value| mapper.value_for_display(&value).cloned())
+                .unwrap_or(true)
+        } else {
+            match self.mode {
+                CategoryWizardMode::Edit { locked_custom, .. } => locked_custom,
+                CategoryWizardMode::Create => true,
+            }
+        };
+
+        let notes = values.get("notes").and_then(|value| sanitize_notes(value));
+
+        let id = match self.mode {
+            CategoryWizardMode::Create => None,
+            CategoryWizardMode::Edit { id, .. } => Some(id),
+        };
+
+        Ok(CategoryFormData {
+            id,
+            name,
+            kind,
+            parent_id,
+            is_custom,
+            notes,
+        })
+    }
+
+    fn cancel(&self) -> Self::Error {
+        unreachable!()
+    }
+}
+
 /// Snapshot of collected data displayed before final confirmation.
 #[derive(Default)]
 pub struct FormSummary {
@@ -214,6 +880,77 @@ pub trait FormInteraction {
     ) -> PromptResponse;
 
     fn confirm(&mut self, summary: &FormSummary) -> ConfirmationResponse;
+}
+
+/// Default interactive implementation backed by `dialoguer`.
+pub struct DialoguerInteraction<'a> {
+    theme: &'a ColorfulTheme,
+}
+
+impl<'a> DialoguerInteraction<'a> {
+    pub fn new(theme: &'a ColorfulTheme) -> Self {
+        Self { theme }
+    }
+}
+
+impl<'a> FormInteraction for DialoguerInteraction<'a> {
+    fn prompt_field(
+        &mut self,
+        _descriptor: &FieldDescriptor,
+        default: Option<&str>,
+    ) -> PromptResponse {
+        let mut input = Input::<String>::with_theme(self.theme);
+        if let Some(default_value) = default {
+            if !default_value.is_empty() {
+                input = input.with_initial_text(default_value);
+            }
+        }
+        input = input.allow_empty(true).with_prompt("> ");
+        let response = match input.interact_text() {
+            Ok(value) => value,
+            Err(_) => return PromptResponse::Cancel,
+        };
+
+        let trimmed = response.trim();
+        match trimmed.to_ascii_lowercase().as_str() {
+            "cancel" => PromptResponse::Cancel,
+            "back" => PromptResponse::Back,
+            "help" => PromptResponse::Help,
+            _ => {
+                if trimmed.is_empty() {
+                    if default.is_some() {
+                        PromptResponse::Keep
+                    } else {
+                        PromptResponse::Value(String::new())
+                    }
+                } else if default.map(|d| d == response).unwrap_or(false) {
+                    PromptResponse::Keep
+                } else {
+                    PromptResponse::Value(response)
+                }
+            }
+        }
+    }
+
+    fn confirm(&mut self, _summary: &FormSummary) -> ConfirmationResponse {
+        loop {
+            let input = Input::<String>::with_theme(self.theme)
+                .with_prompt("Confirm? (yes/no/back/cancel)")
+                .allow_empty(true);
+            let response = match input.interact_text() {
+                Ok(value) => value,
+                Err(_) => return ConfirmationResponse::Cancel,
+            };
+            match response.trim().to_ascii_lowercase().as_str() {
+                "" | "y" | "yes" => return ConfirmationResponse::Confirm,
+                "n" | "no" | "cancel" => return ConfirmationResponse::Cancel,
+                "back" => return ConfirmationResponse::Back,
+                _ => {
+                    output::warning("Enter yes, no, back, or cancel.");
+                }
+            }
+        }
+    }
 }
 
 /// Represents an in-progress wizard session. Callers may drive the session
@@ -504,7 +1241,10 @@ fn render_prompt(descriptor: &FieldDescriptor, default: Option<&str>) {
     }
 
     if let FieldKind::Choice(options) = &descriptor.kind {
-        output::info(format!("Options: {}", options.join(", ")));
+        output::info("Options:");
+        for option in options {
+            output::info(format!("  {}", option));
+        }
     }
 }
 
@@ -535,7 +1275,9 @@ fn build_summary(descriptor: &FormDescriptor, values: &BTreeMap<String, String>)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
     use std::sync::OnceLock;
+    use uuid::Uuid;
 
     struct MockInteraction {
         prompts: std::collections::VecDeque<PromptResponse>,
@@ -718,6 +1460,78 @@ mod tests {
             FormResult::Completed(values) => {
                 assert_eq!(values.get("name").unwrap(), "Snacks");
                 assert_eq!(values.get("amount").unwrap(), "25");
+            }
+            other => panic!("Unexpected result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn account_wizard_collects_all_fields() {
+        let wizard = AccountWizard::new_create(HashSet::new(), Vec::new());
+        let mut interaction = MockInteraction::new(
+            vec![
+                PromptResponse::Value("Checking".into()),
+                PromptResponse::Value("1".into()),
+                PromptResponse::Keep,
+                PromptResponse::Value("500".into()),
+                PromptResponse::Value("Primary checking".into()),
+            ],
+            vec![ConfirmationResponse::Confirm],
+        );
+
+        let result = FormEngine::new(&wizard).run(&mut interaction).unwrap();
+        match result {
+            FormResult::Completed(data) => {
+                assert_eq!(data.id, None);
+                assert_eq!(data.name, "Checking");
+                assert_eq!(data.kind, AccountKind::Bank);
+                assert_eq!(data.category_id, None);
+                assert_eq!(data.opening_balance, Some(500.0));
+                assert_eq!(data.notes.as_deref(), Some("Primary checking"));
+            }
+            other => panic!("Unexpected result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn category_wizard_respects_locked_fields() {
+        let category_id = Uuid::new_v4();
+        let parent_id = Uuid::new_v4();
+        let initial = CategoryInitialData {
+            id: category_id,
+            name: "Rent".into(),
+            kind: CategoryKind::Expense,
+            parent_id: None,
+            is_custom: false,
+            notes: Some("Fixed".into()),
+        };
+        let existing_names: HashSet<String> = HashSet::from(["Rent".into(), "Utilities".into()]);
+        let mut shorthand = parent_id.simple().to_string();
+        shorthand.truncate(8);
+        let parent_label = format!("Housing (Expense) [{}]", shorthand);
+        let parent_options = vec![(parent_label, Some(parent_id))];
+
+        let wizard =
+            CategoryWizard::new_edit(existing_names, initial, parent_options, false, false);
+
+        let mut interaction = MockInteraction::new(
+            vec![
+                PromptResponse::Value("Rent (Updated)".into()),
+                PromptResponse::Value("2".into()),
+                PromptResponse::Value("Updated note".into()),
+            ],
+            vec![ConfirmationResponse::Confirm],
+        );
+
+        let result = FormEngine::new(&wizard).run(&mut interaction).unwrap();
+        match result {
+            FormResult::Completed(data) => {
+                assert_eq!(data.id, Some(category_id));
+                assert_eq!(data.name, "Rent (Updated)");
+                assert_eq!(data.kind, CategoryKind::Expense);
+                assert_eq!(data.is_custom, false);
+                assert_eq!(data.parent_id, Some(parent_id));
+                assert_eq!(data.notes.as_deref(), Some("Updated note"));
             }
             other => panic!("Unexpected result: {:?}", other),
         }
