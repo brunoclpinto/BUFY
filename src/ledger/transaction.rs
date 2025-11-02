@@ -16,6 +16,8 @@ pub struct Transaction {
     pub actual_amount: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub currency: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
     pub recurrence: Option<Recurrence>,
     #[serde(default)]
     pub recurrence_series_id: Option<Uuid>,
@@ -41,6 +43,7 @@ impl Transaction {
             budgeted_amount,
             actual_amount: None,
             currency: None,
+            notes: None,
             recurrence: None,
             recurrence_series_id: None,
             status: TransactionStatus::Planned,

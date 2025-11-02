@@ -408,6 +408,33 @@ impl Ledger {
             .find(|category| category.id == id)
     }
 
+    pub fn transaction(&self, id: Uuid) -> Option<&Transaction> {
+        self.transactions
+            .iter()
+            .find(|transaction| transaction.id == id)
+    }
+
+    pub fn transaction_mut(&mut self, id: Uuid) -> Option<&mut Transaction> {
+        self.transactions
+            .iter_mut()
+            .find(|transaction| transaction.id == id)
+    }
+
+    pub fn remove_transaction(&mut self, id: Uuid) -> Option<Transaction> {
+        if let Some(pos) = self
+            .transactions
+            .iter()
+            .position(|transaction| transaction.id == id)
+        {
+            let removed = self.transactions.remove(pos);
+            self.refresh_recurrence_metadata();
+            self.touch();
+            Some(removed)
+        } else {
+            None
+        }
+    }
+
     pub fn simulations(&self) -> &[Simulation] {
         &self.simulations
     }
