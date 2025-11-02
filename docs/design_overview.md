@@ -212,7 +212,7 @@ The CLI is now split into focused modules so future interactive features can plu
 - `cli::output` – unified helpers for info/warning/error/success messaging so future selectors/forms can render consistently.
 - `cli::selectors` – shared data contracts (`SelectionItem`, `SelectionOutcome`, `SelectionProvider`).
 - `cli::selection` – manager + providers that surface auto-selection lists when commands are missing identifiers. Providers cover accounts, categories, transactions, simulations, and backups; the manager uses Dialoguer by default and supports scripted/test overrides.
-- `cli::forms` – placeholder interfaces for upcoming wizard flows (Phase 14).
+- `cli::forms` – reusable wizard engine (Phase 14). Entities describe their fields via `FieldDescriptor`s, validators, and defaults sourced from `CliState`. The shared `FormEngine` handles prompting, navigation (`back`/`help`/`cancel`), immediate validation feedback, and final confirmation before returning structured results to the caller.
 
 Command handlers still live alongside the shell for now, but they interact with the registry/state/output instead of writing directly to stdout or poking global variables. Script mode continues to use the same entry point (`run_cli`) and benefits from the new modular boundary.
 
@@ -221,7 +221,10 @@ When a required argument is omitted in interactive mode, the handler calls into
 the user to choose an entry. Cancelling simply returns control to the prompt;
 supplying a value proceeds exactly as if it had been typed initially. Tests can
 exercise the same code paths by queueing deterministic selections via the
-`SelectionOverride` helper, keeping script-mode fixtures repeatable.
+`SelectionOverride` helper, keeping script-mode fixtures repeatable. Wizard-style
+flows use the same philosophy: future entity forms will instantiate the shared
+`FormEngine`, letting the dialogue layer consume queued responses during tests
+and dialoguer prompts in interactive sessions.
 
 ### CLI Usage: Interactive vs. Script
 
