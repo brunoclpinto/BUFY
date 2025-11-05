@@ -229,6 +229,14 @@ flows use the same philosophy: future entity forms will instantiate the shared
 `FormEngine`, letting the dialogue layer consume queued responses during tests
 and dialoguer prompts in interactive sessions.
 
+#### Unified Output & Accessibility (Phase 19)
+
+- **Message kinds** – every command routes through `cli::output`, which prefixes messages with textual status labels (`INFO:`, `SUCCESS:`, `WARNING:`, `ERROR:`, `PROMPT:`) plus ASCII-friendly icons. That keeps transcripts understandable for screen readers and in monochrome terminals.
+- **Output preferences** – `OutputPreferences` capture `screen_reader_mode`, `high_contrast_mode`, `quiet_mode`, and `audio_feedback`. Configuration commands update these flags at runtime so new output immediately reflects the user’s accessibility choices.
+- **Layout rules** – sections render via `output::section("Title")`, lists/rows indent by two spaces through `output::info`, and separators/blank lines go through dedicated helpers. Direct `println!`/colour calls are banned outside `cli::output`.
+- **Interactive flows** – wizards show step counters (`Step 3 of 10`), `[default]` hints, and consistent `back`/`cancel` controls; validation errors re-render the prompt via `output::error`. Selection lists share the same “Select …” header, numbered rows, and `Type cancel to abort.` footer.
+- **Non-colour operation** – prompts no longer rely on ANSI styling; even the simulation banner in the prompt is rendered as plain `[sim:name]`. High-contrast mode bolds success/warning/error headings instead of changing colours, while `audio_feedback` adds `[ding]` to warnings/errors for low-vision cues.
+
 ### Account & Category Wizards (Phase 15)
 
 - `account add` and `account edit` invoke the wizard when the shell runs in interactive mode. Script mode continues to accept positional parameters (`account add <name> <kind>`); if a user runs `account edit` without arguments, the selection manager surfaces the account list and aborts cleanly on cancel.
