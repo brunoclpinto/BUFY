@@ -47,6 +47,7 @@ Phase 3 introduces an interactive `rustyline`-powered shell that wraps the ledge
 
 - **Ledger workflows** – `new-ledger`, `save`, `load`, and their named counterparts (`save-ledger`, `load-ledger`) keep the working set obvious. The prompt reflects the active ledger, and auto-complete/history improve ergonomics.
 - **Data entry** – guided prompts for accounts, categories, and transactions with validation, plus script-mode (`BUDGET_CORE_CLI_SCRIPT=1`) automation for tests and CI. Transaction listings annotate recurrence hints (`[recurring]`, `[instance]`). The `transaction` command family (`transaction add/edit/remove/show/complete`) now fronts the ledger workflow: add/edit launch the Phase 14 form engine, while remove/show/complete fall back to the shared selection manager when the user omits an index.
+- **Simulation & backup selectors** – `simulation apply/discard/enter/show`, `restore-ledger`, `config restore`, and their list counterparts render the same two-space numbered menu. When identifiers are missing, the selector prints “Type cancel or press Esc to abort.”, accepts arrow keys or number shortcuts, and returns the exact item name on success. Empty domains (no simulations/backups) surface domain-specific warnings instead of generic “No items available.” alerts.
 - **Recurrence tooling** – `recurring list/edit/clear/pause/resume/skip/sync` and `complete <idx>` manage schedules without leaving the shell.
 - **Forecasting & simulations** – `forecast`, `summary <simulation>`, and `simulation add/modify/exclude` expose future-looking views side-by-side with base results.
 - **Persistence integration** – the CLI auto-loads the last ledger, exposes backup/restore commands, and surfaces migration warnings emitted by `LedgerStore`.
@@ -290,3 +291,19 @@ CLI helpers map these into `CommandError`, allowing interactive sessions to prov
 - **Selection integration** – `transaction edit`, `transaction remove`, `transaction show`, and `transaction complete` all reuse the global selection manager when the caller omits an index. Empty ledgers short-circuit the workflow with a friendly "No transactions available" banner rather than dropping into a prompt.
 
 - **Developer note:** adding another transaction field requires updating the descriptor list in `TransactionWizard::build`, wiring the validator, and extending `CliApp::populate_transaction_from_form`. The form engine takes care of navigation, confirmation, and cancellation semantics once the descriptor is in place.
+- **Selection examples** – interactive flows now look identical across domains:
+
+```text
+Select a simulation to apply:
+   1. Budget-Stress-Test           (Created: 2025-10-10)
+   2. Holiday-Plan                 (Created: 2025-09-01)
+   3. Mortgage-Scenario            (Created: 2025-08-18)
+   Type cancel or press Esc to abort.
+
+Select a backup to restore:
+   1. home_2025-11-01.json.bak     (Created: 2025-11-01 07:30)
+      /Users/.../BUFY/backups/home/home_2025-11-01.json.bak
+   2. home_2025-10-01.json.bak     (Created: 2025-10-01 07:25)
+      /Users/.../BUFY/backups/home/home_2025-10-01.json.bak
+   Type cancel or press Esc to abort.
+```

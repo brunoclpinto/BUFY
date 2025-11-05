@@ -44,7 +44,9 @@ current CLI implementation.
    `SelectionProvider::items()`.
 3. **Display** – `SelectionManager` renders labels and uses either the Dialoguer
    selector (`choose_with_dialoguer`) or the queued override to obtain a
-   selected index.
+   selected index. Items are always printed with two leading spaces and
+   pre-numbered (`  1. …`), followed by a `Type cancel or press Esc to abort.`
+   hint so scripting and accessibility tooling receive consistent output.
 4. **Continuation** – command handlers receive the resulting identifier. If the
    user cancels, the command simply aborts without side effects; otherwise, the
    handler proceeds as if the argument had been supplied explicitly.
