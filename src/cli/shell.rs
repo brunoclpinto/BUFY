@@ -25,11 +25,11 @@ use crate::{
         BudgetSummary, Category, DateWindow, ForecastReport, Ledger, Recurrence, RecurrenceEnd,
         RecurrenceMode, RecurrenceSnapshot, RecurrenceStatus, ScheduledStatus,
         SimulationBudgetImpact, SimulationChange, SimulationStatus, SimulationTransactionPatch,
-        TimeInterval, TimeUnit, Transaction, TransactionStatus,
+        TimeInterval, TimeUnit, Transaction, TransactionStatus, CURRENT_SCHEMA_VERSION,
     },
     utils::{
-        build_info,
-        persistence::{ConfigData, ConfigSnapshot, LedgerStore},
+        build_info::{self, CLI_VERSION},
+        persistence::{ConfigData, ConfigSnapshot, LedgerStore, CONFIG_BACKUP_SCHEMA_VERSION},
     },
 };
 
@@ -3049,6 +3049,12 @@ fn build_commands() -> Vec<CommandDefinition> {
 fn cmd_version(_app: &mut CliApp, _args: &[&str]) -> CommandResult {
     let meta = build_info::current();
     output_section(format!("Budget Core {}", meta.version));
+    output_info(format!("  CLI version  : {}", CLI_VERSION));
+    output_info(format!("  Schema ver   : v{}", CURRENT_SCHEMA_VERSION));
+    output_info(format!(
+        "  Config schema: v{}",
+        CONFIG_BACKUP_SCHEMA_VERSION
+    ));
     output_info(format!(
         "  Build hash   : {} ({})",
         meta.git_hash, meta.git_status

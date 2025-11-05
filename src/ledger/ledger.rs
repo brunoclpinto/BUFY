@@ -246,7 +246,7 @@ impl SimulationTransactionPatch {
     }
 }
 
-const CURRENT_SCHEMA_VERSION: u8 = 4;
+pub const CURRENT_SCHEMA_VERSION: u8 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Ledger {

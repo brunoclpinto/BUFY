@@ -10,6 +10,9 @@ pub struct BuildMetadata {
     pub rustc: &'static str,
 }
 
+/// CLI semantic version derived from the crate metadata.
+pub const CLI_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// Returns the statically-embedded build metadata.
 pub fn current() -> BuildMetadata {
     BuildMetadata {

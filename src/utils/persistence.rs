@@ -24,7 +24,7 @@ const TMP_SUFFIX: &str = "tmp";
 const DEFAULT_RETENTION: usize = 5;
 const CONFIG_BACKUP_DIR: &str = "config_backups";
 const CONFIG_FILE: &str = "config.json";
-const CONFIG_BACKUP_SCHEMA_VERSION: u32 = 1;
+pub const CONFIG_BACKUP_SCHEMA_VERSION: u32 = 1;
 
 /// Writes the provided ledger to disk atomically.
 pub fn save_ledger_to_file(ledger: &Ledger, path: &Path) -> Result<(), LedgerError> {
