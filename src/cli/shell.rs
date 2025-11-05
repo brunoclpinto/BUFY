@@ -8,7 +8,6 @@ use std::{
 };
 
 use chrono::{Duration, Local, NaiveDate, Utc, Weekday};
-use colored::Colorize;
 use dialoguer::{theme::ColorfulTheme, Confirm, Input, Select};
 use rustyline::{error::ReadlineError, DefaultEditor};
 use shell_words::split;
@@ -288,7 +287,7 @@ impl CliApp {
                     }
                 }
                 Err(ReadlineError::Eof) => {
-                    println!("{}", "Exiting shell".bright_black());
+                    output_info("Exiting shell.");
                     break;
                 }
                 Err(err) => return Err(err.into()),
@@ -309,18 +308,9 @@ impl CliApp {
         let sim_segment = self
             .state
             .active_simulation()
-            .map(|name| format!("[sim:{}]", name).bright_magenta().to_string())
+            .map(|name| format!(" [sim:{}]", name))
             .unwrap_or_default();
-        format!(
-            "{}{} {} ",
-            context.bright_cyan(),
-            if sim_segment.is_empty() {
-                String::new()
-            } else {
-                format!(" {}", sim_segment)
-            },
-            PROMPT_ARROW.bright_black()
-        )
+        format!("{context}{sim_segment} {arrow} ", context = context, sim_segment = sim_segment, arrow = PROMPT_ARROW)
     }
 
     fn report_load(&self, warnings: &[String], migrations: &[String]) {
@@ -377,11 +367,7 @@ impl CliApp {
 
         if let Some((distance, best)) = suggestions.first() {
             if *distance <= 3 {
-                output_info(format!(
-                    "{} {}?",
-                    "Did you mean".bright_black(),
-                    best.bright_white()
-                ));
+                output_info(format!("Suggestion: `{}`?", best));
             }
         }
     }
@@ -1059,7 +1045,7 @@ impl CliApp {
         let period = self.prompt_budget_period()?;
         let ledger = Ledger::new(name.clone(), period);
         self.set_ledger(ledger, None, Some(name));
-        println!("{}", "New ledger created".bright_green());
+        output_success("New ledger created.");
         Ok(())
     }
 
@@ -1178,7 +1164,7 @@ impl CliApp {
         let period = parse_period(&period_str)?;
         let ledger = Ledger::new(name.clone(), period);
         self.set_ledger(ledger, None, Some(name));
-        println!("{}", "New ledger created".bright_green());
+        output_success("New ledger created.");
         Ok(())
     }
 
@@ -1188,10 +1174,7 @@ impl CliApp {
             .load_from_path(path)
             .map_err(CommandError::from_ledger)?;
         self.set_ledger(report.ledger, Some(path.to_path_buf()), None);
-        println!(
-            "{}",
-            format!("Ledger loaded from {}", path.display()).bright_green()
-        );
+        output_success(format!("Ledger loaded from {}.", path.display()));
         self.report_load(&report.warnings, &report.migrations);
         let _ = self.store.record_last_ledger(None);
         Ok(())
@@ -1204,10 +1187,7 @@ impl CliApp {
             .map_err(CommandError::from_ledger)?;
         self.state.set_path(Some(path.to_path_buf()));
         self.state.set_named(None);
-        println!(
-            "{}",
-            format!("Ledger saved to {}", path.display()).bright_green()
-        );
+        output_success(format!("Ledger saved to {}.", path.display()));
         Ok(())
     }
 
@@ -1218,10 +1198,11 @@ impl CliApp {
             .map_err(CommandError::from_ledger)?;
         let path = self.store.ledger_path(name);
         self.set_ledger(report.ledger, Some(path.clone()), Some(name.to_string()));
-        println!(
-            "{}",
-            format!("Ledger `{}` loaded from {}", name, path.display()).bright_green()
-        );
+        output_success(format!(
+            "Ledger `{}` loaded from {}.",
+            name,
+            path.display()
+        ));
         self.report_load(&report.warnings, &report.migrations);
         let _ = self.store.record_last_ledger(Some(name));
         Ok(())
@@ -1235,10 +1216,11 @@ impl CliApp {
             .map_err(CommandError::from_ledger)?;
         self.state.set_path(Some(path.clone()));
         self.state.set_named(Some(name.to_string()));
-        println!(
-            "{}",
-            format!("Ledger `{}` saved to {}", name, path.display()).bright_green()
-        );
+        output_success(format!(
+            "Ledger `{}` saved to {}.",
+            name,
+            path.display()
+        ));
         let _ = self.store.record_last_ledger(Some(name));
         Ok(())
     }
@@ -1248,10 +1230,7 @@ impl CliApp {
             .store
             .backup_named(name)
             .map_err(CommandError::from_ledger)?;
-        println!(
-            "{}",
-            format!("Backup created at {}", path.display()).bright_green()
-        );
+        output_success(format!("Backup created at {}.", path.display()));
         Ok(())
     }
 
@@ -1552,7 +1531,7 @@ impl CliApp {
         let account = Account::new(name, kind);
         let ledger = self.current_ledger_mut()?;
         ledger.add_account(account);
-        println!("{}", "Account added".bright_green());
+        output_success("Account added.");
         Ok(())
     }
 
@@ -1577,7 +1556,7 @@ impl CliApp {
         let category = Category::new(name, kind);
         let ledger = self.current_ledger_mut()?;
         ledger.add_category(category);
-        println!("{}", "Category added".bright_green());
+        output_success("Category added.");
         Ok(())
     }
 
@@ -3622,18 +3601,18 @@ fn cmd_list_simulations(app: &mut CliApp, _args: &[&str]) -> CommandResult {
     let ledger = app.current_ledger()?;
     let sims = ledger.simulations();
     if sims.is_empty() {
-        println!("{}", "No simulations defined".bright_black());
+        output_warning("No simulations defined.");
         return Ok(());
     }
-    println!("{}", "Simulations:".bright_white().bold());
+    output_section("Simulations");
     for sim in sims {
-        println!(
-            "  {:<20} {:<8} changes:{:>2} updated:{}",
-            sim.name.bright_magenta(),
+        output_info(format!(
+            "  {:<20} {:<10} changes:{:>2} updated:{}",
+            sim.name,
             format!("{:?}", sim.status),
             sim.changes.len(),
             sim.updated_at
-        );
+        ));
     }
     Ok(())
 }
@@ -3671,10 +3650,7 @@ fn cmd_create_simulation(app: &mut CliApp, args: &[&str]) -> CommandResult {
     ledger
         .create_simulation(name.clone(), notes)
         .map_err(CommandError::from_ledger)?;
-    println!(
-        "{}",
-        format!("Simulation `{}` created", name).bright_green()
-    );
+    output_success(format!("Simulation `{}` created.", name));
     Ok(())
 }
 
@@ -3721,7 +3697,7 @@ fn cmd_leave_simulation(app: &mut CliApp, _args: &[&str]) -> CommandResult {
         ));
     }
     app.state.set_active_simulation(None);
-    println!("{}", "Simulation mode cleared".bright_green());
+    output_success("Simulation mode cleared.");
     Ok(())
 }
 
