@@ -2,9 +2,11 @@ use budget_core::currency::{format_currency_value, CurrencyCode, FormatOptions, 
 
 #[test]
 fn formats_currency_with_locale() {
-    let mut locale = LocaleConfig::default();
-    locale.decimal_separator = ',';
-    locale.grouping_separator = ' ';
+    let locale = LocaleConfig {
+        decimal_separator: ',',
+        grouping_separator: ' ',
+        ..LocaleConfig::default()
+    };
     let options = FormatOptions {
         currency_display: budget_core::currency::CurrencyDisplay::Symbol,
         negative_style: budget_core::currency::NegativeStyle::Parentheses,

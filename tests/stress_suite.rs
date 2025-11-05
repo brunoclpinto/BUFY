@@ -105,7 +105,7 @@ fn stress_repeated_save_load_and_forecast_cycles() {
 
     let mut reference = NaiveDate::from_ymd_opt(2025, 1, 1).unwrap();
     for step in 0..24 {
-        reference = reference + Duration::days(15);
+        reference += Duration::days(15);
         let created = ledger.materialize_due_recurrences(reference);
         if created > 0 {
             for txn in ledger.transactions.iter_mut() {

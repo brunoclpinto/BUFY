@@ -3,7 +3,6 @@ use budget_core::{
     utils::persistence::LedgerStore,
 };
 use chrono::NaiveDate;
-use serde_json;
 use std::fs;
 use std::path::Path;
 use tempfile::tempdir;
