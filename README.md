@@ -13,6 +13,13 @@ Budget Core provides a reusable Rust toolkit for building budgeting workflows, s
 
 For architectural background see `docs/design_overview.md`.
 
+### Documentation
+
+- Developer reference: `docs/cli_developer_reference.md`
+- User guide: `docs/cli_user_guide.md`
+- Accessibility and localization details: `docs/localization_and_accessibility.md`
+- Testing plan: `docs/testing_strategy.md`
+
 ## Getting Started
 
 1. **Install prerequisites**
