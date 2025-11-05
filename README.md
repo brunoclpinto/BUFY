@@ -59,6 +59,13 @@ For architectural background see `docs/design_overview.md`.
 | Summaries | `summary [past|future <n> | custom <start> <end>]` | Default view shows the active budget period; optional simulation overlay highlights deltas. |
 | Meta | `version` | Print build metadata (crate version, git hash, target, rustc, FFI version when available). |
 
+#### CLI Output & Accessibility
+
+- Every message passes through the shared formatter (`cli::output`), which prefixes content with explicit labels (`INFO:`, `SUCCESS:`, `WARNING:`, `ERROR:`, `PROMPT:`) and ASCII-friendly icons. Lists indent by two spaces and section headers render as `=== Title ===`, keeping transcripts screen-reader friendly and colour independent.
+- `config screen-reader on` swaps compact tables for sentence-form rows (“Account: Checking · Kind: Bank”), while `config high-contrast on` disables ANSI styling entirely. Combine them when recording transcripts or screenshots so the output mirrors assistive-technology defaults.
+- Interactive lists (transactions, simulations, backups, etc.) always show a header (`Select a simulation:`), numbered entries, and the footer `Type cancel to abort.`. Cancelling prints `WARNING: [!] Operation cancelled.` for deterministic scripting.
+- Wizard prompts display progress (`Step 4 of 10`), render defaults in square brackets, and accept `back`, `help`, or `cancel` on any field. Validation errors reprint the field with `ERROR:` messaging before allowing you to continue.
+
 Use `BUDGET_CORE_HOME=/custom/path` to relocate the managed store. `save-ledger <name>` remembers the canonical filename and enables quick resaves without re-entering the path.
 
 ## Forecasting & Recurrence

@@ -15,6 +15,14 @@ This guide captures the conventions used by Budget Core to present numbers, date
 
 All settings persist with the ledger JSON so users can customise per-ledger defaults. CLI commands accept overrides (for example, `forecast 90 days --screen-reader`) when temporary changes are required.
 
+## CLI Output Format
+
+- **Status prefixes** – All messages run through `cli::output`, which renders textual prefixes and ascii-friendly icons (`INFO: [i]`, `SUCCESS: [✓]`, `WARNING: [!]`, `ERROR: [x]`, `PROMPT: >`). This keeps transcripts meaningful even when colours are disabled or a screen reader flattens styling.
+- **Sections & lists** – Headings use `output::section`, producing `=== Title ===`. Row-style output is indented by two spaces and avoids tabular ASCII art; separators are textual lines (`----------------------------------------`) so narration remains predictable.
+- **Selections** – Interactive selectors share a standard layout (`Select an account:`, numbered items, `Type cancel to abort.`). Cancelling always emits `WARNING: [!] Operation cancelled.` for deterministic scripting.
+- **Wizards** – Each step displays `Step N of M`, shows defaults in `[square brackets]`, and accepts `back`, `help`, and `cancel`. Validation errors emit `ERROR:` messages inline before re-prompting.
+- **Audio cues** – When `audio_feedback` is enabled (future enhancement), warnings and errors append `[ding]` to provide a textual analogue of the terminal bell.
+
 ## Formatting Rules
 
 1. **Deterministic rounding** – Currency values are stored internally as `f64` but formatted using the currency’s declared minor units (e.g., JPY→0 decimals, KWD→3). Conversion totals sum raw amounts before rounding to avoid drift.

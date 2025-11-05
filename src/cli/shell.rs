@@ -236,10 +236,7 @@ impl CliApp {
                 "off"
             }
         ));
-        output_info(format!(
-            "  Valuation policy: {:?}",
-            ledger.valuation_policy
-        ));
+        output_info(format!("  Valuation policy: {:?}", ledger.valuation_policy));
         Ok(())
     }
 
@@ -310,7 +307,12 @@ impl CliApp {
             .active_simulation()
             .map(|name| format!(" [sim:{}]", name))
             .unwrap_or_default();
-        format!("{context}{sim_segment} {arrow} ", context = context, sim_segment = sim_segment, arrow = PROMPT_ARROW)
+        format!(
+            "{context}{sim_segment} {arrow} ",
+            context = context,
+            sim_segment = sim_segment,
+            arrow = PROMPT_ARROW
+        )
     }
 
     fn report_load(&self, warnings: &[String], migrations: &[String]) {
@@ -1198,11 +1200,7 @@ impl CliApp {
             .map_err(CommandError::from_ledger)?;
         let path = self.store.ledger_path(name);
         self.set_ledger(report.ledger, Some(path.clone()), Some(name.to_string()));
-        output_success(format!(
-            "Ledger `{}` loaded from {}.",
-            name,
-            path.display()
-        ));
+        output_success(format!("Ledger `{}` loaded from {}.", name, path.display()));
         self.report_load(&report.warnings, &report.migrations);
         let _ = self.store.record_last_ledger(Some(name));
         Ok(())
@@ -1216,11 +1214,7 @@ impl CliApp {
             .map_err(CommandError::from_ledger)?;
         self.state.set_path(Some(path.clone()));
         self.state.set_named(Some(name.to_string()));
-        output_success(format!(
-            "Ledger `{}` saved to {}.",
-            name,
-            path.display()
-        ));
+        output_success(format!("Ledger `{}` saved to {}.", name, path.display()));
         let _ = self.store.record_last_ledger(Some(name));
         Ok(())
     }
