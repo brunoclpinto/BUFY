@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use chrono::{Duration, NaiveDate, Utc, Weekday};
+use chrono::{Duration, Local, NaiveDate, Utc, Weekday};
 use colored::Colorize;
 use dialoguer::{theme::ColorfulTheme, Confirm, Input, Select};
 use rustyline::{error::ReadlineError, DefaultEditor};
@@ -38,8 +38,9 @@ use crate::cli::forms::{
 };
 use crate::cli::selection::{
     providers::{
-        AccountSelectionProvider, CategorySelectionProvider, LedgerBackupSelectionProvider,
-        ProviderError, SimulationSelectionProvider, TransactionSelectionProvider,
+        AccountSelectionProvider, CategorySelectionProvider, ConfigBackupSelectionProvider,
+        LedgerBackupSelectionProvider, ProviderError, SimulationSelectionProvider,
+        TransactionSelectionProvider,
     },
     SelectionError, SelectionManager,
 };
@@ -455,7 +456,12 @@ impl CliApp {
             .map_or(false, |override_data| override_data.has_choices())
     }
 
-    fn select_with<P>(&self, provider: P, prompt: &str) -> Result<Option<P::Id>, CommandError>
+    fn select_with<P>(
+        &self,
+        provider: P,
+        prompt: &str,
+        empty_message: &str,
+    ) -> Result<Option<P::Id>, CommandError>
     where
         P: SelectionProvider,
         P::Id: Clone,
@@ -467,9 +473,9 @@ impl CliApp {
             .as_ref()
             .and_then(|override_data| override_data.pop());
         let outcome = if let Some(choice) = selection_choice {
-            manager.choose_with(prompt, move |_, _| Ok(choice))
+            manager.choose_with(prompt, empty_message, move |_, _| Ok(choice))
         } else {
-            manager.choose_with_dialoguer(prompt, &self.theme)
+            manager.choose_with_dialoguer(prompt, empty_message, &self.theme)
         };
         match outcome {
             Ok(SelectionOutcome::Selected(id)) => Ok(Some(id)),
@@ -480,26 +486,51 @@ impl CliApp {
     }
 
     fn select_transaction_index(&self, prompt: &str) -> Result<Option<usize>, CommandError> {
-        self.select_with(TransactionSelectionProvider::new(&self.state), prompt)
+        self.select_with(
+            TransactionSelectionProvider::new(&self.state),
+            prompt,
+            "No transactions available.",
+        )
     }
 
     fn select_simulation_name(&self, prompt: &str) -> Result<Option<String>, CommandError> {
-        self.select_with(SimulationSelectionProvider::new(&self.state), prompt)
+        self.select_with(
+            SimulationSelectionProvider::new(&self.state),
+            prompt,
+            "No saved simulations available.",
+        )
     }
 
     fn select_ledger_backup(&self, prompt: &str) -> Result<Option<PathBuf>, CommandError> {
         self.select_with(
             LedgerBackupSelectionProvider::new(&self.state, &self.store),
             prompt,
+            "No backups available.",
+        )
+    }
+
+    fn select_config_backup(&self, prompt: &str) -> Result<Option<PathBuf>, CommandError> {
+        self.select_with(
+            ConfigBackupSelectionProvider::new(&self.store),
+            prompt,
+            "No configuration backups available.",
         )
     }
 
     fn select_account_index(&self, prompt: &str) -> Result<Option<usize>, CommandError> {
-        self.select_with(AccountSelectionProvider::new(&self.state), prompt)
+        self.select_with(
+            AccountSelectionProvider::new(&self.state),
+            prompt,
+            "No accounts available.",
+        )
     }
 
     fn select_category_index(&self, prompt: &str) -> Result<Option<usize>, CommandError> {
-        self.select_with(CategorySelectionProvider::new(&self.state), prompt)
+        self.select_with(
+            CategorySelectionProvider::new(&self.state),
+            prompt,
+            "No categories available.",
+        )
     }
 
     fn account_category_options(&self, ledger: &Ledger) -> Vec<(String, Option<Uuid>)> {
@@ -1241,17 +1272,25 @@ impl CliApp {
             .list_backups(name)
             .map_err(CommandError::from_ledger)?;
         if backups.is_empty() {
-            println!("{}", "No backups found".bright_black());
+            output_warning("No backups available.");
             return Ok(());
         }
-        println!("{}", "Available backups:".bright_white().bold());
+        output_info("Available backups:");
         for (idx, backup) in backups.iter().enumerate() {
-            println!(
-                "  [{}] {} ({})",
-                idx,
-                backup.timestamp,
-                backup.path.display()
-            );
+            let created = backup.timestamp.with_timezone(&Local);
+            let file_name = backup
+                .path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_owned)
+                .unwrap_or_else(|| backup.path.display().to_string());
+            output_info(format!(
+                "  {:>2}. {} (Created: {})",
+                idx + 1,
+                file_name,
+                created.format("%Y-%m-%d %H:%M")
+            ));
+            output_info(format!("      {}", backup.path.display()));
         }
         Ok(())
     }
@@ -1310,13 +1349,132 @@ impl CliApp {
             true
         };
         if !confirm {
-            println!("{}", "Restore cancelled".bright_black());
+            output_info("Operation cancelled.");
             return Ok(());
         }
         self.store
             .restore_backup(name, &target)
             .map_err(CommandError::from_ledger)?;
         self.load_named_ledger(name)
+    }
+
+    fn list_config_backups(&self) -> CommandResult {
+        let backups = self
+            .store
+            .list_config_backups()
+            .map_err(CommandError::from_ledger)?;
+        if backups.is_empty() {
+            output_warning("No configuration backups available.");
+            return Ok(());
+        }
+        output_info("Configuration backups:");
+        for (idx, backup) in backups.iter().enumerate() {
+            let file_name = backup
+                .path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_owned)
+                .unwrap_or_else(|| backup.path.display().to_string());
+            let created = backup.timestamp.map(|ts| ts.with_timezone(&Local));
+            if let Some(created) = created {
+                output_info(format!(
+                    "  {:>2}. {} (Created: {})",
+                    idx + 1,
+                    file_name,
+                    created.format("%Y-%m-%d %H:%M")
+                ));
+            } else {
+                output_info(format!("  {:>2}. {}", idx + 1, file_name));
+            }
+            output_info(format!("      {}", backup.path.display()));
+        }
+        Ok(())
+    }
+
+    fn restore_config_by_reference(&mut self, reference: &str) -> CommandResult {
+        let backups = self
+            .store
+            .list_config_backups()
+            .map_err(CommandError::from_ledger)?;
+        if backups.is_empty() {
+            return Err(CommandError::InvalidArguments(
+                "no configuration backups available".into(),
+            ));
+        }
+        let target_path = if let Ok(index_raw) = reference.parse::<usize>() {
+            let zero_index = if index_raw > 0 && index_raw <= backups.len() {
+                index_raw - 1
+            } else {
+                index_raw
+            };
+            backups
+                .get(zero_index)
+                .ok_or_else(|| {
+                    CommandError::InvalidArguments(format!(
+                        "configuration backup index {} out of range",
+                        reference
+                    ))
+                })?
+                .path
+                .clone()
+        } else {
+            backups
+                .iter()
+                .find(|info| {
+                    info.path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .map(|name| name.contains(reference))
+                        .unwrap_or(false)
+                })
+                .ok_or_else(|| {
+                    CommandError::InvalidArguments(format!(
+                        "no configuration backup matches reference `{}`",
+                        reference
+                    ))
+                })?
+                .path
+                .clone()
+        };
+        self.restore_config_from_path(target_path)
+    }
+
+    fn restore_config_from_path(&mut self, path: PathBuf) -> CommandResult {
+        let confirm = if self.mode == CliMode::Interactive {
+            Confirm::with_theme(&self.theme)
+                .with_prompt(format!("Restore configuration from {}?", path.display()))
+                .default(false)
+                .interact()
+                .map_err(CommandError::from)?
+        } else {
+            true
+        };
+        if !confirm {
+            output_info("Operation cancelled.");
+            return Ok(());
+        }
+        self.store
+            .restore_config_backup(&path)
+            .map_err(CommandError::from_ledger)?;
+        let created = self
+            .store
+            .list_config_backups()
+            .map_err(CommandError::from_ledger)?
+            .into_iter()
+            .find(|info| info.path == path)
+            .and_then(|info| info.timestamp);
+        let summary = if let Some(ts) = created {
+            let local_ts = ts.with_timezone(&Local);
+            format!(
+                "Configuration restored from {} (Created: {})",
+                path.display(),
+                local_ts.format("%Y-%m-%d %H:%M")
+            )
+        } else {
+            format!("Configuration restored from {}", path.display())
+        };
+        output_success(summary);
+        Ok(())
     }
 
     fn add_account_interactive(&mut self) -> CommandResult {
@@ -2626,32 +2784,26 @@ impl CliApp {
         let sim = ledger.simulation(sim_name).ok_or_else(|| {
             CommandError::InvalidArguments(format!("simulation `{}` not found", sim_name))
         })?;
-        println!(
-            "{}",
-            format!("Simulation `{}` ({:?})", sim.name, sim.status).bright_magenta()
-        );
+        output_info(format!("Simulation `{}` ({:?})", sim.name, sim.status));
         if sim.changes.is_empty() {
-            println!("{}", "No pending changes".bright_black());
+            output_info("No pending changes.");
         } else {
             for (idx, change) in sim.changes.iter().enumerate() {
                 match change {
-                    SimulationChange::AddTransaction { transaction } => println!(
-                        "{} Added transaction {} -> {} on {} budgeted {:.2}",
-                        format!("[{}]", idx).bright_white(),
+                    SimulationChange::AddTransaction { transaction } => output_info(format!(
+                        "  [{:>2}] Add transaction {} -> {} on {} (budgeted {:.2})",
+                        idx,
                         transaction.from_account,
                         transaction.to_account,
                         transaction.scheduled_date,
                         transaction.budgeted_amount
-                    ),
-                    SimulationChange::ModifyTransaction(patch) => println!(
-                        "{} Modify transaction {}",
-                        format!("[{}]", idx).bright_white(),
-                        patch.transaction_id
-                    ),
-                    SimulationChange::ExcludeTransaction { transaction_id } => println!(
-                        "{} Exclude transaction {}",
-                        format!("[{}]", idx).bright_white(),
-                        transaction_id
+                    )),
+                    SimulationChange::ModifyTransaction(patch) => output_info(format!(
+                        "  [{:>2}] Modify transaction {}",
+                        idx, patch.transaction_id
+                    )),
+                    SimulationChange::ExcludeTransaction { transaction_id } => output_info(
+                        format!("  [{:>2}] Exclude transaction {}", idx, transaction_id),
                     ),
                 }
             }
@@ -2668,10 +2820,7 @@ impl CliApp {
         self.current_ledger_mut()?
             .exclude_transaction_in_simulation(sim_name, txn_id)
             .map_err(CommandError::from_ledger)?;
-        println!(
-            "{}",
-            format!("Transaction {} excluded in `{}`", txn_id, sim_name).bright_green()
-        );
+        output_success(format!("Transaction {} excluded in `{}`", txn_id, sim_name));
         Ok(())
     }
 
@@ -2708,10 +2857,7 @@ impl CliApp {
         self.current_ledger_mut()?
             .modify_transaction_in_simulation(sim_name, patch)
             .map_err(CommandError::from_ledger)?;
-        println!(
-            "{}",
-            format!("Transaction {} modified in `{}`", txn_id, sim_name).bright_green()
-        );
+        output_success(format!("Transaction {} modified in `{}`", txn_id, sim_name));
         Ok(())
     }
 
@@ -2841,7 +2987,7 @@ fn build_commands() -> Vec<CommandDefinition> {
         CommandDefinition::new(
             "config",
             "Configure currencies, locale, and valuation",
-            "config [show|base-currency|locale|negative-style|screen-reader|high-contrast|valuation]",
+            "config [show|base-currency|locale|negative-style|screen-reader|high-contrast|valuation|backups|restore]",
             cmd_config,
         ),
         CommandDefinition::new(
@@ -3187,8 +3333,38 @@ fn cmd_config(app: &mut CliApp, args: &[&str]) -> CommandResult {
             println!("{}", "Valuation policy updated".bright_green());
             Ok(())
         }
+        "backups" => {
+            if args.len() > 1 {
+                return Err(CommandError::InvalidArguments(
+                    "usage: config backups".into(),
+                ));
+            }
+            app.list_config_backups()
+        }
+        "restore" => match args.len() {
+            1 => {
+                if !app.can_prompt() {
+                    return Err(CommandError::InvalidArguments(
+                        "usage: config restore <backup_reference>".into(),
+                    ));
+                }
+                match app.select_config_backup(
+                    "Select a configuration backup to restore:",
+                )? {
+                    Some(path) => app.restore_config_from_path(path),
+                    None => {
+                        output_info("Operation cancelled.");
+                        Ok(())
+                    }
+                }
+            }
+            2 => app.restore_config_by_reference(args[1]),
+            _ => Err(CommandError::InvalidArguments(
+                "usage: config restore [backup_reference]".into(),
+            )),
+        },
         _ => Err(CommandError::InvalidArguments(
-            "usage: config [show|base-currency|locale|negative-style|screen-reader|high-contrast|valuation]".into(),
+            "usage: config [show|base-currency|locale|negative-style|screen-reader|high-contrast|valuation|backups|restore]".into(),
         )),
     }
 }
@@ -3259,6 +3435,7 @@ fn cmd_restore_ledger(app: &mut CliApp, args: &[&str]) -> CommandResult {
             };
             let selection = app.select_ledger_backup("Select a backup to restore:")?;
             let Some(path) = selection else {
+                output_info("Operation cancelled.");
                 return Ok(());
             };
             app.restore_backup_from_path(&name, path)
@@ -3531,25 +3708,31 @@ fn cmd_enter_simulation(app: &mut CliApp, args: &[&str]) -> CommandResult {
         "usage: enter-simulation <name>",
     )? {
         Some(name) => name,
-        None => return Ok(()),
+        None => {
+            output_info("Operation cancelled.");
+            return Ok(());
+        }
     };
-    let ledger = app.current_ledger()?;
-    let sim = ledger.simulation(&name).ok_or_else(|| {
-        CommandError::InvalidArguments(format!("simulation `{}` not found", name))
-    })?;
-    if sim.status != SimulationStatus::Pending {
-        return Err(CommandError::InvalidArguments(format!(
-            "simulation `{}` is not editable",
-            name
-        )));
-    }
-    let canonical = sim.name.clone();
-    let _ = ledger;
+    let (canonical, created) = {
+        let ledger = app.current_ledger()?;
+        let sim = ledger.simulation(&name).ok_or_else(|| {
+            CommandError::InvalidArguments(format!("simulation `{}` not found", name))
+        })?;
+        if sim.status != SimulationStatus::Pending {
+            return Err(CommandError::InvalidArguments(format!(
+                "simulation `{}` is not editable",
+                name
+            )));
+        }
+        (sim.name.clone(), sim.created_at)
+    };
     app.state.set_active_simulation(Some(canonical.clone()));
-    println!(
-        "{}",
-        format!("Entered simulation `{}`", canonical).bright_green()
-    );
+    let created = created.with_timezone(&Local);
+    output_success(format!(
+        "Entered simulation `{}` (Created: {})",
+        canonical,
+        created.format("%Y-%m-%d %H:%M")
+    ));
     Ok(())
 }
 
@@ -3572,7 +3755,19 @@ fn cmd_apply_simulation(app: &mut CliApp, args: &[&str]) -> CommandResult {
         "usage: apply-simulation <name>",
     )? {
         Some(name) => name,
-        None => return Ok(()),
+        None => {
+            output_info("Operation cancelled.");
+            return Ok(());
+        }
+    };
+    let created = {
+        let ledger = app.current_ledger()?;
+        ledger
+            .simulation(&name)
+            .map(|sim| sim.created_at)
+            .ok_or_else(|| {
+                CommandError::InvalidArguments(format!("simulation `{}` not found", name))
+            })?
     };
     app.current_ledger_mut()?
         .apply_simulation(&name)
@@ -3584,10 +3779,12 @@ fn cmd_apply_simulation(app: &mut CliApp, args: &[&str]) -> CommandResult {
     {
         app.state.set_active_simulation(None);
     }
-    println!(
-        "{}",
-        format!("Simulation `{}` applied to ledger", name).bright_green()
-    );
+    let created_local = created.with_timezone(&Local);
+    output_success(format!(
+        "Simulation `{}` applied (Created: {})",
+        name,
+        created_local.format("%Y-%m-%d %H:%M")
+    ));
     Ok(())
 }
 
@@ -3599,7 +3796,22 @@ fn cmd_discard_simulation(app: &mut CliApp, args: &[&str]) -> CommandResult {
         "usage: discard-simulation <name>",
     )? {
         Some(name) => name,
-        None => return Ok(()),
+        None => {
+            output_info("Operation cancelled.");
+            return Ok(());
+        }
+    };
+    let (created, was_active) = {
+        let ledger = app.current_ledger()?;
+        let sim = ledger.simulation(&name).ok_or_else(|| {
+            CommandError::InvalidArguments(format!("simulation `{}` not found", name))
+        })?;
+        (
+            Some(sim.created_at),
+            app.active_simulation_name()
+                .map(|active| active.eq_ignore_ascii_case(&name))
+                .unwrap_or(false),
+        )
     };
     if app.mode == CliMode::Interactive {
         let confirm = Confirm::with_theme(&app.theme)
@@ -3608,23 +3820,27 @@ fn cmd_discard_simulation(app: &mut CliApp, args: &[&str]) -> CommandResult {
             .interact()
             .map_err(CommandError::from)?;
         if !confirm {
+            output_info("Operation cancelled.");
             return Ok(());
         }
     }
     app.current_ledger_mut()?
         .discard_simulation(&name)
         .map_err(CommandError::from_ledger)?;
-    if app
-        .active_simulation_name()
-        .map(|active| active.eq_ignore_ascii_case(&name))
-        .unwrap_or(false)
-    {
+    if was_active {
         app.state.set_active_simulation(None);
     }
-    println!(
-        "{}",
-        format!("Simulation `{}` discarded", name).bright_green()
-    );
+    let summary = created
+        .map(|ts| {
+            let local_ts = ts.with_timezone(&Local);
+            format!(
+                "Simulation `{}` discarded (Created: {})",
+                name,
+                local_ts.format("%Y-%m-%d %H:%M")
+            )
+        })
+        .unwrap_or_else(|| format!("Simulation `{}` discarded", name));
+    output_success(summary);
     Ok(())
 }
 
@@ -3637,7 +3853,7 @@ fn cmd_simulation(app: &mut CliApp, args: &[&str]) -> CommandResult {
     let sub = args[0].to_lowercase();
     let target_name = args.get(1).copied();
     match sub.as_str() {
-        "changes" => {
+        "changes" | "show" => {
             let name = match app.resolve_simulation_name(
                 target_name,
                 "Select a simulation to inspect:",
@@ -3645,7 +3861,10 @@ fn cmd_simulation(app: &mut CliApp, args: &[&str]) -> CommandResult {
                 "usage: simulation changes [simulation_name]",
             )? {
                 Some(name) => name,
-                None => return Ok(()),
+                None => {
+                    output_info("Operation cancelled.");
+                    return Ok(());
+                }
             };
             app.print_simulation_changes(&name)
         }
@@ -3657,7 +3876,10 @@ fn cmd_simulation(app: &mut CliApp, args: &[&str]) -> CommandResult {
                 "usage: simulation add [simulation_name]",
             )? {
                 Some(name) => name,
-                None => return Ok(()),
+                None => {
+                    output_info("Operation cancelled.");
+                    return Ok(());
+                }
             };
             app.simulation_add_transaction(&name)
         }
@@ -3669,7 +3891,10 @@ fn cmd_simulation(app: &mut CliApp, args: &[&str]) -> CommandResult {
                 "usage: simulation exclude [simulation_name]",
             )? {
                 Some(name) => name,
-                None => return Ok(()),
+                None => {
+                    output_info("Operation cancelled.");
+                    return Ok(());
+                }
             };
             app.simulation_exclude_transaction(&name)
         }
@@ -3681,7 +3906,10 @@ fn cmd_simulation(app: &mut CliApp, args: &[&str]) -> CommandResult {
                 "usage: simulation modify [simulation_name]",
             )? {
                 Some(name) => name,
-                None => return Ok(()),
+                None => {
+                    output_info("Operation cancelled.");
+                    return Ok(());
+                }
             };
             app.simulation_modify_transaction(&name)
         }
@@ -4188,7 +4416,9 @@ mod tests {
     fn account_selection_positive() {
         let state = state_with_ledger();
         let outcome = SelectionManager::new(AccountSelectionProvider::new(&state))
-            .choose_with("Select account", |_, _| Ok(Some(1)))
+            .choose_with("Select account", "No accounts available.", |_, _| {
+                Ok(Some(1))
+            })
             .unwrap();
         match outcome {
             SelectionOutcome::Selected(id) => assert_eq!(id, 1),
@@ -4200,7 +4430,7 @@ mod tests {
     fn account_selection_cancelled() {
         let state = state_with_ledger();
         let outcome = SelectionManager::new(AccountSelectionProvider::new(&state))
-            .choose_with("Select account", |_, _| Ok(None))
+            .choose_with("Select account", "No accounts available.", |_, _| Ok(None))
             .unwrap();
         assert!(matches!(outcome, SelectionOutcome::Cancelled));
     }
@@ -4209,12 +4439,16 @@ mod tests {
     fn category_selection_paths() {
         let state = state_with_ledger();
         let outcome = SelectionManager::new(CategorySelectionProvider::new(&state))
-            .choose_with("Select category", |_, _| Ok(Some(0)))
+            .choose_with("Select category", "No categories available.", |_, _| {
+                Ok(Some(0))
+            })
             .unwrap();
         assert!(matches!(outcome, SelectionOutcome::Selected(0)));
 
         let outcome = SelectionManager::new(CategorySelectionProvider::new(&state))
-            .choose_with("Select category", |_, _| Ok(None))
+            .choose_with("Select category", "No categories available.", |_, _| {
+                Ok(None)
+            })
             .unwrap();
         assert!(matches!(outcome, SelectionOutcome::Cancelled));
     }
@@ -4223,12 +4457,20 @@ mod tests {
     fn transaction_selection_paths() {
         let state = state_with_ledger();
         let outcome = SelectionManager::new(TransactionSelectionProvider::new(&state))
-            .choose_with("Select transaction", |_, _| Ok(Some(0)))
+            .choose_with(
+                "Select transaction",
+                "No transactions available.",
+                |_, _| Ok(Some(0)),
+            )
             .unwrap();
         assert!(matches!(outcome, SelectionOutcome::Selected(0)));
 
         let outcome = SelectionManager::new(TransactionSelectionProvider::new(&state))
-            .choose_with("Select transaction", |_, _| Ok(None))
+            .choose_with(
+                "Select transaction",
+                "No transactions available.",
+                |_, _| Ok(None),
+            )
             .unwrap();
         assert!(matches!(outcome, SelectionOutcome::Cancelled));
     }
@@ -4266,7 +4508,7 @@ mod tests {
         fs::write(&backup_path, "{}").unwrap();
 
         let outcome = SelectionManager::new(LedgerBackupSelectionProvider::new(&state, &store))
-            .choose_with("Select backup", |_, _| Ok(Some(0)))
+            .choose_with("Select backup", "No backups available.", |_, _| Ok(Some(0)))
             .unwrap();
         match outcome {
             SelectionOutcome::Selected(path) => assert_eq!(path, backup_path),
@@ -4274,7 +4516,7 @@ mod tests {
         }
 
         let outcome = SelectionManager::new(LedgerBackupSelectionProvider::new(&state, &store))
-            .choose_with("Select backup", |_, _| Ok(None))
+            .choose_with("Select backup", "No backups available.", |_, _| Ok(None))
             .unwrap();
         assert!(matches!(outcome, SelectionOutcome::Cancelled));
     }
@@ -4290,7 +4532,11 @@ mod tests {
         fs::write(&config_path, "{}").unwrap();
 
         let outcome = SelectionManager::new(ConfigBackupSelectionProvider::new(&store))
-            .choose_with("Select config", |_, _| Ok(Some(0)))
+            .choose_with(
+                "Select config",
+                "No configuration backups available.",
+                |_, _| Ok(Some(0)),
+            )
             .unwrap();
         match outcome {
             SelectionOutcome::Selected(path) => assert_eq!(path, config_path),
@@ -4298,7 +4544,11 @@ mod tests {
         }
 
         let outcome = SelectionManager::new(ConfigBackupSelectionProvider::new(&store))
-            .choose_with("Select config", |_, _| Ok(None))
+            .choose_with(
+                "Select config",
+                "No configuration backups available.",
+                |_, _| Ok(None),
+            )
             .unwrap();
         assert!(matches!(outcome, SelectionOutcome::Cancelled));
     }
