@@ -24,6 +24,7 @@ where
     pub fn choose_with<F>(
         mut self,
         prompt: &str,
+        empty_message: &str,
         mut selector: F,
     ) -> Result<SelectionOutcome<P::Id>, SelectionError<P::Error>>
     where
@@ -31,14 +32,24 @@ where
     {
         let items = self.provider.items().map_err(SelectionError::Provider)?;
         if items.is_empty() {
-            warning("No items available.");
+            warning(empty_message);
             return Ok(SelectionOutcome::Cancelled);
         }
 
         info(prompt);
         let labels: Vec<String> = items.iter().map(render_label).collect();
+        let display_rows: Vec<String> = labels
+            .iter()
+            .enumerate()
+            .map(|(index, label)| format!("  {:>2}. {}", index + 1, label))
+            .collect();
 
-        let selection = selector(prompt, &labels).map_err(SelectionError::Interaction)?;
+        for row in &display_rows {
+            info(row);
+        }
+        info("  Type cancel or press Esc to abort.");
+
+        let selection = selector(prompt, &display_rows).map_err(SelectionError::Interaction)?;
 
         if let Some(index) = selection {
             Ok(SelectionOutcome::Selected(items[index].id.clone()))
@@ -50,9 +61,10 @@ where
     pub fn choose_with_dialoguer(
         self,
         prompt: &str,
+        empty_message: &str,
         theme: &ColorfulTheme,
     ) -> Result<SelectionOutcome<P::Id>, SelectionError<P::Error>> {
-        self.choose_with(prompt, |prompt, labels| {
+        self.choose_with(prompt, empty_message, |prompt, labels| {
             Select::with_theme(theme)
                 .with_prompt(prompt)
                 .items(labels)
