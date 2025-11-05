@@ -14,7 +14,7 @@ knowing domain details.
 | `TransactionSelectionProvider` | `usize` | Scheduled date (`YYYY-MM-DD`), budgeted/actual amount in subtitle, recurrence hint in label | Labels call out recurring entries (`• recurring`) to make schedule-driven selections easier. |
 | `SimulationSelectionProvider` | `String` (simulation name) | Simulation name with status subtitle | Names remain the authoritative handle for simulations, matching CLI commands and persistence. |
 | `LedgerBackupSelectionProvider` | `PathBuf` | Backup timestamp (ISO format) with file path in subtitle | Requires an active named ledger; errors bubble through `ProviderError::Store`. |
-| `ConfigBackupSelectionProvider` | `PathBuf` | Snapshot label derived from file stem | Scans the `state-backups/` directory for `.json` files. |
+| `ConfigBackupSelectionProvider` | `PathBuf` | `<filename> (Created: YYYY-MM-DD HH:MM) [note: …]` | Scans the `config_backups/` directory for `.json` snapshots and surfaces the newest-first list used by `config restore`. |
 
 All providers share the following conventions:
 

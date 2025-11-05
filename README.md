@@ -52,7 +52,7 @@ For architectural background see `docs/design_overview.md`.
 | Persistence tooling | `backup-ledger [name]`, `list-backups [name]`, `restore-ledger <idx|pattern> [name]` | Snapshots live under `~/.budget_core/backups/<name>/YYYY-MM-DDTHH-MM-SS.json.bak`. |
 | Currency & locale | `config [show|base-currency|locale|negative-style|screen-reader|high-contrast|valuation]` | Persisted per-ledger settings for currency display, locale defaults, valuation policies, and accessibility. |
 | Data entry | `transaction add/edit/remove/show/complete`, `add account`, `add category`, `add transaction`, `list [accounts|categories|transactions]` | Transaction list output shows recurrence hints (`[recurring]`, `[instance]`). |
-| Backups & selection | `restore-ledger <backup?>`, `config backups`, `config restore <backup?>`, `simulation apply/discard/enter <name?>` | Omit the identifier to open an interactive list (two-space numbered rows, `Type cancel` prompt); success messages echo the chosen item and timestamp. |
+| Backups & selection | `config backup [--note <text>]`, `config backups`, `config restore <backup?>`, `restore-ledger <backup?>`, `simulation apply/discard/enter <name?>` | Omit the identifier to open an interactive list (two-space numbered rows, `Type cancel` prompt); success messages echo the chosen item and timestamp. |
 | Recurrence | `recurring list/edit/clear/pause/resume/skip/sync`, `complete <idx>` | Schedules track start/end dates, exceptions, and automatically materialize overdue instances. |
 | Forecasting | `forecast [simulation] [<n> <unit> | custom <start> <end>]` | Produces future inflow/outflow projections plus window-specific budget summaries. |
 | Simulations | `create-simulation`, `enter-simulation`, `simulation add/modify/exclude`, `list-simulations`, `summary <simulation>`, `apply-simulation`, `discard-simulation` | Enables “what-if” comparisons against the base ledger. |
@@ -68,7 +68,9 @@ Budget Core now understands recurring obligations and can materialize missed occ
 - `recurring list [overdue|pending|all]` surfaces every recurrence with next-due dates, overdue counts, and status (Active/Paused/Completed). Use `recurring edit <transaction_index>` to attach or update a schedule for any transaction, `recurring clear` to remove it, `recurring pause`/`recurring resume` to toggle activity, `recurring skip <index> <YYYY-MM-DD>` to add exceptions, and `recurring sync [YYYY-MM-DD]` to backfill overdue ledger entries.
 - `forecast [simulation_name] [<number> <unit> | custom <start> <end>]` produces a deterministic projection for the requested window and reports inflow/outflow totals, overdue vs. pending counts, and the top upcoming instances. Prefix the command with a simulation name to preview "what-if" schedules.
 - `transaction complete <transaction_index> <YYYY-MM-DD> <amount>` (alias: `complete`) marks a scheduled transaction as finished and updates recurrence metadata automatically.
+- `config backup [--note <text>]` writes a timestamped snapshot to `~/.budget_core/config_backups/` (metadata includes `schema_version`, `created_at`, `note`, and a `config` payload).
 - `config restore <backup_reference?>` mirrors `restore-ledger`: pick a saved configuration snapshot interactively or pass the filename to restore directly.
+- `config backups` prints numbered configuration snapshots sorted by newest first; each entry shows the creation timestamp and optional note. Use `config restore` to select one from the list.
 
 Recurrence state is persisted with the ledger JSON so restarting the CLI preserves start dates, next occurrences, and skipped dates. Use `recurring sync` after structural changes (new accounts/categories) to ensure schedules stay aligned.
 
@@ -98,6 +100,54 @@ Additional architectural notes are captured in `docs/design_overview.md`.
 ```
 
 Every save produces pretty JSON for human inspection, and backups are pruned according to the store’s retention setting (default 5). Loads validate schema versions (`schema_version`), rebuild recurrence metadata, and surface migration notes in the CLI.
+
+## Configuration Backups
+
+- Configuration snapshots live under `~/.budget_core/config_backups/` and use the schema:
+
+  ```json
+  {
+    "schema_version": 1,
+    "created_at": "2025-11-02T14:30:00Z",
+    "note": "before sync",
+    "config": {
+      "base_currency": "USD",
+      "locale": { "language_tag": "en-US", "decimal_separator": ".", ... },
+      "currency_display": "Symbol",
+      "negative_style": "Sign",
+      "screen_reader_mode": false,
+      "high_contrast_mode": false,
+      "valuation_policy": { "kind": "transaction_date" }
+    }
+  }
+  ```
+
+- Example workflow:
+
+  ```text
+  config backup --note "before sync"
+  ✔ Configuration backup saved: config_2025-11-02T14-30-00.json (Created: 2025-11-02 14:30)
+  ℹ Stored in the `config_backups` directory.
+
+  config backups
+  Available configuration backups:
+    1. config_2025-11-02T14-30-00.json (Created: 2025-11-02 14:30) (note: before sync)
+
+  config restore
+  Select a configuration backup to restore:
+    1. config_2025-11-02T14-30-00.json (Created: 2025-11-02 14:30)  [note: before sync]
+    Type cancel or press Esc to abort.
+  Selected backup: config_2025-11-02T14-30-00.json
+  Created: 2025-11-02 14:30
+  Note: before sync
+  Base currency: USD
+  Locale: en-US
+  Currency display: Symbol | Negative style: Sign
+  Screen reader: off | High contrast: off
+  Valuation policy: TransactionDate
+  Restore configuration from this backup? (y/N)
+  ✔ Configuration restored from config_2025-11-02T14-30-00.json (Created: 2025-11-02 14:30)
+  ```
 
 ## Currency & Localization
 
@@ -148,3 +198,4 @@ Licensed under either of
 at your option.
 
 Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in this project is licensed under the same dual license terms.
+- `config backups` prints numbered configuration snapshots sorted by newest first; each entry shows the creation timestamp and optional note. Use `config restore` to select one from the list.
