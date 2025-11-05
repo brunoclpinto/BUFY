@@ -82,6 +82,9 @@ pub enum FieldKind {
     Choice(Vec<String>),
 }
 
+type ValidatorCallback = dyn Fn(&str) -> Result<String, String> + Send + Sync;
+type SharedValidatorCallback = Arc<ValidatorCallback>;
+
 /// Built-in validation helpers.
 #[derive(Clone)]
 pub enum Validator {
@@ -93,7 +96,7 @@ pub enum Validator {
     Date,
     Time,
     OneOf(Vec<String>),
-    Custom(Arc<dyn Fn(&str) -> Result<String, String> + Send + Sync>),
+    Custom(SharedValidatorCallback),
 }
 
 impl Validator {
@@ -147,9 +150,7 @@ impl Validator {
                         ))
                     })
             }
-            Validator::Custom(func) => func(input)
-                .map_err(|msg| ValidationError::new(msg))
-                .map(|value| value),
+            Validator::Custom(func) => func(input).map_err(ValidationError::new),
         }
     }
 }
@@ -554,20 +555,14 @@ impl AccountWizard {
         let category_choices = ChoiceMapper::from_pairs(category_pairs);
         let category_validator = make_choice_validator(category_choices.clone(), "linked category");
 
-        let mut fields = Vec::new();
-        fields.push(FieldDescriptor::new(
-            "name",
-            "Account name",
-            FieldKind::Text,
-            name_validator,
-        ));
-        fields.push(FieldDescriptor::new(
-            "kind",
-            "Account type",
-            FieldKind::Choice(kind_choices.options()),
-            kind_validator,
-        ));
-        fields.push(
+        let fields = vec![
+            FieldDescriptor::new("name", "Account name", FieldKind::Text, name_validator),
+            FieldDescriptor::new(
+                "kind",
+                "Account type",
+                FieldKind::Choice(kind_choices.options()),
+                kind_validator,
+            ),
             FieldDescriptor::new(
                 "category",
                 "Linked category",
@@ -575,8 +570,6 @@ impl AccountWizard {
                 category_validator,
             )
             .with_optional(),
-        );
-        fields.push(
             FieldDescriptor::new(
                 "opening_balance",
                 "Opening balance",
@@ -584,11 +577,9 @@ impl AccountWizard {
                 make_optional_decimal_validator(),
             )
             .with_optional(),
-        );
-        fields.push(
             FieldDescriptor::new("notes", "Notes", FieldKind::Text, make_notes_validator(512))
                 .with_optional(),
-        );
+        ];
 
         let mut defaults = BTreeMap::new();
         let mode = if let Some(data) = initial {
@@ -729,8 +720,12 @@ pub struct TransactionInitialData {
 
 #[derive(Clone)]
 enum TransactionWizardMode {
-    Create { default_status: TransactionStatus },
-    Edit { initial: TransactionInitialData },
+    Create {
+        default_status: TransactionStatus,
+    },
+    Edit {
+        initial: Box<TransactionInitialData>,
+    },
 }
 
 #[derive(Clone, PartialEq)]
@@ -780,7 +775,9 @@ impl TransactionWizard {
             categories,
             today,
             min_date,
-            TransactionWizardMode::Edit { initial },
+            TransactionWizardMode::Edit {
+                initial: Box::new(initial),
+            },
         )
     }
 
@@ -901,20 +898,20 @@ impl TransactionWizard {
         ]);
         let status_validator = make_choice_validator(status_choices.clone(), "transaction status");
 
-        let mut fields = Vec::new();
-        fields.push(FieldDescriptor::new(
-            "from_account",
-            "From account",
-            FieldKind::Choice(account_choices.options()),
-            account_validator.clone(),
-        ));
-        fields.push(FieldDescriptor::new(
-            "to_account",
-            "To account",
-            FieldKind::Choice(account_choices.options()),
-            account_validator,
-        ));
-        fields.push(
+        let account_validator_for_to = account_validator.clone();
+        let mut fields = vec![
+            FieldDescriptor::new(
+                "from_account",
+                "From account",
+                FieldKind::Choice(account_choices.options()),
+                account_validator,
+            ),
+            FieldDescriptor::new(
+                "to_account",
+                "To account",
+                FieldKind::Choice(account_choices.options()),
+                account_validator_for_to,
+            ),
             FieldDescriptor::new(
                 "category",
                 "Category",
@@ -922,14 +919,12 @@ impl TransactionWizard {
                 category_validator,
             )
             .with_optional(),
-        );
-        fields.push(FieldDescriptor::new(
-            "scheduled_date",
-            "Scheduled date (YYYY-MM-DD)",
-            FieldKind::Date,
-            make_min_date_validator(min_date),
-        ));
-        fields.push(
+            FieldDescriptor::new(
+                "scheduled_date",
+                "Scheduled date (YYYY-MM-DD)",
+                FieldKind::Date,
+                make_min_date_validator(min_date),
+            ),
             FieldDescriptor::new(
                 "actual_date",
                 "Actual date (YYYY-MM-DD)",
@@ -937,14 +932,12 @@ impl TransactionWizard {
                 make_optional_date_validator(today),
             )
             .with_optional(),
-        );
-        fields.push(FieldDescriptor::new(
-            "budgeted_amount",
-            "Budgeted amount",
-            FieldKind::Decimal,
-            make_non_negative_decimal_validator(),
-        ));
-        fields.push(
+            FieldDescriptor::new(
+                "budgeted_amount",
+                "Budgeted amount",
+                FieldKind::Decimal,
+                make_non_negative_decimal_validator(),
+            ),
             FieldDescriptor::new(
                 "actual_amount",
                 "Actual amount",
@@ -952,14 +945,12 @@ impl TransactionWizard {
                 make_optional_non_negative_decimal_validator(None),
             )
             .with_optional(),
-        );
-        fields.push(FieldDescriptor::new(
-            "recurrence",
-            "Recurrence",
-            FieldKind::Choice(recurrence_choices.options()),
-            recurrence_validator,
-        ));
-        fields.push(
+            FieldDescriptor::new(
+                "recurrence",
+                "Recurrence",
+                FieldKind::Choice(recurrence_choices.options()),
+                recurrence_validator,
+            ),
             FieldDescriptor::new(
                 "recurrence_days",
                 "Every N days interval",
@@ -967,17 +958,15 @@ impl TransactionWizard {
                 make_positive_integer_validator(1),
             )
             .with_help("Only used when recurrence is set to 'Every N days'."),
-        );
-        fields.push(FieldDescriptor::new(
-            "status",
-            "Status",
-            FieldKind::Choice(status_choices.options()),
-            status_validator,
-        ));
-        fields.push(
+            FieldDescriptor::new(
+                "status",
+                "Status",
+                FieldKind::Choice(status_choices.options()),
+                status_validator,
+            ),
             FieldDescriptor::new("notes", "Notes", FieldKind::Text, make_notes_validator(512))
                 .with_optional(),
-        );
+        ];
 
         let mut defaults = defaults;
         if let Some(display) = account_choices.options().first() {
