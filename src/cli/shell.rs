@@ -156,10 +156,7 @@ impl CliApp {
             self.state
                 .set_ledger(report.ledger, Some(path), Some(name.clone()));
             self.report_load(&report.warnings, &report.migrations);
-            println!(
-                "{}",
-                format!("Automatically loaded last ledger `{}`", name).bright_green()
-            );
+            output_success(format!("Automatically loaded last ledger `{}`.", name));
         }
         Ok(())
     }
@@ -318,10 +315,10 @@ impl CliApp {
 
     fn report_load(&self, warnings: &[String], migrations: &[String]) {
         for note in migrations {
-            output_info(format!("Migration: {}", note).bright_yellow());
+            output_info(format!("Migration: {}", note));
         }
         for warning in warnings {
-            output_warning(format!("⚠️  {}", warning).yellow());
+            output_warning(warning);
         }
     }
 
@@ -404,11 +401,11 @@ impl CliApp {
     }
 
     fn print_error(&self, message: &str) {
-        output_error(format!("{} {}", "⚠️".bright_yellow(), message));
+        output_error(message);
     }
 
     fn print_warning(&self, message: &str) {
-        output_warning(format!("{} {}", "⚠️".bright_yellow(), message));
+        output_warning(message);
     }
 
     fn current_ledger(&self) -> Result<&Ledger, CommandError> {
@@ -2495,7 +2492,7 @@ impl CliApp {
             .map(|snap| (snap.series_id, snap))
             .collect();
         if snapshot_map.is_empty() {
-            println!("{}", "No recurring schedules defined.".bright_black());
+            output_warning("No recurring schedules defined.");
             return Ok(());
         }
         let mut entries: Vec<(usize, &Transaction, &RecurrenceSnapshot)> = ledger
@@ -2517,7 +2514,7 @@ impl CliApp {
             (None, None) => Ordering::Equal,
         });
 
-        println!("{}", "Recurring schedules:".bright_white().bold());
+        output_section("Recurring schedules");
         let mut shown = 0;
         for (index, txn, snapshot) in entries {
             if !filter.matches(snapshot) {
@@ -2527,10 +2524,7 @@ impl CliApp {
             self.print_recurrence_entry(ledger, index, txn, snapshot);
         }
         if shown == 0 {
-            println!(
-                "{}",
-                "No recurring entries match the requested filter.".bright_black()
-            );
+            output_info("No recurring entries match the requested filter.");
         }
         Ok(())
     }
@@ -2552,8 +2546,8 @@ impl CliApp {
             .map(|d| d.to_string())
             .unwrap_or_else(|| "None".into());
         let status = self.recurrence_status_label(&snapshot.status);
-        println!(
-            "[{idx}] {route} | {cat} | every {freq} | next {next} | overdue {overdue} | pending {pending}",
+        output_info(format!(
+            "[{idx:>3}] {route} | {cat} | every {freq} | next {next} | overdue {overdue} | pending {pending}",
             idx = index,
             route = route,
             cat = category,
@@ -2561,18 +2555,18 @@ impl CliApp {
             next = next_due,
             overdue = snapshot.overdue,
             pending = snapshot.pending
-        );
-        println!(
-            "      amount {:.2} | status {} | since {}",
-            txn.budgeted_amount, status, snapshot.start_date
-        );
+        ));
+        output_info(format!(
+            "      amount {:.2} | status {status} | since {}",
+            txn.budgeted_amount, snapshot.start_date
+        ));
     }
 
-    fn recurrence_status_label(&self, status: &RecurrenceStatus) -> colored::ColoredString {
+    fn recurrence_status_label(&self, status: &RecurrenceStatus) -> &'static str {
         match status {
-            RecurrenceStatus::Active => "Active".green(),
-            RecurrenceStatus::Paused => "Paused".yellow(),
-            RecurrenceStatus::Completed => "Completed".bright_black(),
+            RecurrenceStatus::Active => "Active",
+            RecurrenceStatus::Paused => "Paused",
+            RecurrenceStatus::Completed => "Completed",
         }
     }
 
