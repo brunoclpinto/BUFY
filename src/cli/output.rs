@@ -15,23 +15,12 @@ pub enum MessageKind {
     Separator,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct OutputPreferences {
     pub screen_reader_mode: bool,
     pub high_contrast_mode: bool,
     pub quiet_mode: bool,
     pub audio_feedback: bool,
-}
-
-impl Default for OutputPreferences {
-    fn default() -> Self {
-        Self {
-            screen_reader_mode: false,
-            high_contrast_mode: false,
-            quiet_mode: false,
-            audio_feedback: false,
-        }
-    }
 }
 
 static PREFERENCES: OnceLock<RwLock<OutputPreferences>> = OnceLock::new();

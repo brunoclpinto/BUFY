@@ -2319,7 +2319,7 @@ mod tests {
                 assert_eq!(data.id, Some(category_id));
                 assert_eq!(data.name, "Rent (Updated)");
                 assert_eq!(data.kind, CategoryKind::Expense);
-                assert_eq!(data.is_custom, false);
+                assert!(!data.is_custom);
                 assert_eq!(data.parent_id, Some(parent_id));
                 assert_eq!(data.notes.as_deref(), Some("Updated note"));
             }

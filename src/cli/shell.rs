@@ -168,7 +168,8 @@ impl CliApp {
             CliMode::Script => None,
         };
 
-        let store = LedgerStore::default().map_err(|err| CliError::Internal(err.to_string()))?;
+        let store =
+            LedgerStore::new_default().map_err(|err| CliError::Internal(err.to_string()))?;
 
         let mut app = Self {
             mode,
@@ -430,7 +431,7 @@ impl CliApp {
         }
         self.selection_override
             .as_ref()
-            .map_or(false, |override_data| override_data.has_choices())
+            .is_some_and(|override_data| override_data.has_choices())
     }
 
     fn select_with<P>(

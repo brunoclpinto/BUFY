@@ -146,7 +146,7 @@ impl LedgerStore {
     }
 
     /// Returns a store using the default base directory.
-    pub fn default() -> Result<Self, LedgerError> {
+    pub fn new_default() -> Result<Self, LedgerError> {
         Self::new(None, None)
     }
 
@@ -358,7 +358,7 @@ impl LedgerStore {
     /// Records the last opened ledger in the state file.
     pub fn record_last_ledger(&self, name: Option<&str>) -> Result<(), LedgerError> {
         let mut state = self.read_state()?;
-        state.last_ledger = name.map(|n| canonical_name(n));
+        state.last_ledger = name.map(canonical_name);
         let data = serde_json::to_string_pretty(&state)?;
         write_atomic(&self.state_path(), &data)?;
         Ok(())
