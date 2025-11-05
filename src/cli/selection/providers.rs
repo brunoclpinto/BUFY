@@ -183,10 +183,19 @@ impl<'a> SelectionProvider for ConfigBackupSelectionProvider<'a> {
                     .file_name()
                     .and_then(|stem| stem.to_str())
                     .unwrap_or("config-backup");
-                let mut label = format!("{:<30}", file_name);
-                if let Some(timestamp) = info.timestamp {
-                    let created = timestamp.with_timezone(&Local);
-                    label.push_str(&format!(" (Created: {})", created.format("%Y-%m-%d %H:%M")));
+                let created = info.created_at.with_timezone(&Local);
+                let mut label = format!(
+                    "{:<30} (Created: {})",
+                    file_name,
+                    created.format("%Y-%m-%d %H:%M")
+                );
+                if let Some(note) = info
+                    .note
+                    .as_ref()
+                    .map(|n| n.trim())
+                    .filter(|n| !n.is_empty())
+                {
+                    label.push_str(&format!("  [note: {}]", note));
                 }
                 SelectionItem::new(info.path, label)
             })
