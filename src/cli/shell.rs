@@ -26,14 +26,15 @@ use crate::{
         BudgetStatus, BudgetSummary, Category, DateWindow, ForecastReport, Ledger, Recurrence,
         RecurrenceEnd, RecurrenceMode, RecurrenceSnapshot, RecurrenceStatus, ScheduledStatus,
         SimulationBudgetImpact, SimulationChange, SimulationStatus, SimulationTransactionPatch,
-        TimeInterval, TimeUnit, Transaction,
+        TimeInterval, TimeUnit, Transaction, TransactionStatus,
     },
     utils::{build_info, persistence::LedgerStore},
 };
 
 use crate::cli::forms::{
     AccountFormData, AccountInitialData, AccountWizard, CategoryFormData, CategoryInitialData,
-    CategoryWizard, DialoguerInteraction, FormEngine, FormResult,
+    CategoryWizard, DialoguerInteraction, FormEngine, FormResult, TransactionFormData,
+    TransactionInitialData, TransactionRecurrenceAction, TransactionWizard,
 };
 use crate::cli::selection::{
     providers::{
@@ -519,6 +520,24 @@ impl CliApp {
             .collect()
     }
 
+    fn transaction_account_options(&self, ledger: &Ledger) -> Vec<(String, Uuid)> {
+        ledger
+            .accounts
+            .iter()
+            .map(|account| {
+                (
+                    format!(
+                        "{} ({:?}) [{}]",
+                        account.name,
+                        account.kind,
+                        short_id(account.id)
+                    ),
+                    account.id,
+                )
+            })
+            .collect()
+    }
+
     fn category_parent_options(
         &self,
         ledger: &Ledger,
@@ -614,6 +633,189 @@ impl CliApp {
                 category.notes = data.notes;
                 self.current_ledger_mut()?.add_category(category);
                 output_success(format!("Category `{}` added.", data.name));
+            }
+        }
+        Ok(())
+    }
+
+    fn populate_transaction_from_form(transaction: &mut Transaction, data: &TransactionFormData) {
+        transaction.from_account = data.from_account;
+        transaction.to_account = data.to_account;
+        transaction.category_id = data.category_id;
+        transaction.scheduled_date = data.scheduled_date;
+        transaction.budgeted_amount = data.budgeted_amount;
+
+        let mut actual_date = data.actual_date;
+        let mut actual_amount = data.actual_amount;
+
+        if matches!(data.status, TransactionStatus::Completed) {
+            if actual_date.is_none() {
+                actual_date = Some(data.scheduled_date);
+            }
+            if actual_amount.is_none() {
+                actual_amount = Some(data.budgeted_amount);
+            }
+        }
+
+        transaction.actual_date = actual_date;
+        transaction.actual_amount = actual_amount;
+        transaction.status = data.status.clone();
+        transaction.notes = data.notes.clone();
+
+        match &data.recurrence {
+            TransactionRecurrenceAction::Clear => {
+                transaction.set_recurrence(None);
+                transaction.recurrence_series_id = None;
+            }
+            TransactionRecurrenceAction::Set(recurrence) => {
+                transaction.set_recurrence(Some(recurrence.clone()));
+            }
+            TransactionRecurrenceAction::Keep => {}
+        }
+    }
+
+    fn apply_transaction_creation(
+        &mut self,
+        data: TransactionFormData,
+        simulation: Option<&str>,
+    ) -> CommandResult {
+        let mut transaction = Transaction::new(
+            data.from_account,
+            data.to_account,
+            data.category_id,
+            data.scheduled_date,
+            data.budgeted_amount,
+        );
+        Self::populate_transaction_from_form(&mut transaction, &data);
+
+        let summary = {
+            let ledger = self.current_ledger()?;
+            self.transaction_summary_line(ledger, &transaction)
+        };
+
+        if let Some(name) = simulation {
+            {
+                let ledger = self.current_ledger_mut()?;
+                ledger
+                    .add_simulation_transaction(name, transaction)
+                    .map_err(CommandError::from_ledger)?;
+            }
+            output_success(format!(
+                "Transaction saved to simulation `{}`: {}",
+                name, summary
+            ));
+        } else {
+            let id = {
+                let ledger = self.current_ledger_mut()?;
+                ledger.add_transaction(transaction)
+            };
+            let summary = {
+                let ledger = self.current_ledger()?;
+                let txn = ledger
+                    .transaction(id)
+                    .expect("transaction just added should exist");
+                self.transaction_summary_line(ledger, txn)
+            };
+            output_success(format!("Transaction saved: {}", summary));
+        }
+        Ok(())
+    }
+
+    fn apply_transaction_update(&mut self, data: TransactionFormData) -> CommandResult {
+        let txn_id = data.id.ok_or_else(|| {
+            CommandError::InvalidArguments("transaction identifier missing".into())
+        })?;
+        {
+            let ledger = self.current_ledger_mut()?;
+            let transaction = ledger
+                .transaction_mut(txn_id)
+                .ok_or_else(|| CommandError::InvalidArguments("Transaction not found".into()))?;
+            Self::populate_transaction_from_form(transaction, &data);
+            ledger.refresh_recurrence_metadata();
+            ledger.touch();
+        }
+        let summary = {
+            let ledger = self.current_ledger()?;
+            let txn = ledger
+                .transaction(txn_id)
+                .expect("transaction should exist after update");
+            self.transaction_summary_line(ledger, txn)
+        };
+        output_success(format!("Transaction updated: {}", summary));
+        Ok(())
+    }
+
+    fn remove_transaction_by_index(&mut self, index: usize) -> CommandResult {
+        let (transaction, summary) = {
+            let ledger = self.current_ledger()?;
+            let txn = ledger.transactions.get(index).ok_or_else(|| {
+                CommandError::InvalidArguments("transaction index out of range".into())
+            })?;
+            let summary = self.transaction_summary_line(ledger, txn);
+            (txn.clone(), summary)
+        };
+        let ledger = self.current_ledger_mut()?;
+        if ledger.remove_transaction(transaction.id).is_none() {
+            return Err(CommandError::InvalidArguments(
+                "transaction index out of range".into(),
+            ));
+        }
+        output_success(format!("Transaction removed: {}", summary));
+        Ok(())
+    }
+
+    fn display_transaction(&self, index: usize) -> CommandResult {
+        let ledger = self.current_ledger()?;
+        let txn = ledger.transactions.get(index).ok_or_else(|| {
+            CommandError::InvalidArguments("transaction index out of range".into())
+        })?;
+
+        output_info(format!("Transaction [{}]", index));
+        let route = self.describe_transaction_route(ledger, txn);
+        output_info(format!("Route: {}", route));
+        let category = txn
+            .category_id
+            .and_then(|id| self.lookup_category_name(ledger, id))
+            .unwrap_or_else(|| "Uncategorized".into());
+        output_info(format!("Category: {}", category));
+        output_info(format!(
+            "Scheduled: {}",
+            self.format_date(ledger, txn.scheduled_date)
+        ));
+        let budget = format_currency_value(
+            txn.budgeted_amount,
+            &ledger.transaction_currency(txn),
+            &ledger.locale,
+            &ledger.format,
+        );
+        output_info(format!("Budgeted: {}", budget));
+        if txn.actual_amount.is_some() || txn.actual_date.is_some() {
+            let amount_label = txn
+                .actual_amount
+                .map(|value| {
+                    format_currency_value(
+                        value,
+                        &ledger.transaction_currency(txn),
+                        &ledger.locale,
+                        &ledger.format,
+                    )
+                })
+                .unwrap_or_else(|| "-".into());
+            let date_label = txn
+                .actual_date
+                .map(|date| self.format_date(ledger, date))
+                .unwrap_or_else(|| "-".into());
+            output_info(format!("Actual: {} on {}", amount_label, date_label));
+        }
+        output_info(format!("Status: {:?}", txn.status));
+        if let Some(hint) = self.transaction_recurrence_hint(txn) {
+            output_info(format!("Recurrence: {}", hint));
+        } else if txn.recurrence.is_some() || txn.recurrence_series_id.is_some() {
+            output_info("Recurrence: linked instance");
+        }
+        if let Some(notes) = &txn.notes {
+            if !notes.trim().is_empty() {
+                output_info(format!("Notes: {}", notes));
             }
         }
         Ok(())
@@ -1168,14 +1370,21 @@ impl CliApp {
     }
 
     fn add_transaction_interactive(&mut self) -> CommandResult {
+        if self.mode != CliMode::Interactive {
+            return Err(CommandError::InvalidArguments(
+                "usage: add transaction <from_account_index> <to_account_index> <YYYY-MM-DD> <amount>"
+                    .into(),
+            ));
+        }
         let sim = self.active_simulation_name().map(|s| s.to_string());
-        self.add_transaction_flow(sim.as_deref())
+        self.run_transaction_add_wizard(sim.as_deref())
     }
 
     fn add_transaction_script(&mut self, args: &[&str]) -> CommandResult {
         if args.len() < 4 {
             return Err(CommandError::InvalidArguments(
-                "usage: add transaction <from_account_index> <to_account_index> <YYYY-MM-DD> <amount>".into(),
+                "usage: add transaction <from_account_index> <to_account_index> <YYYY-MM-DD> <amount>"
+                    .into(),
             ));
         }
 
@@ -1193,89 +1402,287 @@ impl CliApp {
             .parse()
             .map_err(|_| CommandError::InvalidArguments("invalid amount".into()))?;
 
-        {
-            let ledger = self.current_ledger()?;
-            if from_index >= ledger.accounts.len() || to_index >= ledger.accounts.len() {
-                return Err(CommandError::InvalidArguments(
-                    "account indices out of range".into(),
-                ));
-            }
-        }
-        let ledger = self.current_ledger()?;
-        let from_id = ledger.accounts[from_index].id;
-        let to_id = ledger.accounts[to_index].id;
-        let _ = ledger;
-
-        let transaction = Transaction::new(from_id, to_id, None, date, amount);
-        let ledger = self.current_ledger_mut()?;
-        if let Some(sim_name) = sim {
-            ledger
-                .add_simulation_transaction(&sim_name, transaction)
-                .map_err(CommandError::from_ledger)?;
-            println!(
-                "{}",
-                format!("Simulated transaction recorded in `{}`", sim_name).bright_green()
-            );
-        } else {
-            ledger.add_transaction(transaction);
-            println!("{}", "Transaction added".bright_green());
-        }
-        Ok(())
-    }
-
-    fn add_transaction_flow(&mut self, simulation: Option<&str>) -> CommandResult {
-        {
+        let (from_id, to_id) = {
             let ledger = self.current_ledger()?;
             if ledger.accounts.is_empty() {
                 return Err(CommandError::Message(
                     "Add at least one account before creating transactions".into(),
                 ));
             }
-        }
+            if from_index >= ledger.accounts.len() || to_index >= ledger.accounts.len() {
+                return Err(CommandError::InvalidArguments(
+                    "account indices out of range".into(),
+                ));
+            }
+            (ledger.accounts[from_index].id, ledger.accounts[to_index].id)
+        };
 
-        let (from, to) = self.select_accounts()?;
+        let transaction = Transaction::new(from_id, to_id, None, date, amount);
+        let summary = {
+            let ledger = self.current_ledger()?;
+            self.transaction_summary_line(ledger, &transaction)
+        };
 
-        let budgeted_amount: f64 = Input::<f64>::with_theme(&self.theme)
-            .with_prompt("Budgeted amount")
-            .interact_text()
-            .map_err(CommandError::from)?;
-
-        let date_input: String = Input::<String>::with_theme(&self.theme)
-            .with_prompt("Scheduled date (YYYY-MM-DD)")
-            .validate_with(|input: &String| -> Result<(), &str> {
-                NaiveDate::parse_from_str(input.trim(), "%Y-%m-%d")
-                    .map(|_| ())
-                    .map_err(|_| "Use format YYYY-MM-DD")
-            })
-            .interact_text()
-            .map_err(CommandError::from)?;
-        let scheduled_date = NaiveDate::parse_from_str(&date_input, "%Y-%m-%d")
-            .map_err(|_| CommandError::InvalidArguments("Invalid date format".into()))?;
-
-        let mut transaction = Transaction::new(from, to, None, scheduled_date, budgeted_amount);
-        if Confirm::with_theme(&self.theme)
-            .with_prompt("Add recurrence?")
-            .default(false)
-            .interact()
-            .map_err(CommandError::from)?
-        {
-            let recurrence = self.prompt_recurrence(scheduled_date, None)?;
-            transaction.recurrence = Some(recurrence);
-        }
-
-        if let Some(name) = simulation {
-            self.current_ledger_mut()?
-                .add_simulation_transaction(name, transaction)
-                .map_err(CommandError::from_ledger)?;
-            println!(
-                "{}",
-                format!("Simulated transaction recorded in `{}`", name).bright_green()
-            );
+        if let Some(sim_name) = sim {
+            {
+                let ledger = self.current_ledger_mut()?;
+                ledger
+                    .add_simulation_transaction(&sim_name, transaction)
+                    .map_err(CommandError::from_ledger)?;
+            }
+            output_success(format!(
+                "Transaction saved to simulation `{}`: {}",
+                sim_name, summary
+            ));
         } else {
-            self.current_ledger_mut()?.add_transaction(transaction);
-            println!("{}", "Transaction added".bright_green());
+            let id = {
+                let ledger = self.current_ledger_mut()?;
+                ledger.add_transaction(transaction)
+            };
+            let summary = {
+                let ledger = self.current_ledger()?;
+                let txn = ledger
+                    .transaction(id)
+                    .expect("transaction just added should exist");
+                self.transaction_summary_line(ledger, txn)
+            };
+            output_success(format!("Transaction saved: {}", summary));
         }
         Ok(())
+    }
+
+    fn run_transaction_add_wizard(&mut self, simulation: Option<&str>) -> CommandResult {
+        let ledger = self.current_ledger()?;
+        if ledger.accounts.is_empty() {
+            return Err(CommandError::Message(
+                "Add at least one account before creating transactions".into(),
+            ));
+        }
+        let accounts = self.transaction_account_options(ledger);
+        let categories = self.account_category_options(ledger);
+        let today = Utc::now().date_naive();
+        let min_date = ledger.created_at.date_naive();
+        let default_status = if simulation.is_some() {
+            TransactionStatus::Simulated
+        } else {
+            TransactionStatus::Planned
+        };
+        let wizard =
+            TransactionWizard::new_create(accounts, categories, today, min_date, default_status);
+        let mut interaction = DialoguerInteraction::new(&self.theme);
+        match FormEngine::new(&wizard).run(&mut interaction).unwrap() {
+            FormResult::Cancelled => {
+                output_info("Transaction creation cancelled.");
+                Ok(())
+            }
+            FormResult::Completed(data) => self.apply_transaction_creation(data, simulation),
+        }
+    }
+
+    fn run_transaction_edit_wizard(&mut self, index: usize) -> CommandResult {
+        self.ensure_base_mode("Transaction editing")?;
+        if self.mode != CliMode::Interactive {
+            return Err(CommandError::InvalidArguments(
+                "usage: transaction edit <index>".into(),
+            ));
+        }
+        let (accounts, categories, initial, created_at) = {
+            let ledger = self.current_ledger()?;
+            if index >= ledger.transactions.len() {
+                return Err(CommandError::InvalidArguments(
+                    "transaction index out of range".into(),
+                ));
+            }
+            let txn = ledger.transactions[index].clone();
+            let accounts = self.transaction_account_options(ledger);
+            let categories = self.account_category_options(ledger);
+            let created_at = ledger.created_at;
+            let initial = TransactionInitialData {
+                id: txn.id,
+                from_account: txn.from_account,
+                to_account: txn.to_account,
+                category_id: txn.category_id,
+                scheduled_date: txn.scheduled_date,
+                actual_date: txn.actual_date,
+                budgeted_amount: txn.budgeted_amount,
+                actual_amount: txn.actual_amount,
+                recurrence: txn.recurrence.clone(),
+                status: txn.status.clone(),
+                notes: txn.notes.clone(),
+            };
+            (accounts, categories, initial, created_at)
+        };
+        let today = Utc::now().date_naive();
+        let min_date = created_at.date_naive();
+        let wizard = TransactionWizard::new_edit(accounts, categories, today, min_date, initial);
+        let mut interaction = DialoguerInteraction::new(&self.theme);
+        match FormEngine::new(&wizard).run(&mut interaction).unwrap() {
+            FormResult::Cancelled => {
+                output_info("Transaction update cancelled.");
+                Ok(())
+            }
+            FormResult::Completed(data) => self.apply_transaction_update(data),
+        }
+    }
+
+    fn transaction_add(&mut self, args: &[&str]) -> CommandResult {
+        if args.is_empty() {
+            if self.mode == CliMode::Interactive {
+                let sim = self.active_simulation_name().map(|s| s.to_string());
+                self.run_transaction_add_wizard(sim.as_deref())
+            } else {
+                Err(CommandError::InvalidArguments(
+                    "usage: transaction add <from_account_index> <to_account_index> <YYYY-MM-DD> <amount>"
+                        .into(),
+                ))
+            }
+        } else {
+            self.add_transaction_script(args)
+        }
+    }
+
+    fn transaction_edit(&mut self, args: &[&str]) -> CommandResult {
+        if self.current_ledger()?.transactions.is_empty() {
+            output_warning("No transactions available.");
+            return Ok(());
+        }
+        if args.len() > 1 {
+            return Err(CommandError::InvalidArguments(
+                "usage: transaction edit <index>".into(),
+            ));
+        }
+        let usage = "usage: transaction edit <index>";
+        let prompt = "Select a transaction to edit:";
+        let selection = self.transaction_index_from_arg(args.first().copied(), usage, prompt)?;
+        let Some(index) = selection else {
+            return Ok(());
+        };
+        self.run_transaction_edit_wizard(index)
+    }
+
+    fn transaction_remove(&mut self, args: &[&str]) -> CommandResult {
+        self.ensure_base_mode("Transaction removal")?;
+        if self.current_ledger()?.transactions.is_empty() {
+            output_warning("No transactions available.");
+            return Ok(());
+        }
+        if args.len() > 1 {
+            return Err(CommandError::InvalidArguments(
+                "usage: transaction remove <index>".into(),
+            ));
+        }
+        let usage = "usage: transaction remove <index>";
+        let prompt = "Select a transaction to remove:";
+        let selection = self.transaction_index_from_arg(args.first().copied(), usage, prompt)?;
+        let Some(index) = selection else {
+            return Ok(());
+        };
+        self.remove_transaction_by_index(index)
+    }
+
+    fn transaction_show(&mut self, args: &[&str]) -> CommandResult {
+        if self.current_ledger()?.transactions.is_empty() {
+            output_warning("No transactions available.");
+            return Ok(());
+        }
+        if args.len() > 1 {
+            return Err(CommandError::InvalidArguments(
+                "usage: transaction show <index>".into(),
+            ));
+        }
+        let usage = "usage: transaction show <index>";
+        let prompt = "Select a transaction to show:";
+        let selection = self.transaction_index_from_arg(args.first().copied(), usage, prompt)?;
+        let Some(index) = selection else {
+            return Ok(());
+        };
+        self.display_transaction(index)
+    }
+
+    fn transaction_complete_internal(
+        &mut self,
+        args: &[&str],
+        usage: &str,
+        prompt: &str,
+    ) -> CommandResult {
+        self.ensure_base_mode("Completion")?;
+        if self.current_ledger()?.transactions.is_empty() {
+            output_warning("No transactions available.");
+            return Ok(());
+        }
+        let selection = self.transaction_index_from_arg(args.first().copied(), usage, prompt)?;
+        let Some(idx) = selection else {
+            return Ok(());
+        };
+
+        let (scheduled_default, budget_default) = {
+            let ledger = self.current_ledger()?;
+            let txn = ledger.transactions.get(idx).ok_or_else(|| {
+                CommandError::InvalidArguments("transaction index out of range".into())
+            })?;
+            (
+                txn.scheduled_date,
+                txn.actual_amount.unwrap_or(txn.budgeted_amount),
+            )
+        };
+
+        let actual_date = if let Some(raw) = args.get(1) {
+            parse_date(raw)?
+        } else if self.mode == CliMode::Interactive {
+            let prompt = format!("Completion date for transaction {} (YYYY-MM-DD)", idx);
+            let input = Input::<String>::with_theme(&self.theme)
+                .with_prompt(prompt)
+                .with_initial_text(scheduled_default.to_string())
+                .interact_text()
+                .map_err(CommandError::from)?;
+            parse_date(input.trim())?
+        } else {
+            return Err(CommandError::InvalidArguments(usage.into()));
+        };
+
+        let amount: f64 = if let Some(raw) = args.get(2) {
+            raw.parse()
+                .map_err(|_| CommandError::InvalidArguments("amount must be numeric".into()))?
+        } else if self.mode == CliMode::Interactive {
+            let prompt = format!("Actual amount for transaction {}", idx);
+            let input = Input::<String>::with_theme(&self.theme)
+                .with_prompt(prompt)
+                .with_initial_text(format!("{:.2}", budget_default))
+                .interact_text()
+                .map_err(CommandError::from)?;
+            input
+                .trim()
+                .parse()
+                .map_err(|_| CommandError::InvalidArguments("amount must be numeric".into()))?
+        } else {
+            return Err(CommandError::InvalidArguments(usage.into()));
+        };
+
+        let ledger = self.current_ledger_mut()?;
+        let txn = ledger.transactions.get_mut(idx).ok_or_else(|| {
+            CommandError::InvalidArguments("transaction index out of range".into())
+        })?;
+        txn.mark_completed(actual_date, amount);
+        ledger.refresh_recurrence_metadata();
+        ledger.touch();
+        output_success(format!("Transaction {} marked completed", idx));
+        Ok(())
+    }
+
+    fn transaction_complete(&mut self, args: &[&str]) -> CommandResult {
+        self.transaction_complete_internal(
+            args,
+            "usage: transaction complete <transaction_index> <YYYY-MM-DD> <amount>",
+            "Select a transaction to complete:",
+        )
+    }
+
+    fn legacy_complete(&mut self, args: &[&str]) -> CommandResult {
+        self.transaction_complete_internal(
+            args,
+            "usage: complete <transaction_index> <YYYY-MM-DD> <amount>",
+            "Select a transaction to complete:",
+        )
     }
 
     fn prompt_recurrence(
@@ -1375,36 +1782,6 @@ impl CliApp {
             recurrence.next_scheduled = existing.next_scheduled;
         }
         Ok(recurrence)
-    }
-
-    fn select_accounts(&mut self) -> Result<(uuid::Uuid, uuid::Uuid), CommandError> {
-        let items: Vec<String> = {
-            let ledger = self.current_ledger()?;
-            ledger
-                .accounts
-                .iter()
-                .enumerate()
-                .map(|(idx, account)| format!("{}: {}", idx, account.name))
-                .collect()
-        };
-
-        let from_idx = Select::with_theme(&self.theme)
-            .with_prompt("From account")
-            .items(&items)
-            .default(0)
-            .interact()
-            .map_err(CommandError::from)?;
-        let to_idx = Select::with_theme(&self.theme)
-            .with_prompt("To account")
-            .items(&items)
-            .default(0)
-            .interact()
-            .map_err(CommandError::from)?;
-
-        let ledger = self.current_ledger()?;
-        let from_id = ledger.accounts[from_idx].id;
-        let to_id = ledger.accounts[to_idx].id;
-        Ok((from_id, to_id))
     }
 
     fn list_accounts(&self) -> CommandResult {
@@ -1941,6 +2318,22 @@ impl CliApp {
         format!("{} → {}", from, to)
     }
 
+    fn transaction_summary_line(&self, ledger: &Ledger, txn: &Transaction) -> String {
+        let category = txn
+            .category_id
+            .and_then(|id| self.lookup_category_name(ledger, id))
+            .unwrap_or_else(|| "Uncategorized".into());
+        let amount = format_currency_value(
+            txn.budgeted_amount,
+            &ledger.transaction_currency(txn),
+            &ledger.locale,
+            &ledger.format,
+        );
+        let route = self.describe_transaction_route(ledger, txn);
+        let date = self.format_date(ledger, txn.scheduled_date);
+        format!("{} {} ({} ) on {}", category, amount, route, date)
+    }
+
     fn lookup_category_name(&self, ledger: &Ledger, id: Uuid) -> Option<String> {
         ledger
             .categories
@@ -2267,7 +2660,7 @@ impl CliApp {
     }
 
     fn simulation_add_transaction(&mut self, sim_name: &str) -> CommandResult {
-        self.add_transaction_flow(Some(sim_name))
+        self.run_transaction_add_wizard(Some(sim_name))
     }
 
     fn simulation_exclude_transaction(&mut self, sim_name: &str) -> CommandResult {
@@ -2480,6 +2873,12 @@ fn build_commands() -> Vec<CommandDefinition> {
             "Add an account, category, or transaction",
             "add [account|category|transaction]",
             cmd_add,
+        ),
+        CommandDefinition::new(
+            "transaction",
+            "Manage transactions via wizard flows",
+            "transaction <add|edit|remove|show|complete>",
+            cmd_transaction,
         ),
         CommandDefinition::new(
             "account",
@@ -2907,6 +3306,26 @@ fn cmd_add(app: &mut CliApp, args: &[&str]) -> CommandResult {
     } else {
         Err(CommandError::InvalidArguments(
             "usage: add <account|category|transaction>".into(),
+        ))
+    }
+}
+
+fn cmd_transaction(app: &mut CliApp, args: &[&str]) -> CommandResult {
+    if let Some((subcommand, rest)) = args.split_first() {
+        match subcommand.to_ascii_lowercase().as_str() {
+            "add" => app.transaction_add(rest),
+            "edit" => app.transaction_edit(rest),
+            "remove" => app.transaction_remove(rest),
+            "show" => app.transaction_show(rest),
+            "complete" => app.transaction_complete(rest),
+            other => Err(CommandError::InvalidArguments(format!(
+                "unknown transaction subcommand `{}`",
+                other
+            ))),
+        }
+    } else {
+        Err(CommandError::InvalidArguments(
+            "usage: transaction <add|edit|remove|show|complete>".into(),
         ))
     }
 }
@@ -3370,82 +3789,7 @@ fn cmd_exit(_app: &mut CliApp, _args: &[&str]) -> CommandResult {
 }
 
 fn cmd_complete(app: &mut CliApp, args: &[&str]) -> CommandResult {
-    app.ensure_base_mode("Completion")?;
-    let idx: usize = if let Some(raw) = args.get(0) {
-        raw.parse().map_err(|_| {
-            CommandError::InvalidArguments("transaction_index must be numeric".into())
-        })?
-    } else if app.mode == CliMode::Interactive {
-        match app.select_transaction_index("Select a transaction to complete:")? {
-            Some(index) => index,
-            None => return Ok(()),
-        }
-    } else {
-        return Err(CommandError::InvalidArguments(
-            "usage: complete <transaction_index> <YYYY-MM-DD> <amount>".into(),
-        ));
-    };
-
-    let (scheduled_default, budget_default) = {
-        let ledger = app.current_ledger()?;
-        let txn = ledger.transactions.get(idx).ok_or_else(|| {
-            CommandError::InvalidArguments("transaction index out of range".into())
-        })?;
-        (
-            txn.scheduled_date,
-            txn.actual_amount.unwrap_or(txn.budgeted_amount),
-        )
-    };
-
-    let actual_date = if let Some(raw) = args.get(1) {
-        parse_date(raw)?
-    } else if app.mode == CliMode::Interactive {
-        let prompt = format!("Completion date for transaction {} (YYYY-MM-DD)", idx);
-        let input = Input::<String>::with_theme(&app.theme)
-            .with_prompt(prompt)
-            .with_initial_text(scheduled_default.to_string())
-            .interact_text()
-            .map_err(CommandError::from)?;
-        parse_date(input.trim())?
-    } else {
-        return Err(CommandError::InvalidArguments(
-            "usage: complete <transaction_index> <YYYY-MM-DD> <amount>".into(),
-        ));
-    };
-
-    let amount: f64 = if let Some(raw) = args.get(2) {
-        raw.parse()
-            .map_err(|_| CommandError::InvalidArguments("amount must be numeric".into()))?
-    } else if app.mode == CliMode::Interactive {
-        let prompt = format!("Actual amount for transaction {}", idx);
-        let input = Input::<String>::with_theme(&app.theme)
-            .with_prompt(prompt)
-            .with_initial_text(format!("{:.2}", budget_default))
-            .interact_text()
-            .map_err(CommandError::from)?;
-        input
-            .trim()
-            .parse()
-            .map_err(|_| CommandError::InvalidArguments("amount must be numeric".into()))?
-    } else {
-        return Err(CommandError::InvalidArguments(
-            "usage: complete <transaction_index> <YYYY-MM-DD> <amount>".into(),
-        ));
-    };
-
-    let ledger = app.current_ledger_mut()?;
-    let txn = ledger
-        .transactions
-        .get_mut(idx)
-        .ok_or_else(|| CommandError::InvalidArguments("transaction index out of range".into()))?;
-    txn.mark_completed(actual_date, amount);
-    ledger.refresh_recurrence_metadata();
-    ledger.touch();
-    println!(
-        "{}",
-        format!("Transaction {} marked completed", idx).bright_green()
-    );
-    Ok(())
+    app.legacy_complete(args)
 }
 
 fn parse_command_line(line: &str) -> Result<Vec<String>, ParseError> {
