@@ -51,7 +51,7 @@ For architectural background see `docs/design_overview.md`.
 | Ledger lifecycle | `new-ledger`, `load [path]`, `save [path]`, `load-ledger <name>`, `save-ledger [name]` | Named saves use the managed store; path-based commands operate on arbitrary JSON files. |
 | Persistence tooling | `backup-ledger [name]`, `list-backups [name]`, `restore-ledger <idx|pattern> [name]` | Snapshots live under `~/.budget_core/backups/<name>/YYYY-MM-DDTHH-MM-SS.json.bak`. |
 | Currency & locale | `config [show|base-currency|locale|negative-style|screen-reader|high-contrast|valuation]` | Persisted per-ledger settings for currency display, locale defaults, valuation policies, and accessibility. |
-| Data entry | `add account`, `add category`, `add transaction`, `list [accounts|categories|transactions]` | Transaction list output shows recurrence hints (`[recurring]`, `[instance]`). |
+| Data entry | `transaction add/edit/remove/show/complete`, `add account`, `add category`, `add transaction`, `list [accounts|categories|transactions]` | Transaction list output shows recurrence hints (`[recurring]`, `[instance]`). |
 | Recurrence | `recurring list/edit/clear/pause/resume/skip/sync`, `complete <idx>` | Schedules track start/end dates, exceptions, and automatically materialize overdue instances. |
 | Forecasting | `forecast [simulation] [<n> <unit> | custom <start> <end>]` | Produces future inflow/outflow projections plus window-specific budget summaries. |
 | Simulations | `create-simulation`, `enter-simulation`, `simulation add/modify/exclude`, `list-simulations`, `summary <simulation>`, `apply-simulation`, `discard-simulation` | Enables “what-if” comparisons against the base ledger. |
@@ -66,7 +66,7 @@ Budget Core now understands recurring obligations and can materialize missed occ
 
 - `recurring list [overdue|pending|all]` surfaces every recurrence with next-due dates, overdue counts, and status (Active/Paused/Completed). Use `recurring edit <transaction_index>` to attach or update a schedule for any transaction, `recurring clear` to remove it, `recurring pause`/`recurring resume` to toggle activity, `recurring skip <index> <YYYY-MM-DD>` to add exceptions, and `recurring sync [YYYY-MM-DD]` to backfill overdue ledger entries.
 - `forecast [simulation_name] [<number> <unit> | custom <start> <end>]` produces a deterministic projection for the requested window and reports inflow/outflow totals, overdue vs. pending counts, and the top upcoming instances. Prefix the command with a simulation name to preview "what-if" schedules.
-- `complete <transaction_index> <YYYY-MM-DD> <amount>` marks a scheduled transaction as finished and updates recurrence metadata automatically.
+- `transaction complete <transaction_index> <YYYY-MM-DD> <amount>` (alias: `complete`) marks a scheduled transaction as finished and updates recurrence metadata automatically.
 
 Recurrence state is persisted with the ledger JSON so restarting the CLI preserves start dates, next occurrences, and skipped dates. Use `recurring sync` after structural changes (new accounts/categories) to ensure schedules stay aligned.
 

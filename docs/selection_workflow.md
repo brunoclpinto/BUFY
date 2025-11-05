@@ -20,7 +20,10 @@ current CLI implementation.
    categories, transactions, simulations, ledger backups, and configuration
    backups. Each provider returns domain-appropriate ids (e.g. list indices for
    ledger collections, `PathBuf` for backup files) while reusing the shared
-   presentation shape.
+   presentation shape. Phase 16 expands the transaction provider to surface
+   rich labels of the form `[##] YYYY-MM-DD | From -> To | amount | category | status`,
+   making it easier to disambiguate entries when launching the transaction
+   wizards or follow-on actions.
 4. **`SelectionManager`** – orchestrates user interaction. Providers hand their
    items to the manager, which renders labels and delegates the actual choice to
    a selector function. The default selector uses `dialoguer::Select`, while
@@ -32,7 +35,10 @@ current CLI implementation.
 1. **Detection** – command handlers call helper methods such as
    `CliApp::transaction_index_from_arg` or `CliApp::resolve_simulation_name`.
    These detect missing arguments and trigger a selection only when interactive
-   input (or a queued test override) is available.
+   input (or a queued test override) is available. With Phase 16, the
+   `transaction remove/show/complete` commands lean on the same helper, so
+   users can simply press Enter to pick from the recent transaction list instead
+   of memorising numeric indices.
 2. **Enumeration** – the appropriate provider (`AccountSelectionProvider`,
    `TransactionSelectionProvider`, etc.) captures the latest state via
    `SelectionProvider::items()`.

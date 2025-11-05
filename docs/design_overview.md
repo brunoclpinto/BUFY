@@ -46,7 +46,7 @@ Design trade-offs:
 Phase 3 introduces an interactive `rustyline`-powered shell that wraps the ledger APIs with contextual menus and command dispatch. Highlights:
 
 - **Ledger workflows** – `new-ledger`, `save`, `load`, and their named counterparts (`save-ledger`, `load-ledger`) keep the working set obvious. The prompt reflects the active ledger, and auto-complete/history improve ergonomics.
-- **Data entry** – guided prompts for accounts, categories, and transactions with validation, plus script-mode (`BUDGET_CORE_CLI_SCRIPT=1`) automation for tests and CI. Transaction listings annotate recurrence hints (`[recurring]`, `[instance]`).
+- **Data entry** – guided prompts for accounts, categories, and transactions with validation, plus script-mode (`BUDGET_CORE_CLI_SCRIPT=1`) automation for tests and CI. Transaction listings annotate recurrence hints (`[recurring]`, `[instance]`). The `transaction` command family (`transaction add/edit/remove/show/complete`) now fronts the ledger workflow: add/edit launch the Phase 14 form engine, while remove/show/complete fall back to the shared selection manager when the user omits an index.
 - **Recurrence tooling** – `recurring list/edit/clear/pause/resume/skip/sync` and `complete <idx>` manage schedules without leaving the shell.
 - **Forecasting & simulations** – `forecast`, `summary <simulation>`, and `simulation add/modify/exclude` expose future-looking views side-by-side with base results.
 - **Persistence integration** – the CLI auto-loads the last ledger, exposes backup/restore commands, and surfaces migration warnings emitted by `LedgerStore`.
@@ -278,3 +278,15 @@ CLI helpers map these into `CommandError`, allowing interactive sessions to prov
    deepens.
 6. Phase 9 follow-ups: implement the FFI modules per `docs/ffi_spec.md`, generate bindings, and expand cross-platform test coverage.
 7. Phase 11 performance tracking: maintain the Criterion harness (`benches/performance.rs`) and record benchmark results (see `docs/performance.md`).
+- **Transaction wizard (Phase 16)** – `transaction add` and `transaction edit` share a declarative descriptor layered on top of the generic form engine. The form walks users through:
+  1. **From/To accounts** – resolved through `ChoiceMapper` entries per ledger account, rejecting stale identifiers.
+  2. **Category** – optional; `None` remains valid for transfer-like entries.
+  3. **Scheduled / actual dates** – scheduled dates must be on/after the ledger’s creation date; actual dates are optional but must be ≤ today. Keeping `Completed` status without an explicit actual date back-fills the scheduled date automatically.
+  4. **Budgeted / actual amounts** – amounts are non-negative, rounded according to the existing currency helpers. Blank actual amounts default to the budgeted value for completed transactions.
+  5. **Recurrence** – fixed presets (None/Daily/Weekly/Monthly/Yearly) plus an "Every N days" variant with positive integer validation. Editing flows include a "Keep existing" guardrail for schedules that fall outside those presets.
+  6. **Status & notes** – status constrained to `Planned`, `Completed`, `Missed`, or `Simulated`; notes trimmed and size-limited.
+  The wizard finishes with a review screen and explicit confirmation before mutating the ledger. Cancellation leaves the ledger untouched.
+
+- **Selection integration** – `transaction edit`, `transaction remove`, `transaction show`, and `transaction complete` all reuse the global selection manager when the caller omits an index. Empty ledgers short-circuit the workflow with a friendly "No transactions available" banner rather than dropping into a prompt.
+
+- **Developer note:** adding another transaction field requires updating the descriptor list in `TransactionWizard::build`, wiring the validator, and extending `CliApp::populate_transaction_from_form`. The form engine takes care of navigation, confirmation, and cancellation semantics once the descriptor is in place.
