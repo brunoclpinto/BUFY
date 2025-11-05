@@ -211,26 +211,36 @@ impl CliApp {
 
     fn show_config(&self) -> CommandResult {
         let ledger = self.current_ledger()?;
-        println!("Base currency: {}", ledger.base_currency.as_str());
-        println!("Locale: {}", ledger.locale.language_tag);
-        println!("Negative style: {:?}", ledger.format.negative_style);
-        println!(
-            "Screen reader mode: {}",
+        output_section("Configuration");
+        output_info(format!(
+            "  Base currency: {}",
+            ledger.base_currency.as_str()
+        ));
+        output_info(format!("  Locale: {}", ledger.locale.language_tag));
+        output_info(format!(
+            "  Negative style: {:?}",
+            ledger.format.negative_style
+        ));
+        output_info(format!(
+            "  Screen reader mode: {}",
             if ledger.format.screen_reader_mode {
                 "on"
             } else {
                 "off"
             }
-        );
-        println!(
-            "High contrast mode: {}",
+        ));
+        output_info(format!(
+            "  High contrast mode: {}",
             if ledger.format.high_contrast_mode {
                 "on"
             } else {
                 "off"
             }
-        );
-        println!("Valuation policy: {:?}", ledger.valuation_policy);
+        ));
+        output_info(format!(
+            "  Valuation policy: {:?}",
+            ledger.valuation_policy
+        ));
         Ok(())
     }
 
@@ -2587,10 +2597,7 @@ impl CliApp {
         txn.set_recurrence(Some(recurrence));
         ledger.refresh_recurrence_metadata();
         ledger.touch();
-        println!(
-            "{}",
-            format!("Recurrence updated for transaction {}", index).bright_green()
-        );
+        output_success(format!("Recurrence updated for transaction {}.", index));
         Ok(())
     }
 
@@ -2601,20 +2608,14 @@ impl CliApp {
             CommandError::InvalidArguments("transaction index out of range".into())
         })?;
         if txn.recurrence.is_none() {
-            println!(
-                "{}",
-                "Transaction has no recurrence defined.".bright_black()
-            );
+            output_warning("Transaction has no recurrence defined.");
             return Ok(());
         }
         txn.set_recurrence(None);
         txn.recurrence_series_id = None;
         ledger.refresh_recurrence_metadata();
         ledger.touch();
-        println!(
-            "{}",
-            format!("Recurrence removed from transaction {}", index).bright_green()
-        );
+        output_success(format!("Recurrence removed from transaction {}.", index));
         Ok(())
     }
 
@@ -2630,10 +2631,10 @@ impl CliApp {
         recurrence.status = status.clone();
         ledger.refresh_recurrence_metadata();
         ledger.touch();
-        println!(
-            "{}",
-            format!("Recurrence {:?} for transaction {}", status, index).bright_green()
-        );
+        output_success(format!(
+            "Recurrence status set to {:?} for transaction {}.",
+            status, index
+        ));
         Ok(())
     }
 
@@ -2647,20 +2648,20 @@ impl CliApp {
             CommandError::InvalidArguments("transaction has no recurrence".into())
         })?;
         if recurrence.exceptions.contains(&date) {
-            println!(
-                "{}",
-                format!("Date {} already skipped for this recurrence", date).bright_black()
-            );
+            output_info(format!(
+                "Date {} already marked as skipped for this recurrence.",
+                date
+            ));
             return Ok(());
         }
         recurrence.exceptions.push(date);
         recurrence.exceptions.sort();
         ledger.refresh_recurrence_metadata();
         ledger.touch();
-        println!(
-            "{}",
-            format!("Added skip date {} for transaction {}", date, index).bright_green()
-        );
+        output_success(format!(
+            "Added skip date {} for transaction {}.",
+            date, index
+        ));
         Ok(())
     }
 
@@ -2669,15 +2670,12 @@ impl CliApp {
         let ledger = self.current_ledger_mut()?;
         let created = ledger.materialize_due_recurrences(reference);
         if created == 0 {
-            println!(
-                "{}",
-                "All due recurring instances already exist.".bright_black()
-            );
+            output_info("All due recurring instances already exist.");
         } else {
-            println!(
-                "{}",
-                format!("Created {} pending transactions from schedules", created).bright_green()
-            );
+            output_success(format!(
+                "Created {} pending transactions from schedules.",
+                created
+            ));
         }
         Ok(())
     }
@@ -3076,24 +3074,18 @@ fn build_commands() -> Vec<CommandDefinition> {
 
 fn cmd_version(_app: &mut CliApp, _args: &[&str]) -> CommandResult {
     let meta = build_info::current();
-    println!(
-        "{}",
-        format!("Budget Core {}", meta.version)
-            .bright_white()
-            .bold()
-    );
-    println!(
+    output_section(format!("Budget Core {}", meta.version));
+    output_info(format!(
         "  Build hash   : {} ({})",
-        meta.git_hash.bright_cyan(),
-        meta.git_status
-    );
-    println!("  Built at     : {}", meta.timestamp);
-    println!("  Target       : {}", meta.target);
-    println!("  Profile      : {}", meta.profile);
-    println!("  Rustc        : {}", meta.rustc);
+        meta.git_hash, meta.git_status
+    ));
+    output_info(format!("  Built at     : {}", meta.timestamp));
+    output_info(format!("  Target       : {}", meta.target));
+    output_info(format!("  Profile      : {}", meta.profile));
+    output_info(format!("  Rustc        : {}", meta.rustc));
     #[cfg(feature = "ffi")]
     {
-        println!("  FFI version  : {}", crate::ffi::FFI_VERSION);
+        output_info(format!("  FFI version  : {}", crate::ffi::FFI_VERSION));
     }
     Ok(())
 }
@@ -3101,24 +3093,24 @@ fn cmd_version(_app: &mut CliApp, _args: &[&str]) -> CommandResult {
 fn cmd_help(app: &mut CliApp, args: &[&str]) -> CommandResult {
     if let Some(command) = args.first().map(|name| name.to_lowercase()) {
         if let Some(command) = app.command(&command) {
-            println!(
-                "{}\n  Usage: {}",
-                command.description.bright_white(),
-                command.usage.bright_black()
-            );
+            output_section(format!("Help: {}", args[0]));
+            output_info(format!("  Description: {}", command.description));
+            output_info(format!("  Usage: {}", command.usage));
+            output_info("Use arrows or type command names; press Enter to execute.");
         } else {
             app.suggest_command(args[0]);
         }
         return Ok(());
     }
 
-    println!("{}", "Available commands:".bright_white().bold());
+    output_section("Available commands");
     for name in app.command_names() {
         if let Some(cmd) = app.command(name) {
-            println!("  {:<16} {}", name.bright_cyan(), cmd.description);
+            output_info(format!("  {:<16} {}", name, cmd.description));
         }
     }
-    println!("Use `help <command>` for details.");
+    output_info("Use `help <command>` for details.");
+    output_info("Use arrows or type command names; press Enter to execute.");
     Ok(())
 }
 
@@ -3218,7 +3210,10 @@ fn cmd_config(app: &mut CliApp, args: &[&str]) -> CommandResult {
                 .ok_or_else(|| CommandError::InvalidArguments("usage: config base-currency <ISO>".into()))?;
             let ledger = app.current_ledger_mut()?;
             ledger.base_currency = CurrencyCode::new(*code);
-            println!("{}", format!("Base currency set to {}", ledger.base_currency.as_str()).bright_green());
+            output_success(format!(
+                "Base currency set to {}.",
+                ledger.base_currency.as_str()
+            ));
             Ok(())
         }
         "locale" => {
@@ -3227,7 +3222,10 @@ fn cmd_config(app: &mut CliApp, args: &[&str]) -> CommandResult {
                 .ok_or_else(|| CommandError::InvalidArguments("usage: config locale <tag>".into()))?;
             let ledger = app.current_ledger_mut()?;
             ledger.locale = locale_template(tag);
-            println!("{}", format!("Locale set to {}", ledger.locale.language_tag).bright_green());
+            output_success(format!(
+                "Locale set to {}.",
+                ledger.locale.language_tag
+            ));
             Ok(())
         }
         "negative-style" => {
@@ -3245,7 +3243,7 @@ fn cmd_config(app: &mut CliApp, args: &[&str]) -> CommandResult {
                     )))
                 }
             };
-            println!("{}", "Negative style updated".bright_green());
+            output_success("Negative style updated.");
             Ok(())
         }
         "screen-reader" => {
@@ -3254,7 +3252,7 @@ fn cmd_config(app: &mut CliApp, args: &[&str]) -> CommandResult {
                 .ok_or_else(|| CommandError::InvalidArguments("usage: config screen-reader <on|off>".into()))?;
             let ledger = app.current_ledger_mut()?;
             ledger.format.screen_reader_mode = matches!(mode.to_lowercase().as_str(), "on" | "true" | "yes");
-            println!("{}", "Screen reader mode updated".bright_green());
+            output_success("Screen reader mode updated.");
             Ok(())
         }
         "high-contrast" => {
@@ -3263,7 +3261,7 @@ fn cmd_config(app: &mut CliApp, args: &[&str]) -> CommandResult {
                 .ok_or_else(|| CommandError::InvalidArguments("usage: config high-contrast <on|off>".into()))?;
             let ledger = app.current_ledger_mut()?;
             ledger.format.high_contrast_mode = matches!(mode.to_lowercase().as_str(), "on" | "true" | "yes");
-            println!("{}", "Contrast preference updated".bright_green());
+            output_success("Contrast preference updated.");
             Ok(())
         }
         "valuation" => {
@@ -3290,7 +3288,7 @@ fn cmd_config(app: &mut CliApp, args: &[&str]) -> CommandResult {
                     )))
                 }
             };
-            println!("{}", "Valuation policy updated".bright_green());
+            output_success("Valuation policy updated.");
             Ok(())
         }
         "backup" => {
