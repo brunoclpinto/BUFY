@@ -1,4 +1,3 @@
-use std::fs;
 use std::path::PathBuf;
 
 use crate::{
@@ -6,6 +5,7 @@ use crate::{
     ledger::{Account, Category, Ledger, Simulation, Transaction},
     utils::persistence::{BackupInfo, LedgerStore},
 };
+use chrono::Local;
 
 use crate::cli::state::CliState;
 
@@ -171,24 +171,26 @@ impl<'a> SelectionProvider for ConfigBackupSelectionProvider<'a> {
     type Error = ProviderError;
 
     fn items(&mut self) -> Result<Vec<SelectionItem<Self::Id>>, Self::Error> {
-        let dir = self.store.base_dir().join("state-backups");
-        if !dir.exists() {
-            return Ok(Vec::new());
-        }
-        let mut entries = Vec::new();
-        for entry in fs::read_dir(dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
-                let label = path
-                    .file_stem()
+        let backups = self
+            .store
+            .list_config_backups()
+            .map_err(|err| ProviderError::Store(err.to_string()))?;
+        Ok(backups
+            .into_iter()
+            .map(|info| {
+                let file_name = info
+                    .path
+                    .file_name()
                     .and_then(|stem| stem.to_str())
-                    .unwrap_or("config-backup")
-                    .to_string();
-                entries.push(SelectionItem::new(path.clone(), label).with_category("config"));
-            }
-        }
-        Ok(entries)
+                    .unwrap_or("config-backup");
+                let mut label = format!("{:<30}", file_name);
+                if let Some(timestamp) = info.timestamp {
+                    let created = timestamp.with_timezone(&Local);
+                    label.push_str(&format!(" (Created: {})", created.format("%Y-%m-%d %H:%M")));
+                }
+                SelectionItem::new(info.path, label)
+            })
+            .collect())
     }
 }
 
@@ -233,10 +235,29 @@ fn transaction_item(index: usize, txn: &Transaction, ledger: &Ledger) -> Selecti
 }
 
 fn simulation_item(sim: &Simulation) -> SelectionItem<String> {
-    let subtitle = format!("status: {:?}", sim.status);
-    SelectionItem::new(sim.name.clone(), sim.name.clone()).with_subtitle(subtitle)
+    let created = sim.created_at.with_timezone(&Local);
+    let mut label = format!("{:<30} (Created: {})", sim.name, created.format("%Y-%m-%d"));
+    if let Some(note) = &sim.notes {
+        let trimmed = note.trim();
+        if !trimmed.is_empty() {
+            label.push_str(&format!("  [note: {}]", trimmed));
+        }
+    }
+    label.push_str(&format!("  [status: {:?}]", sim.status));
+    SelectionItem::new(sim.name.clone(), label)
 }
 
 fn backup_item(info: BackupInfo) -> SelectionItem<PathBuf> {
-    SelectionItem::new(info.path.clone(), info.timestamp.to_string())
+    let created = info.timestamp.with_timezone(&Local);
+    let file_name = info
+        .path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("backup");
+    let label = format!(
+        "{:<30} (Created: {})",
+        file_name,
+        created.format("%Y-%m-%d %H:%M")
+    );
+    SelectionItem::new(info.path.clone(), label)
 }

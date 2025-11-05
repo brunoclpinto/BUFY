@@ -2,6 +2,7 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use dirs::home_dir;
 use serde::{Deserialize, Serialize};
 use std::{
+    cmp::Ordering,
     collections::HashSet,
     env,
     fs::{self, File},
@@ -51,6 +52,13 @@ pub struct LoadReport {
 pub struct BackupInfo {
     pub path: PathBuf,
     pub timestamp: DateTime<Utc>,
+}
+
+/// Metadata describing saved configuration backups.
+#[derive(Debug, Clone)]
+pub struct ConfigBackupInfo {
+    pub path: PathBuf,
+    pub timestamp: Option<DateTime<Utc>>,
 }
 
 /// Centralized persistence layer responsible for locating, saving, and backing up ledgers.
@@ -190,6 +198,47 @@ impl LedgerStore {
         }
         entries.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
         Ok(entries)
+    }
+
+    /// Lists configuration backups stored under the persistence root.
+    pub fn list_config_backups(&self) -> Result<Vec<ConfigBackupInfo>, LedgerError> {
+        let dir = self.base_dir.join("state-backups");
+        if !dir.exists() {
+            return Ok(Vec::new());
+        }
+        let mut entries = Vec::new();
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            let timestamp = entry
+                .metadata()
+                .ok()
+                .and_then(|meta| meta.modified().ok())
+                .map(DateTime::<Utc>::from);
+            entries.push(ConfigBackupInfo { path, timestamp });
+        }
+        entries.sort_by(|a, b| match (&a.timestamp, &b.timestamp) {
+            (Some(lhs), Some(rhs)) => rhs.cmp(lhs),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => Ordering::Equal,
+        });
+        Ok(entries)
+    }
+
+    /// Restores the application configuration from a saved backup file.
+    pub fn restore_config_backup(&self, backup_path: &Path) -> Result<(), LedgerError> {
+        if !backup_path.exists() {
+            return Err(LedgerError::Persistence(format!(
+                "configuration backup `{}` not found",
+                backup_path.display()
+            )));
+        }
+        fs::copy(backup_path, self.state_path())?;
+        Ok(())
     }
 
     /// Restores a ledger from the provided backup file.
