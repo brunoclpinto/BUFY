@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use crate::{
     cli::selectors::{SelectionItem, SelectionProvider},
-    ledger::{Account, Category, Simulation, Transaction},
+    ledger::{Account, Category, Ledger, Simulation, Transaction},
     utils::persistence::{BackupInfo, LedgerStore},
 };
 
@@ -100,7 +100,7 @@ impl<'a> SelectionProvider for TransactionSelectionProvider<'a> {
             .transactions
             .iter()
             .enumerate()
-            .map(|(idx, txn)| transaction_item(idx, txn))
+            .map(|(idx, txn)| transaction_item(idx, txn, ledger))
             .collect())
     }
 }
@@ -209,14 +209,27 @@ fn category_item(index: usize, category: &Category) -> SelectionItem<usize> {
     item
 }
 
-fn transaction_item(index: usize, txn: &Transaction) -> SelectionItem<usize> {
-    let label = txn
-        .recurrence
-        .as_ref()
-        .map(|_| format!("{} • recurring", txn.scheduled_date))
-        .unwrap_or_else(|| txn.scheduled_date.to_string());
+fn transaction_item(index: usize, txn: &Transaction, ledger: &Ledger) -> SelectionItem<usize> {
+    let from = ledger
+        .account(txn.from_account)
+        .map(|acct| acct.name.as_str())
+        .unwrap_or("Unknown");
+    let to = ledger
+        .account(txn.to_account)
+        .map(|acct| acct.name.as_str())
+        .unwrap_or("Unknown");
+    let category = txn
+        .category_id
+        .and_then(|id| ledger.category(id))
+        .map(|cat| cat.name.as_str())
+        .unwrap_or("Uncategorized");
     let amount = txn.actual_amount.unwrap_or(txn.budgeted_amount);
-    SelectionItem::new(index, label).with_subtitle(format!("{:.2}", amount))
+    let status = format!("{:?}", txn.status);
+    let label = format!(
+        "[{:>3}] {} | {} -> {} | {:.2} | {} | {}",
+        index, txn.scheduled_date, from, to, amount, category, status
+    );
+    SelectionItem::new(index, label)
 }
 
 fn simulation_item(sim: &Simulation) -> SelectionItem<String> {
