@@ -28,7 +28,10 @@ use crate::{
         SimulationBudgetImpact, SimulationChange, SimulationStatus, SimulationTransactionPatch,
         TimeInterval, TimeUnit, Transaction, TransactionStatus,
     },
-    utils::{build_info, persistence::LedgerStore},
+    utils::{
+        build_info,
+        persistence::{ConfigData, ConfigSnapshot, LedgerStore},
+    },
 };
 
 use crate::cli::forms::{
@@ -513,7 +516,7 @@ impl CliApp {
         self.select_with(
             ConfigBackupSelectionProvider::new(&self.store),
             prompt,
-            "No configuration backups available.",
+            "No configuration backups found.",
         )
     }
 
@@ -1358,35 +1361,64 @@ impl CliApp {
         self.load_named_ledger(name)
     }
 
+    fn create_config_backup(&mut self, note: Option<String>) -> CommandResult {
+        let ledger = self.current_ledger()?;
+        let note = note.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
+        let config = ConfigData::from_ledger(ledger);
+        let snapshot = ConfigSnapshot::new(config, note);
+        let path = self
+            .store
+            .create_config_backup(&snapshot)
+            .map_err(CommandError::from_ledger)?;
+        self.store
+            .save_active_config(&snapshot.config)
+            .map_err(CommandError::from_ledger)?;
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("configuration backup");
+        let created = snapshot.created_at.with_timezone(&Local);
+        output_success(format!(
+            "Configuration backup saved: {} (Created: {})",
+            file_name,
+            created.format("%Y-%m-%d %H:%M")
+        ));
+        output_info("Stored in the `config_backups` directory.");
+        Ok(())
+    }
+
     fn list_config_backups(&self) -> CommandResult {
         let backups = self
             .store
             .list_config_backups()
             .map_err(CommandError::from_ledger)?;
         if backups.is_empty() {
-            output_warning("No configuration backups available.");
+            output_warning("No configuration backups found.");
             return Ok(());
         }
-        output_info("Configuration backups:");
+        output_info("Available configuration backups:");
         for (idx, backup) in backups.iter().enumerate() {
             let file_name = backup
                 .path
                 .file_name()
                 .and_then(|name| name.to_str())
-                .map(str::to_owned)
-                .unwrap_or_else(|| backup.path.display().to_string());
-            let created = backup.timestamp.map(|ts| ts.with_timezone(&Local));
-            if let Some(created) = created {
-                output_info(format!(
-                    "  {:>2}. {} (Created: {})",
-                    idx + 1,
-                    file_name,
-                    created.format("%Y-%m-%d %H:%M")
-                ));
-            } else {
-                output_info(format!("  {:>2}. {}", idx + 1, file_name));
+                .unwrap_or("config-backup");
+            let created = backup.created_at.with_timezone(&Local);
+            let mut line = format!(
+                "  {:>2}. {} (Created: {})",
+                idx + 1,
+                file_name,
+                created.format("%Y-%m-%d %H:%M")
+            );
+            if let Some(note) = backup
+                .note
+                .as_ref()
+                .map(|n| n.trim())
+                .filter(|n| !n.is_empty())
+            {
+                line.push_str(&format!(" (note: {})", note));
             }
-            output_info(format!("      {}", backup.path.display()));
+            output_info(line);
         }
         Ok(())
     }
@@ -1440,9 +1472,52 @@ impl CliApp {
     }
 
     fn restore_config_from_path(&mut self, path: PathBuf) -> CommandResult {
+        let snapshot = self
+            .store
+            .load_config_snapshot(&path)
+            .map_err(CommandError::from_ledger)?;
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("configuration backup");
+        let created = snapshot.created_at.with_timezone(&Local);
+        output_info(format!("Selected backup: {}", file_name));
+        output_info(format!("Created: {}", created.format("%Y-%m-%d %H:%M")));
+        if let Some(note) = snapshot
+            .note
+            .as_ref()
+            .map(|n| n.trim())
+            .filter(|n| !n.is_empty())
+        {
+            output_info(format!("Note: {}", note));
+        }
+        output_info(format!("Base currency: {}", snapshot.config.base_currency));
+        output_info(format!("Locale: {}", snapshot.config.locale.language_tag));
+        output_info(format!(
+            "Currency display: {:?} | Negative style: {:?}",
+            snapshot.config.currency_display, snapshot.config.negative_style
+        ));
+        output_info(format!(
+            "Screen reader: {} | High contrast: {}",
+            if snapshot.config.screen_reader_mode {
+                "on"
+            } else {
+                "off"
+            },
+            if snapshot.config.high_contrast_mode {
+                "on"
+            } else {
+                "off"
+            }
+        ));
+        output_info(format!(
+            "Valuation policy: {:?}",
+            snapshot.config.valuation_policy
+        ));
+
         let confirm = if self.mode == CliMode::Interactive {
             Confirm::with_theme(&self.theme)
-                .with_prompt(format!("Restore configuration from {}?", path.display()))
+                .with_prompt("Restore configuration from this backup?")
                 .default(false)
                 .interact()
                 .map_err(CommandError::from)?
@@ -1450,30 +1525,23 @@ impl CliApp {
             true
         };
         if !confirm {
-            output_info("Operation cancelled.");
+            output_warning("Operation cancelled.");
             return Ok(());
         }
+
+        {
+            let ledger = self.current_ledger_mut()?;
+            snapshot.config.apply_to_ledger(ledger);
+            ledger.touch();
+        }
         self.store
-            .restore_config_backup(&path)
+            .save_active_config(&snapshot.config)
             .map_err(CommandError::from_ledger)?;
-        let created = self
-            .store
-            .list_config_backups()
-            .map_err(CommandError::from_ledger)?
-            .into_iter()
-            .find(|info| info.path == path)
-            .and_then(|info| info.timestamp);
-        let summary = if let Some(ts) = created {
-            let local_ts = ts.with_timezone(&Local);
-            format!(
-                "Configuration restored from {} (Created: {})",
-                path.display(),
-                local_ts.format("%Y-%m-%d %H:%M")
-            )
-        } else {
-            format!("Configuration restored from {}", path.display())
-        };
-        output_success(summary);
+        output_success(format!(
+            "Configuration restored from {} (Created: {})",
+            file_name,
+            created.format("%Y-%m-%d %H:%M")
+        ));
         Ok(())
     }
 
@@ -3333,6 +3401,26 @@ fn cmd_config(app: &mut CliApp, args: &[&str]) -> CommandResult {
             println!("{}", "Valuation policy updated".bright_green());
             Ok(())
         }
+        "backup" => {
+            let mut note: Option<String> = None;
+            let mut iter = args.iter().skip(1);
+            while let Some(arg) = iter.next() {
+                if arg.eq_ignore_ascii_case("--note") {
+                    let value = iter.next().ok_or_else(|| {
+                        CommandError::InvalidArguments(
+                            "usage: config backup [--note <text>]".into(),
+                        )
+                    })?;
+                    note = Some((*value).to_string());
+                } else {
+                    return Err(CommandError::InvalidArguments(format!(
+                        "unknown option `{}`",
+                        arg
+                    )));
+                }
+            }
+            app.create_config_backup(note)
+        }
         "backups" => {
             if args.len() > 1 {
                 return Err(CommandError::InvalidArguments(
@@ -3364,7 +3452,7 @@ fn cmd_config(app: &mut CliApp, args: &[&str]) -> CommandResult {
             )),
         },
         _ => Err(CommandError::InvalidArguments(
-            "usage: config [show|base-currency|locale|negative-style|screen-reader|high-contrast|valuation|backups|restore]".into(),
+            "usage: config [show|base-currency|locale|negative-style|screen-reader|high-contrast|valuation|backup|backups|restore]".into(),
         )),
     }
 }
@@ -4303,7 +4391,9 @@ mod tests {
     };
     use crate::cli::selection::SelectionManager;
     use crate::cli::selectors::SelectionOutcome;
+    use crate::currency::{CurrencyDisplay, LocaleConfig, NegativeStyle, ValuationPolicy};
     use crate::ledger::Simulation;
+    use crate::utils::persistence::{ConfigData, ConfigSnapshot, LedgerStore};
     use chrono::{NaiveDate, Utc};
     use std::fs;
     use tempfile::{tempdir, NamedTempFile};
@@ -4525,16 +4615,24 @@ mod tests {
     fn config_backup_selection_paths() {
         let temp = tempdir().unwrap();
         let store = LedgerStore::new(Some(temp.path().to_path_buf()), Some(5)).unwrap();
-
-        let config_dir = store.base_dir().join("state-backups");
-        fs::create_dir_all(&config_dir).unwrap();
-        let config_path = config_dir.join("config-2024.json");
-        fs::write(&config_path, "{}").unwrap();
+        let snapshot = ConfigSnapshot::new(
+            ConfigData {
+                base_currency: "USD".into(),
+                locale: LocaleConfig::default(),
+                currency_display: CurrencyDisplay::Symbol,
+                negative_style: NegativeStyle::Sign,
+                screen_reader_mode: false,
+                high_contrast_mode: false,
+                valuation_policy: ValuationPolicy::TransactionDate,
+            },
+            Some("baseline".into()),
+        );
+        let config_path = store.create_config_backup(&snapshot).unwrap();
 
         let outcome = SelectionManager::new(ConfigBackupSelectionProvider::new(&store))
             .choose_with(
                 "Select config",
-                "No configuration backups available.",
+                "No configuration backups found.",
                 |_, _| Ok(Some(0)),
             )
             .unwrap();
@@ -4546,7 +4644,7 @@ mod tests {
         let outcome = SelectionManager::new(ConfigBackupSelectionProvider::new(&store))
             .choose_with(
                 "Select config",
-                "No configuration backups available.",
+                "No configuration backups found.",
                 |_, _| Ok(None),
             )
             .unwrap();
