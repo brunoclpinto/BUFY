@@ -59,8 +59,10 @@ pub struct ForecastTotals {
 
 impl ForecastTotals {
     fn from_transactions(transactions: &[ForecastTransaction]) -> Self {
-        let mut totals = ForecastTotals::default();
-        totals.generated = transactions.len();
+        let mut totals = ForecastTotals {
+            generated: transactions.len(),
+            ..ForecastTotals::default()
+        };
         for item in transactions {
             let amount = item.transaction.budgeted_amount;
             if amount >= 0.0 {
@@ -322,9 +324,7 @@ pub fn materialize_due_instances(
     creations
 }
 
-fn collect_series_entries<'a>(
-    transactions: &'a [Transaction],
-) -> HashMap<Uuid, Vec<&'a Transaction>> {
+fn collect_series_entries(transactions: &[Transaction]) -> HashMap<Uuid, Vec<&Transaction>> {
     let mut map: HashMap<Uuid, Vec<&Transaction>> = HashMap::new();
     for txn in transactions {
         if let Some(series_id) = txn.recurrence_series() {

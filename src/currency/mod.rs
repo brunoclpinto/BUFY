@@ -88,17 +88,12 @@ pub enum DateFormatStyle {
     Long,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub enum ValuationPolicy {
+    #[default]
     TransactionDate,
     ReportDate,
     CustomDate(NaiveDate),
-}
-
-impl Default for ValuationPolicy {
-    fn default() -> Self {
-        ValuationPolicy::TransactionDate
-    }
 }
 
 /// Results of a currency conversion for disclosure.
@@ -188,13 +183,11 @@ fn insert_grouping(int_part: &mut String, separator: char) {
 
 fn group_digits(digits: &str, separator: char) -> String {
     let mut grouped = String::new();
-    let mut count = 0;
-    for ch in digits.chars().rev() {
-        if count != 0 && count % 3 == 0 {
+    for (idx, ch) in digits.chars().rev().enumerate() {
+        if idx != 0 && idx % 3 == 0 {
             grouped.insert(0, separator);
         }
         grouped.insert(0, ch);
-        count += 1;
     }
     grouped
 }

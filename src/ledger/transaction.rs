@@ -112,18 +112,13 @@ pub struct Recurrence {
     pub next_scheduled: Option<NaiveDate>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum RecurrenceMode {
     /// Follows fixed planned schedule regardless of actual timing.
+    #[default]
     FixedSchedule,
     /// Starts next period after the actual performed date.
     AfterLastPerformed,
-}
-
-impl Default for RecurrenceMode {
-    fn default() -> Self {
-        RecurrenceMode::FixedSchedule
-    }
 }
 
 impl Recurrence {
@@ -154,7 +149,7 @@ impl Recurrence {
     }
 
     pub fn is_exception(&self, date: NaiveDate) -> bool {
-        self.exceptions.iter().any(|d| *d == date)
+        self.exceptions.contains(&date)
     }
 
     pub fn allows_occurrence(&self, occurrence_index: u32, candidate: NaiveDate) -> bool {
@@ -217,28 +212,18 @@ impl Recurrence {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum RecurrenceEnd {
+    #[default]
     Never,
     OnDate(NaiveDate),
     AfterOccurrences(u32),
 }
 
-impl Default for RecurrenceEnd {
-    fn default() -> Self {
-        RecurrenceEnd::Never
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum RecurrenceStatus {
+    #[default]
     Active,
     Paused,
     Completed,
-}
-
-impl Default for RecurrenceStatus {
-    fn default() -> Self {
-        RecurrenceStatus::Active
-    }
 }
