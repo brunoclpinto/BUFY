@@ -2,7 +2,6 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use dirs::home_dir;
 use serde::{Deserialize, Serialize};
 use std::{
-    cmp::Ordering,
     collections::HashSet,
     env,
     fs::{self, File},
@@ -10,7 +9,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{errors::LedgerError, ledger::Ledger};
+use crate::{
+    currency::{CurrencyCode, CurrencyDisplay, LocaleConfig, NegativeStyle, ValuationPolicy},
+    errors::LedgerError,
+    ledger::Ledger,
+};
 
 const DEFAULT_DIR_NAME: &str = ".budget_core";
 const LEDGER_EXTENSION: &str = "json";
@@ -19,6 +22,9 @@ const BACKUP_DIR: &str = "backups";
 const STATE_FILE: &str = "state.json";
 const TMP_SUFFIX: &str = "tmp";
 const DEFAULT_RETENTION: usize = 5;
+const CONFIG_BACKUP_DIR: &str = "config_backups";
+const CONFIG_FILE: &str = "config.json";
+const CONFIG_BACKUP_SCHEMA_VERSION: u32 = 1;
 
 /// Writes the provided ledger to disk atomically.
 pub fn save_ledger_to_file(ledger: &Ledger, path: &Path) -> Result<(), LedgerError> {
@@ -58,7 +64,63 @@ pub struct BackupInfo {
 #[derive(Debug, Clone)]
 pub struct ConfigBackupInfo {
     pub path: PathBuf,
-    pub timestamp: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigSnapshot {
+    pub schema_version: u32,
+    pub created_at: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    pub config: ConfigData,
+}
+
+impl ConfigSnapshot {
+    pub fn new(config: ConfigData, note: Option<String>) -> Self {
+        Self {
+            schema_version: CONFIG_BACKUP_SCHEMA_VERSION,
+            created_at: Utc::now(),
+            note,
+            config,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigData {
+    pub base_currency: String,
+    pub locale: LocaleConfig,
+    pub currency_display: CurrencyDisplay,
+    pub negative_style: NegativeStyle,
+    pub screen_reader_mode: bool,
+    pub high_contrast_mode: bool,
+    pub valuation_policy: ValuationPolicy,
+}
+
+impl ConfigData {
+    pub fn from_ledger(ledger: &Ledger) -> Self {
+        Self {
+            base_currency: ledger.base_currency.as_str().to_string(),
+            locale: ledger.locale.clone(),
+            currency_display: ledger.format.currency_display,
+            negative_style: ledger.format.negative_style,
+            screen_reader_mode: ledger.format.screen_reader_mode,
+            high_contrast_mode: ledger.format.high_contrast_mode,
+            valuation_policy: ledger.valuation_policy.clone(),
+        }
+    }
+
+    pub fn apply_to_ledger(&self, ledger: &mut Ledger) {
+        ledger.base_currency = CurrencyCode::new(self.base_currency.clone());
+        ledger.locale = self.locale.clone();
+        ledger.format.currency_display = self.currency_display;
+        ledger.format.negative_style = self.negative_style;
+        ledger.format.screen_reader_mode = self.screen_reader_mode;
+        ledger.format.high_contrast_mode = self.high_contrast_mode;
+        ledger.valuation_policy = self.valuation_policy.clone();
+    }
 }
 
 /// Centralized persistence layer responsible for locating, saving, and backing up ledgers.
@@ -107,6 +169,10 @@ impl LedgerStore {
 
     fn backups_dir_for(&self, name: &str) -> PathBuf {
         self.base_dir.join(BACKUP_DIR).join(canonical_name(name))
+    }
+
+    fn config_backups_dir(&self) -> PathBuf {
+        self.base_dir.join(CONFIG_BACKUP_DIR)
     }
 
     /// Loads a ledger by its friendly name (mapped to a JSON file under the store).
@@ -202,7 +268,7 @@ impl LedgerStore {
 
     /// Lists configuration backups stored under the persistence root.
     pub fn list_config_backups(&self) -> Result<Vec<ConfigBackupInfo>, LedgerError> {
-        let dir = self.base_dir.join("state-backups");
+        let dir = self.config_backups_dir();
         if !dir.exists() {
             return Ok(Vec::new());
         }
@@ -213,31 +279,65 @@ impl LedgerStore {
             if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
                 continue;
             }
-            let timestamp = entry
-                .metadata()
-                .ok()
-                .and_then(|meta| meta.modified().ok())
-                .map(DateTime::<Utc>::from);
-            entries.push(ConfigBackupInfo { path, timestamp });
+            let contents = match fs::read_to_string(&path) {
+                Ok(data) => data,
+                Err(_) => continue,
+            };
+            let snapshot: ConfigSnapshot = match serde_json::from_str(&contents) {
+                Ok(snapshot) => snapshot,
+                Err(_) => continue,
+            };
+            entries.push(ConfigBackupInfo {
+                path,
+                created_at: snapshot.created_at,
+                note: snapshot.note.clone(),
+            });
         }
-        entries.sort_by(|a, b| match (&a.timestamp, &b.timestamp) {
-            (Some(lhs), Some(rhs)) => rhs.cmp(lhs),
-            (Some(_), None) => Ordering::Less,
-            (None, Some(_)) => Ordering::Greater,
-            (None, None) => Ordering::Equal,
-        });
+        entries.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         Ok(entries)
     }
 
-    /// Restores the application configuration from a saved backup file.
-    pub fn restore_config_backup(&self, backup_path: &Path) -> Result<(), LedgerError> {
+    /// Creates a configuration backup snapshot on disk.
+    pub fn create_config_backup(&self, snapshot: &ConfigSnapshot) -> Result<PathBuf, LedgerError> {
+        let dir = self.config_backups_dir();
+        fs::create_dir_all(&dir)?;
+        let file_name = format!(
+            "config_{}.json",
+            snapshot.created_at.format("%Y-%m-%dT%H-%M-%S")
+        );
+        let path = dir.join(file_name);
+        let json = serde_json::to_string_pretty(snapshot)?;
+        write_atomic(&path, &json)?;
+        Ok(path)
+    }
+
+    /// Loads a configuration snapshot from disk.
+    pub fn load_config_snapshot(&self, backup_path: &Path) -> Result<ConfigSnapshot, LedgerError> {
         if !backup_path.exists() {
             return Err(LedgerError::Persistence(format!(
                 "configuration backup `{}` not found",
                 backup_path.display()
             )));
         }
-        fs::copy(backup_path, self.state_path())?;
+        let data = fs::read_to_string(backup_path)?;
+        let snapshot: ConfigSnapshot = serde_json::from_str(&data)?;
+        if snapshot.schema_version > CONFIG_BACKUP_SCHEMA_VERSION {
+            return Err(LedgerError::Persistence(format!(
+                "configuration backup `{}` is from a newer schema version",
+                backup_path.display()
+            )));
+        }
+        Ok(snapshot)
+    }
+
+    /// Persists the active configuration to disk.
+    pub fn save_active_config(&self, config: &ConfigData) -> Result<(), LedgerError> {
+        let path = self.base_dir.join(CONFIG_FILE);
+        let json = serde_json::to_string_pretty(config)?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        write_atomic(&path, &json)?;
         Ok(())
     }
 
@@ -406,4 +506,67 @@ fn parse_backup_timestamp(path: &Path) -> Option<DateTime<Utc>> {
     NaiveDateTime::parse_from_str(ts, "%Y-%m-%dT%H-%M-%S")
         .ok()
         .map(|naive| DateTime::from_naive_utc_and_offset(naive, Utc))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ledger::BudgetPeriod;
+    use tempfile::tempdir;
+
+    #[test]
+    fn config_backup_roundtrip() {
+        let temp = tempdir().unwrap();
+        let store = LedgerStore::new(Some(temp.path().to_path_buf()), Some(5)).unwrap();
+
+        let mut ledger = Ledger::new("Test", BudgetPeriod::monthly());
+        ledger.base_currency = CurrencyCode::new("EUR");
+        ledger.locale.language_tag = "en-GB".into();
+        ledger.format.currency_display = CurrencyDisplay::Code;
+        ledger.format.negative_style = NegativeStyle::Parentheses;
+        ledger.format.screen_reader_mode = true;
+        ledger.format.high_contrast_mode = true;
+        ledger.valuation_policy = ValuationPolicy::ReportDate;
+
+        let config = ConfigData::from_ledger(&ledger);
+        let snapshot = ConfigSnapshot::new(config.clone(), Some("before sync".into()));
+        let path = store.create_config_backup(&snapshot).unwrap();
+        assert!(path.exists());
+
+        let backups = store.list_config_backups().unwrap();
+        assert_eq!(backups.len(), 1);
+        assert_eq!(backups[0].note.as_deref(), Some("before sync"));
+
+        let loaded = store.load_config_snapshot(&path).unwrap();
+        assert_eq!(loaded.config.base_currency, "EUR");
+        store.save_active_config(&loaded.config).unwrap();
+        let config_file = temp.path().join(CONFIG_FILE);
+        assert!(config_file.exists());
+    }
+
+    #[test]
+    fn config_data_apply_updates_ledger() {
+        let mut ledger = Ledger::new("Apply", BudgetPeriod::monthly());
+        let config = ConfigData {
+            base_currency: "JPY".into(),
+            locale: LocaleConfig::default(),
+            currency_display: CurrencyDisplay::Code,
+            negative_style: NegativeStyle::Parentheses,
+            screen_reader_mode: true,
+            high_contrast_mode: false,
+            valuation_policy: ValuationPolicy::ReportDate,
+        };
+
+        config.apply_to_ledger(&mut ledger);
+
+        assert_eq!(ledger.base_currency.as_str(), "JPY");
+        assert_eq!(ledger.format.currency_display, CurrencyDisplay::Code);
+        assert_eq!(ledger.format.negative_style, NegativeStyle::Parentheses);
+        assert!(ledger.format.screen_reader_mode);
+        assert!(!ledger.format.high_contrast_mode);
+        assert!(matches!(
+            ledger.valuation_policy,
+            ValuationPolicy::ReportDate
+        ));
+    }
 }
