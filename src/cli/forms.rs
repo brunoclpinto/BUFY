@@ -15,7 +15,10 @@ use dialoguer::{theme::ColorfulTheme, Input};
 use uuid::Uuid;
 
 use crate::cli::output;
-use crate::ledger::{AccountKind, CategoryKind};
+use crate::ledger::{
+    AccountKind, CategoryKind, Recurrence, RecurrenceMode, TimeInterval, TimeUnit,
+    TransactionStatus,
+};
 
 /// High-level lifecycle states emitted by the form runner.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -285,7 +288,7 @@ fn make_name_validator(existing: HashSet<String>) -> Validator {
 fn make_optional_decimal_validator() -> Validator {
     Validator::Custom(Arc::new(|input| {
         let trimmed = input.trim();
-        if trimmed.is_empty() {
+        if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("none") {
             Ok(String::new())
         } else {
             trimmed
@@ -293,6 +296,111 @@ fn make_optional_decimal_validator() -> Validator {
                 .map(|value| value.to_string())
                 .map_err(|_| "Enter a numeric amount".into())
         }
+    }))
+}
+
+fn make_non_negative_decimal_validator() -> Validator {
+    Validator::Custom(Arc::new(|input| {
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
+            return Err("Amount is required".into());
+        }
+        trimmed
+            .parse::<f64>()
+            .map_err(|_| "Enter a numeric amount".into())
+            .and_then(|value| {
+                if value < 0.0 {
+                    Err("Amount must be zero or positive".into())
+                } else {
+                    Ok(format_amount(value))
+                }
+            })
+    }))
+}
+
+fn make_optional_non_negative_decimal_validator(default: Option<f64>) -> Validator {
+    Validator::Custom(Arc::new(move |input| {
+        let trimmed = input.trim();
+        if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("none") {
+            if let Some(def) = default {
+                Ok(format_amount(def))
+            } else {
+                Ok(String::new())
+            }
+        } else {
+            trimmed
+                .parse::<f64>()
+                .map_err(|_| "Enter a numeric amount".into())
+                .and_then(|value| {
+                    if value < 0.0 {
+                        Err("Amount must be zero or positive".into())
+                    } else {
+                        Ok(format_amount(value))
+                    }
+                })
+        }
+    }))
+}
+
+fn make_min_date_validator(min_date: NaiveDate) -> Validator {
+    Validator::Custom(Arc::new(move |input| {
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
+            return Err("Date is required (use YYYY-MM-DD)".into());
+        }
+        NaiveDate::parse_from_str(trimmed, "%Y-%m-%d")
+            .map_err(|_| "Use YYYY-MM-DD format".to_string())
+            .and_then(|date| {
+                if date < min_date {
+                    Err(format!(
+                        "Date must be on or after {}",
+                        min_date.format("%Y-%m-%d")
+                    ))
+                } else {
+                    Ok(date.to_string())
+                }
+            })
+    }))
+}
+
+fn make_optional_date_validator(max_date: NaiveDate) -> Validator {
+    Validator::Custom(Arc::new(move |input| {
+        let trimmed = input.trim();
+        if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("none") {
+            Ok(String::new())
+        } else {
+            NaiveDate::parse_from_str(trimmed, "%Y-%m-%d")
+                .map_err(|_| "Use YYYY-MM-DD format".to_string())
+                .and_then(|date| {
+                    if date > max_date {
+                        Err(format!(
+                            "Date cannot be after {}",
+                            max_date.format("%Y-%m-%d")
+                        ))
+                    } else {
+                        Ok(date.to_string())
+                    }
+                })
+        }
+    }))
+}
+
+fn make_positive_integer_validator(default: u32) -> Validator {
+    Validator::Custom(Arc::new(move |input| {
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
+            return Ok(default.to_string());
+        }
+        trimmed
+            .parse::<u32>()
+            .map_err(|_| "Enter a whole number (1 or greater)".into())
+            .and_then(|value| {
+                if value == 0 {
+                    Err("Value must be at least 1".into())
+                } else {
+                    Ok(value.to_string())
+                }
+            })
     }))
 }
 
@@ -574,6 +682,568 @@ impl FormFlow for AccountWizard {
             category_id,
             opening_balance,
             notes,
+        })
+    }
+
+    fn cancel(&self) -> Self::Error {
+        unreachable!()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum TransactionRecurrenceAction {
+    Clear,
+    Set(Recurrence),
+    Keep,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TransactionFormData {
+    pub id: Option<Uuid>,
+    pub from_account: Uuid,
+    pub to_account: Uuid,
+    pub category_id: Option<Uuid>,
+    pub scheduled_date: NaiveDate,
+    pub actual_date: Option<NaiveDate>,
+    pub budgeted_amount: f64,
+    pub actual_amount: Option<f64>,
+    pub status: TransactionStatus,
+    pub notes: Option<String>,
+    pub recurrence: TransactionRecurrenceAction,
+}
+
+#[derive(Clone, Debug)]
+pub struct TransactionInitialData {
+    pub id: Uuid,
+    pub from_account: Uuid,
+    pub to_account: Uuid,
+    pub category_id: Option<Uuid>,
+    pub scheduled_date: NaiveDate,
+    pub actual_date: Option<NaiveDate>,
+    pub budgeted_amount: f64,
+    pub actual_amount: Option<f64>,
+    pub recurrence: Option<Recurrence>,
+    pub status: TransactionStatus,
+    pub notes: Option<String>,
+}
+
+#[derive(Clone)]
+enum TransactionWizardMode {
+    Create { default_status: TransactionStatus },
+    Edit { initial: TransactionInitialData },
+}
+
+#[derive(Clone, PartialEq)]
+enum RecurrenceChoice {
+    None,
+    Preset(TimeInterval),
+    EveryNDays,
+    KeepExisting,
+}
+
+pub struct TransactionWizard {
+    descriptor: FormDescriptor,
+    defaults: BTreeMap<String, String>,
+    mode: TransactionWizardMode,
+    account_choices: ChoiceMapper<Uuid>,
+    category_choices: ChoiceMapper<Option<Uuid>>,
+    recurrence_choices: ChoiceMapper<RecurrenceChoice>,
+    status_choices: ChoiceMapper<TransactionStatus>,
+}
+
+impl TransactionWizard {
+    pub fn new_create(
+        accounts: Vec<(String, Uuid)>,
+        categories: Vec<(String, Option<Uuid>)>,
+        today: NaiveDate,
+        min_date: NaiveDate,
+        default_status: TransactionStatus,
+    ) -> Self {
+        Self::build(
+            accounts,
+            categories,
+            today,
+            min_date,
+            TransactionWizardMode::Create { default_status },
+        )
+    }
+
+    pub fn new_edit(
+        accounts: Vec<(String, Uuid)>,
+        categories: Vec<(String, Option<Uuid>)>,
+        today: NaiveDate,
+        min_date: NaiveDate,
+        initial: TransactionInitialData,
+    ) -> Self {
+        Self::build(
+            accounts,
+            categories,
+            today,
+            min_date,
+            TransactionWizardMode::Edit { initial },
+        )
+    }
+
+    fn build(
+        accounts: Vec<(String, Uuid)>,
+        categories: Vec<(String, Option<Uuid>)>,
+        today: NaiveDate,
+        min_date: NaiveDate,
+        mode: TransactionWizardMode,
+    ) -> Self {
+        let account_choices = ChoiceMapper::from_pairs(accounts);
+        let account_validator = make_choice_validator(account_choices.clone(), "account");
+
+        let mut category_pairs = Vec::new();
+        category_pairs.push(("None".to_string(), None));
+        for (label, id) in categories {
+            category_pairs.push((label, id));
+        }
+        let category_choices = ChoiceMapper::from_pairs(category_pairs);
+        let category_validator =
+            make_choice_validator(category_choices.clone(), "category selection");
+
+        let mut recurrence_pairs = vec![
+            ("None".to_string(), RecurrenceChoice::None),
+            (
+                "Daily".to_string(),
+                RecurrenceChoice::Preset(TimeInterval {
+                    every: 1,
+                    unit: TimeUnit::Day,
+                }),
+            ),
+            (
+                "Weekly".to_string(),
+                RecurrenceChoice::Preset(TimeInterval {
+                    every: 1,
+                    unit: TimeUnit::Week,
+                }),
+            ),
+            (
+                "Monthly".to_string(),
+                RecurrenceChoice::Preset(TimeInterval {
+                    every: 1,
+                    unit: TimeUnit::Month,
+                }),
+            ),
+            ("Every N days".to_string(), RecurrenceChoice::EveryNDays),
+            (
+                "Yearly".to_string(),
+                RecurrenceChoice::Preset(TimeInterval {
+                    every: 1,
+                    unit: TimeUnit::Year,
+                }),
+            ),
+        ];
+
+        let defaults = BTreeMap::new();
+        let mut recurrence_default_value = RecurrenceChoice::None;
+        let mut recurrence_every_default = 1u32;
+        let mut keep_display: Option<String> = None;
+
+        let default_status = match &mode {
+            TransactionWizardMode::Create { default_status } => default_status.clone(),
+            TransactionWizardMode::Edit { initial } => initial.status.clone(),
+        };
+
+        if let TransactionWizardMode::Edit { initial } = &mode {
+            if let Some(rule) = &initial.recurrence {
+                match (&rule.interval.unit, rule.interval.every) {
+                    (TimeUnit::Day, 1) => {
+                        recurrence_default_value = RecurrenceChoice::Preset(TimeInterval {
+                            every: 1,
+                            unit: TimeUnit::Day,
+                        });
+                    }
+                    (TimeUnit::Week, 1) => {
+                        recurrence_default_value = RecurrenceChoice::Preset(TimeInterval {
+                            every: 1,
+                            unit: TimeUnit::Week,
+                        });
+                    }
+                    (TimeUnit::Month, 1) => {
+                        recurrence_default_value = RecurrenceChoice::Preset(TimeInterval {
+                            every: 1,
+                            unit: TimeUnit::Month,
+                        });
+                    }
+                    (TimeUnit::Year, 1) => {
+                        recurrence_default_value = RecurrenceChoice::Preset(TimeInterval {
+                            every: 1,
+                            unit: TimeUnit::Year,
+                        });
+                    }
+                    (TimeUnit::Day, every) => {
+                        recurrence_default_value = RecurrenceChoice::EveryNDays;
+                        recurrence_every_default = every;
+                    }
+                    _ => {
+                        keep_display = Some(format!("Keep existing ({})", rule.interval.label()));
+                        recurrence_default_value = RecurrenceChoice::KeepExisting;
+                    }
+                }
+            }
+        }
+
+        if let Some(label) = &keep_display {
+            recurrence_pairs.push((label.clone(), RecurrenceChoice::KeepExisting));
+        }
+
+        let recurrence_choices = ChoiceMapper::from_pairs(recurrence_pairs);
+        let recurrence_validator =
+            make_choice_validator(recurrence_choices.clone(), "recurrence pattern");
+
+        let status_choices = ChoiceMapper::from_pairs(vec![
+            ("Planned".to_string(), TransactionStatus::Planned),
+            ("Completed".to_string(), TransactionStatus::Completed),
+            ("Missed".to_string(), TransactionStatus::Missed),
+            ("Simulated".to_string(), TransactionStatus::Simulated),
+        ]);
+        let status_validator = make_choice_validator(status_choices.clone(), "transaction status");
+
+        let mut fields = Vec::new();
+        fields.push(FieldDescriptor::new(
+            "from_account",
+            "From account",
+            FieldKind::Choice(account_choices.options()),
+            account_validator.clone(),
+        ));
+        fields.push(FieldDescriptor::new(
+            "to_account",
+            "To account",
+            FieldKind::Choice(account_choices.options()),
+            account_validator,
+        ));
+        fields.push(
+            FieldDescriptor::new(
+                "category",
+                "Category",
+                FieldKind::Choice(category_choices.options()),
+                category_validator,
+            )
+            .with_optional(),
+        );
+        fields.push(FieldDescriptor::new(
+            "scheduled_date",
+            "Scheduled date (YYYY-MM-DD)",
+            FieldKind::Date,
+            make_min_date_validator(min_date),
+        ));
+        fields.push(
+            FieldDescriptor::new(
+                "actual_date",
+                "Actual date (YYYY-MM-DD)",
+                FieldKind::Date,
+                make_optional_date_validator(today),
+            )
+            .with_optional(),
+        );
+        fields.push(FieldDescriptor::new(
+            "budgeted_amount",
+            "Budgeted amount",
+            FieldKind::Decimal,
+            make_non_negative_decimal_validator(),
+        ));
+        fields.push(
+            FieldDescriptor::new(
+                "actual_amount",
+                "Actual amount",
+                FieldKind::Decimal,
+                make_optional_non_negative_decimal_validator(None),
+            )
+            .with_optional(),
+        );
+        fields.push(FieldDescriptor::new(
+            "recurrence",
+            "Recurrence",
+            FieldKind::Choice(recurrence_choices.options()),
+            recurrence_validator,
+        ));
+        fields.push(
+            FieldDescriptor::new(
+                "recurrence_days",
+                "Every N days interval",
+                FieldKind::Integer,
+                make_positive_integer_validator(1),
+            )
+            .with_help("Only used when recurrence is set to 'Every N days'."),
+        );
+        fields.push(FieldDescriptor::new(
+            "status",
+            "Status",
+            FieldKind::Choice(status_choices.options()),
+            status_validator,
+        ));
+        fields.push(
+            FieldDescriptor::new("notes", "Notes", FieldKind::Text, make_notes_validator(512))
+                .with_optional(),
+        );
+
+        let mut defaults = defaults;
+        if let Some(display) = account_choices.options().first() {
+            defaults.insert("from_account".into(), display.clone());
+            defaults.insert("to_account".into(), display.clone());
+        }
+        if let Some(display) = category_choices.display_for_value(&None) {
+            defaults.insert("category".into(), display);
+        }
+        defaults.insert("scheduled_date".into(), today.to_string());
+        defaults.insert(
+            "recurrence_days".into(),
+            recurrence_every_default.to_string(),
+        );
+
+        let recurrence_default_display = recurrence_choices
+            .display_for_value(&recurrence_default_value)
+            .or_else(|| recurrence_choices.display_for_value(&RecurrenceChoice::None))
+            .unwrap_or_else(|| "None".into());
+        defaults.insert("recurrence".into(), recurrence_default_display);
+
+        if let Some(display) = status_choices.display_for_value(&default_status) {
+            defaults.insert("status".into(), display);
+        }
+
+        match &mode {
+            TransactionWizardMode::Create { .. } => {
+                defaults.insert("actual_date".into(), String::new());
+                defaults.insert("actual_amount".into(), String::new());
+            }
+            TransactionWizardMode::Edit { initial } => {
+                if let Some(display) = account_choices.display_for_value(&initial.from_account) {
+                    defaults.insert("from_account".into(), display);
+                }
+                if let Some(display) = account_choices.display_for_value(&initial.to_account) {
+                    defaults.insert("to_account".into(), display);
+                }
+                defaults.insert("scheduled_date".into(), initial.scheduled_date.to_string());
+                if let Some(actual_date) = initial.actual_date {
+                    defaults.insert("actual_date".into(), actual_date.to_string());
+                } else {
+                    defaults.insert("actual_date".into(), String::new());
+                }
+                defaults.insert(
+                    "budgeted_amount".into(),
+                    format_amount(initial.budgeted_amount),
+                );
+                if let Some(actual) = initial.actual_amount {
+                    defaults.insert("actual_amount".into(), format_amount(actual));
+                } else {
+                    defaults.insert("actual_amount".into(), String::new());
+                }
+                if let Some(category_id) = initial.category_id {
+                    if let Some(display) = category_choices.display_for_value(&Some(category_id)) {
+                        defaults.insert("category".into(), display);
+                    }
+                }
+                if let Some(notes) = &initial.notes {
+                    defaults.insert("notes".into(), notes.clone());
+                } else {
+                    defaults.insert("notes".into(), String::new());
+                }
+                if recurrence_default_value == RecurrenceChoice::EveryNDays {
+                    defaults.insert(
+                        "recurrence_days".into(),
+                        recurrence_every_default.to_string(),
+                    );
+                }
+            }
+        }
+
+        if let Some(field) = fields.iter_mut().find(|f| f.key == "actual_amount") {
+            let default_amount = match &mode {
+                TransactionWizardMode::Create { .. } => None,
+                TransactionWizardMode::Edit { initial } => {
+                    Some(initial.actual_amount.unwrap_or(initial.budgeted_amount))
+                }
+            };
+            field.validator = make_optional_non_negative_decimal_validator(default_amount);
+        }
+
+        let descriptor = FormDescriptor::new("transaction", fields);
+
+        Self {
+            descriptor,
+            defaults,
+            mode,
+            account_choices,
+            category_choices,
+            recurrence_choices,
+            status_choices,
+        }
+    }
+
+    fn apply_existing_recurrence_metadata(&self, recurrence: &mut Recurrence) {
+        if let TransactionWizardMode::Edit { initial } = &self.mode {
+            if let Some(existing) = &initial.recurrence {
+                recurrence.series_id = existing.series_id;
+                recurrence.mode = existing.mode.clone();
+                recurrence.end = existing.end.clone();
+                recurrence.exceptions = existing.exceptions.clone();
+                recurrence.status = existing.status.clone();
+                recurrence.last_generated = existing.last_generated;
+                recurrence.last_completed = existing.last_completed;
+                recurrence.generated_occurrences = existing.generated_occurrences;
+                recurrence.next_scheduled = existing.next_scheduled;
+            }
+        }
+    }
+
+    fn existing_id(&self) -> Option<Uuid> {
+        if let TransactionWizardMode::Edit { initial } = &self.mode {
+            Some(initial.id)
+        } else {
+            None
+        }
+    }
+}
+
+impl FormFlow for TransactionWizard {
+    type Output = TransactionFormData;
+    type Error = Infallible;
+
+    fn descriptor(&self) -> &FormDescriptor {
+        &self.descriptor
+    }
+
+    fn defaults(&self) -> BTreeMap<String, String> {
+        self.defaults.clone()
+    }
+
+    fn commit(&self, values: BTreeMap<String, String>) -> Result<Self::Output, Self::Error> {
+        let from_display = values
+            .get("from_account")
+            .cloned()
+            .or_else(|| self.defaults.get("from_account").cloned())
+            .unwrap_or_default();
+        let from_account = self
+            .account_choices
+            .value_for_display(&from_display)
+            .cloned()
+            .unwrap_or_else(Uuid::new_v4);
+
+        let to_display = values
+            .get("to_account")
+            .cloned()
+            .or_else(|| self.defaults.get("to_account").cloned())
+            .unwrap_or_default();
+        let to_account = self
+            .account_choices
+            .value_for_display(&to_display)
+            .cloned()
+            .unwrap_or_else(Uuid::new_v4);
+
+        let category_display = values
+            .get("category")
+            .cloned()
+            .or_else(|| self.defaults.get("category").cloned())
+            .unwrap_or_else(|| "None".into());
+        let category_id = self
+            .category_choices
+            .value_for_display(&category_display)
+            .cloned()
+            .unwrap_or(None);
+
+        let scheduled_raw = values
+            .get("scheduled_date")
+            .cloned()
+            .or_else(|| self.defaults.get("scheduled_date").cloned())
+            .unwrap_or_else(|| NaiveDate::default().to_string());
+        let scheduled_date = NaiveDate::parse_from_str(&scheduled_raw, "%Y-%m-%d")
+            .unwrap_or_else(|_| NaiveDate::from_ymd_opt(1970, 1, 1).unwrap());
+
+        let actual_date = values
+            .get("actual_date")
+            .cloned()
+            .filter(|value| !value.trim().is_empty())
+            .and_then(|value| NaiveDate::parse_from_str(&value, "%Y-%m-%d").ok());
+
+        let budget_raw = values
+            .get("budgeted_amount")
+            .cloned()
+            .or_else(|| self.defaults.get("budgeted_amount").cloned())
+            .unwrap_or_else(|| "0".into());
+        let budgeted_amount = budget_raw.parse::<f64>().unwrap_or(0.0);
+
+        let actual_amount = values.get("actual_amount").cloned().and_then(|value| {
+            if value.trim().is_empty() {
+                None
+            } else {
+                parse_optional_f64(&value)
+            }
+        });
+
+        let recurrence_display = values
+            .get("recurrence")
+            .cloned()
+            .or_else(|| self.defaults.get("recurrence").cloned())
+            .unwrap_or_else(|| "None".into());
+        let recurrence_choice = self
+            .recurrence_choices
+            .value_for_display(&recurrence_display)
+            .cloned()
+            .unwrap_or(RecurrenceChoice::None);
+
+        let recurrence_days_raw = values
+            .get("recurrence_days")
+            .cloned()
+            .or_else(|| self.defaults.get("recurrence_days").cloned())
+            .unwrap_or_else(|| "1".into());
+        let recurrence_days = recurrence_days_raw
+            .trim()
+            .parse::<u32>()
+            .unwrap_or(1)
+            .max(1);
+
+        let status_display = values
+            .get("status")
+            .cloned()
+            .or_else(|| self.defaults.get("status").cloned())
+            .unwrap_or_else(|| "Planned".into());
+        let status = self
+            .status_choices
+            .value_for_display(&status_display)
+            .cloned()
+            .unwrap_or(TransactionStatus::Planned);
+
+        let notes = values.get("notes").and_then(|value| sanitize_notes(value));
+
+        let recurrence_action = match recurrence_choice {
+            RecurrenceChoice::None => TransactionRecurrenceAction::Clear,
+            RecurrenceChoice::EveryNDays => {
+                let mut recurrence = Recurrence::new(
+                    scheduled_date,
+                    TimeInterval {
+                        every: recurrence_days,
+                        unit: TimeUnit::Day,
+                    },
+                    RecurrenceMode::FixedSchedule,
+                );
+                self.apply_existing_recurrence_metadata(&mut recurrence);
+                TransactionRecurrenceAction::Set(recurrence)
+            }
+            RecurrenceChoice::Preset(interval) => {
+                let mut recurrence =
+                    Recurrence::new(scheduled_date, interval, RecurrenceMode::FixedSchedule);
+                self.apply_existing_recurrence_metadata(&mut recurrence);
+                TransactionRecurrenceAction::Set(recurrence)
+            }
+            RecurrenceChoice::KeepExisting => TransactionRecurrenceAction::Keep,
+        };
+
+        let id = self.existing_id();
+
+        Ok(TransactionFormData {
+            id,
+            from_account,
+            to_account,
+            category_id,
+            scheduled_date,
+            actual_date,
+            budgeted_amount,
+            actual_amount,
+            status,
+            notes,
+            recurrence: recurrence_action,
         })
     }
 
@@ -1488,6 +2158,137 @@ mod tests {
                 assert_eq!(data.category_id, None);
                 assert_eq!(data.opening_balance, Some(500.0));
                 assert_eq!(data.notes.as_deref(), Some("Primary checking"));
+            }
+            other => panic!("Unexpected result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn transaction_wizard_create_every_n_days() {
+        let from_id = Uuid::new_v4();
+        let to_id = Uuid::new_v4();
+        let accounts = vec![("From".to_string(), from_id), ("To".to_string(), to_id)];
+        let categories = Vec::new();
+        let today = NaiveDate::from_ymd_opt(2024, 1, 1).unwrap();
+        let min_date = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
+        let wizard = TransactionWizard::new_create(
+            accounts,
+            categories,
+            today,
+            min_date,
+            TransactionStatus::Planned,
+        );
+
+        let prompts = vec![
+            PromptResponse::Value("1".into()), // from account
+            PromptResponse::Value("2".into()), // to account
+            PromptResponse::Keep,              // category none
+            PromptResponse::Value("2025-03-01".into()),
+            PromptResponse::Keep, // actual date empty
+            PromptResponse::Value("950".into()),
+            PromptResponse::Keep,              // actual amount blank
+            PromptResponse::Value("5".into()), // Every N days
+            PromptResponse::Value("3".into()), // N = 3
+            PromptResponse::Keep,              // status Planned
+            PromptResponse::Value("Rent".into()),
+        ];
+        let mut interaction = MockInteraction::new(prompts, vec![ConfirmationResponse::Confirm]);
+
+        let result = FormEngine::new(&wizard).run(&mut interaction).unwrap();
+        match result {
+            FormResult::Completed(data) => {
+                assert!(data.id.is_none());
+                assert_eq!(data.from_account, from_id);
+                assert_eq!(data.to_account, to_id);
+                assert_eq!(data.category_id, None);
+                assert_eq!(
+                    data.scheduled_date,
+                    NaiveDate::from_ymd_opt(2025, 3, 1).unwrap()
+                );
+                assert!(data.actual_date.is_none());
+                assert_eq!(data.budgeted_amount, 950.0);
+                assert!(data.actual_amount.is_none());
+                assert_eq!(data.status, TransactionStatus::Planned);
+                assert_eq!(data.notes.as_deref(), Some("Rent"));
+                match data.recurrence {
+                    TransactionRecurrenceAction::Set(recurrence) => {
+                        assert_eq!(recurrence.interval.every, 3);
+                        assert_eq!(recurrence.interval.unit, TimeUnit::Day);
+                        assert_eq!(recurrence.start_date, data.scheduled_date);
+                    }
+                    other => panic!("Unexpected recurrence action: {:?}", other),
+                }
+            }
+            other => panic!("Unexpected result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn transaction_wizard_edit_keep_existing() {
+        let from_id = Uuid::new_v4();
+        let to_id = Uuid::new_v4();
+        let category_id = Uuid::new_v4();
+        let accounts = vec![("From".to_string(), from_id), ("To".to_string(), to_id)];
+        let categories = vec![("Cat".to_string(), Some(category_id))];
+        let scheduled = NaiveDate::from_ymd_opt(2024, 5, 1).unwrap();
+        let recurrence = Recurrence::new(
+            scheduled,
+            TimeInterval {
+                every: 2,
+                unit: TimeUnit::Week,
+            },
+            RecurrenceMode::FixedSchedule,
+        );
+        let initial = TransactionInitialData {
+            id: Uuid::new_v4(),
+            from_account: from_id,
+            to_account: to_id,
+            category_id: Some(category_id),
+            scheduled_date: scheduled,
+            actual_date: Some(NaiveDate::from_ymd_opt(2024, 5, 2).unwrap()),
+            budgeted_amount: 100.0,
+            actual_amount: Some(105.0),
+            recurrence: Some(recurrence),
+            status: TransactionStatus::Planned,
+            notes: Some("Initial".into()),
+        };
+        let initial_id = initial.id;
+        let wizard = TransactionWizard::new_edit(
+            accounts,
+            categories,
+            NaiveDate::from_ymd_opt(2024, 5, 10).unwrap(),
+            NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
+            initial,
+        );
+
+        let prompts = vec![
+            PromptResponse::Keep,                       // from account
+            PromptResponse::Keep,                       // to account
+            PromptResponse::Keep,                       // category
+            PromptResponse::Value("2024-06-01".into()), // scheduled date
+            PromptResponse::Keep,                       // actual date
+            PromptResponse::Value("125.50".into()),
+            PromptResponse::Value("120.25".into()),
+            PromptResponse::Keep,              // keep existing recurrence
+            PromptResponse::Keep,              // recurrence days unused
+            PromptResponse::Value("3".into()), // status -> Missed
+            PromptResponse::Value("Updated".into()),
+        ];
+        let mut interaction = MockInteraction::new(prompts, vec![ConfirmationResponse::Confirm]);
+
+        let result = FormEngine::new(&wizard).run(&mut interaction).unwrap();
+        match result {
+            FormResult::Completed(data) => {
+                assert_eq!(data.id, Some(initial_id));
+                assert_eq!(
+                    data.scheduled_date,
+                    NaiveDate::from_ymd_opt(2024, 6, 1).unwrap()
+                );
+                assert_eq!(data.budgeted_amount, 125.50);
+                assert_eq!(data.actual_amount, Some(120.25));
+                assert_eq!(data.status, TransactionStatus::Missed);
+                assert_eq!(data.notes.as_deref(), Some("Updated"));
+                assert!(matches!(data.recurrence, TransactionRecurrenceAction::Keep));
             }
             other => panic!("Unexpected result: {:?}", other),
         }
