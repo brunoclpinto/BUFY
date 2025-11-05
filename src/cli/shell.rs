@@ -23,8 +23,8 @@ use crate::{
     errors::LedgerError,
     ledger::{
         account::AccountKind, category::CategoryKind, Account, BudgetPeriod, BudgetScope,
-        BudgetStatus, BudgetSummary, Category, DateWindow, ForecastReport, Ledger, Recurrence,
-        RecurrenceEnd, RecurrenceMode, RecurrenceSnapshot, RecurrenceStatus, ScheduledStatus,
+        BudgetSummary, Category, DateWindow, ForecastReport, Ledger, Recurrence, RecurrenceEnd,
+        RecurrenceMode, RecurrenceSnapshot, RecurrenceStatus, ScheduledStatus,
         SimulationBudgetImpact, SimulationChange, SimulationStatus, SimulationTransactionPatch,
         TimeInterval, TimeUnit, Transaction, TransactionStatus,
     },
@@ -51,8 +51,8 @@ use crate::cli::selectors::{SelectionOutcome, SelectionProvider};
 
 use super::commands::{CommandDefinition, CommandRegistry};
 use super::output::{
-    error as output_error, info as output_info, success as output_success,
-    warning as output_warning,
+    error as output_error, info as output_info, section as output_section,
+    success as output_success, warning as output_warning,
 };
 use super::state::CliState;
 
@@ -210,27 +210,6 @@ impl CliApp {
 
     fn format_date(&self, ledger: &Ledger, date: NaiveDate) -> String {
         format_date(&ledger.locale, date)
-    }
-
-    fn warning_prefix<'a>(&self, ledger: &'a Ledger) -> &'a str {
-        if ledger.format.screen_reader_mode {
-            "Warning:"
-        } else {
-            "⚠️"
-        }
-    }
-
-    fn paint<'a>(
-        &self,
-        ledger: &Ledger,
-        text: String,
-        colorizer: impl Fn(String) -> colored::ColoredString,
-    ) -> String {
-        if ledger.format.high_contrast_mode {
-            text
-        } else {
-            colorizer(text).to_string()
-        }
     }
 
     fn show_config(&self) -> CommandResult {
@@ -2013,17 +1992,18 @@ impl CliApp {
     fn list_accounts(&self) -> CommandResult {
         let ledger = self.current_ledger()?;
         if ledger.accounts.is_empty() {
-            println!("{}", "No accounts defined".bright_black());
-        } else {
-            println!("{}", "Accounts".bright_white().bold());
-            for (idx, account) in ledger.accounts.iter().enumerate() {
-                println!(
-                    "  [{}] {} ({:?})",
-                    idx,
-                    account.name.bright_white(),
-                    account.kind
-                );
-            }
+            output_warning("No accounts defined.");
+            return Ok(());
+        }
+
+        output_section("Accounts");
+        for (idx, account) in ledger.accounts.iter().enumerate() {
+            output_info(format!(
+                "  [{idx:>3}] {name} ({kind:?})",
+                idx = idx,
+                name = account.name,
+                kind = account.kind
+            ));
         }
         Ok(())
     }
@@ -2031,18 +2011,24 @@ impl CliApp {
     fn list_categories(&self) -> CommandResult {
         let ledger = self.current_ledger()?;
         if ledger.categories.is_empty() {
-            println!("{}", "No categories defined".bright_black());
-        } else {
-            println!("{}", "Categories".bright_white().bold());
-            for (idx, category) in ledger.categories.iter().enumerate() {
-                println!(
-                    "  [{}] {} ({:?}){}",
-                    idx,
-                    category.name.bright_white(),
-                    category.kind,
-                    category.parent_id.map(|_| " [child]").unwrap_or("")
-                );
-            }
+            output_warning("No categories defined.");
+            return Ok(());
+        }
+
+        output_section("Categories");
+        for (idx, category) in ledger.categories.iter().enumerate() {
+            let parent_marker = if category.parent_id.is_some() {
+                " [child]"
+            } else {
+                ""
+            };
+            output_info(format!(
+                "  [{idx:>3}] {name} ({kind:?}){parent_marker}",
+                idx = idx,
+                name = category.name,
+                kind = category.kind,
+                parent_marker = parent_marker
+            ));
         }
         Ok(())
     }
@@ -2050,18 +2036,11 @@ impl CliApp {
     fn list_transactions(&self) -> CommandResult {
         let ledger = self.current_ledger()?;
         if ledger.transactions.is_empty() {
-            println!(
-                "{}",
-                self.paint(ledger, "No transactions recorded.".into(), |s| s
-                    .bright_black())
-            );
+            output_warning("No transactions recorded.");
             return Ok(());
         }
 
-        println!(
-            "{}",
-            self.paint(ledger, "Transactions".into(), |s| s.bright_white().bold())
-        );
+        output_section("Transactions");
         for (idx, txn) in ledger.transactions.iter().enumerate() {
             let route = self.describe_transaction_route(ledger, txn);
             let category = txn
@@ -2077,7 +2056,7 @@ impl CliApp {
                 &ledger.locale,
                 &ledger.format,
             );
-            println!(
+            output_info(format!(
                 "  [{idx:>3}] {date} | {amount} | {status:<10} | {route} ({category})",
                 idx = idx,
                 date = scheduled,
@@ -2085,7 +2064,7 @@ impl CliApp {
                 status = status,
                 route = route,
                 category = category
-            );
+            ));
             if let Some(actual_date) = txn.actual_date {
                 if let Some(actual_amount) = txn.actual_amount {
                     let formatted_date = self.format_date(ledger, actual_date);
@@ -2095,20 +2074,16 @@ impl CliApp {
                         &ledger.locale,
                         &ledger.format,
                     );
-                    println!("        actual {} | {}", formatted_date, formatted_amount);
+                    output_info(format!(
+                        "        actual {} | {}",
+                        formatted_date, formatted_amount
+                    ));
                 }
             }
             if let Some(hint) = self.transaction_recurrence_hint(txn) {
-                println!("        {}", self.paint(ledger, hint, |s| s.bright_black()));
+                output_info(format!("        {}", hint));
             } else if txn.recurrence_series_id.is_some() {
-                println!(
-                    "{}",
-                    self.paint(
-                        ledger,
-                        "        [instance] scheduled entry from recurrence".into(),
-                        |s| s.bright_black()
-                    )
-                );
+                output_info("        [instance] scheduled entry from recurrence");
             }
         }
         Ok(())
@@ -2131,12 +2106,12 @@ impl CliApp {
             let impact = ledger
                 .summarize_simulation_in_window(name, window, scope)
                 .map_err(CommandError::from_ledger)?;
-            self.print_simulation_impact(&impact);
+            self.print_simulation_impact(ledger, &impact);
             return Ok(());
         }
 
         let summary = ledger.summarize_window_scope(window, scope);
-        self.print_budget_summary(&summary);
+        self.print_budget_summary(ledger, &summary);
         Ok(())
     }
 
@@ -2224,181 +2199,121 @@ impl CliApp {
         DateWindow::new(today, end).map_err(CommandError::from_ledger)
     }
 
-    fn print_budget_summary(&self, summary: &BudgetSummary) {
-        let ledger = match self.current_ledger() {
-            Ok(ledger) => ledger,
-            Err(_) => {
-                println!("{}", "Ledger not loaded".red());
-                return;
-            }
-        };
+    fn print_budget_summary(&self, ledger: &Ledger, summary: &BudgetSummary) {
         let end_display = summary
             .window
             .end
             .checked_sub_signed(Duration::days(1))
             .unwrap_or(summary.window.end);
-        let header = format!(
+        output_section(format!(
             "{:?} {} → {}",
             summary.scope,
             self.format_date(ledger, summary.window.start),
             self.format_date(ledger, end_display)
-        );
-        println!("{}", self.paint(ledger, header, |s| s.bright_cyan().bold()));
+        ));
 
-        let totals_line = format!(
+        output_info(format!(
             "Budgeted: {} | Real: {} | Remaining: {} | Variance: {}",
             self.format_amount(ledger, summary.totals.budgeted),
             self.format_amount(ledger, summary.totals.real),
             self.format_amount(ledger, summary.totals.remaining),
             self.format_amount(ledger, summary.totals.variance)
-        );
-        println!("{}", self.paint(ledger, totals_line, |s| s.bright_white()));
+        ));
 
         if let Some(percent) = summary.totals.percent_used {
-            let usage = format!("Usage: {:.1}%", percent);
-            println!("{}", self.paint(ledger, usage, |s| s.bright_white()));
+            output_info(format!("Usage: {:.1}%", percent));
         }
 
-        let status_label = format!("Status: {:?}", summary.totals.status);
-        let status_text = if ledger.format.high_contrast_mode {
-            status_label
-        } else {
-            match summary.totals.status {
-                BudgetStatus::OnTrack => status_label.green().to_string(),
-                BudgetStatus::UnderBudget => status_label.cyan().to_string(),
-                BudgetStatus::OverBudget => status_label.red().to_string(),
-                BudgetStatus::Empty => status_label.bright_black().to_string(),
-                BudgetStatus::Incomplete => status_label.yellow().to_string(),
-            }
-        };
-        println!("{}", status_text);
+        output_info(format!("Status: {:?}", summary.totals.status));
 
         if summary.incomplete_transactions > 0 {
-            println!(
-                "{} {} incomplete transactions",
-                self.warning_prefix(ledger),
+            output_warning(format!(
+                "{} incomplete transactions",
                 summary.incomplete_transactions
-            );
+            ));
         }
 
         if summary.orphaned_transactions > 0 {
-            println!(
-                "{} {} transactions reference unknown accounts or categories",
-                self.warning_prefix(ledger),
+            output_warning(format!(
+                "{} transactions reference unknown accounts or categories",
                 summary.orphaned_transactions
-            );
+            ));
         }
 
         if summary.per_category.is_empty() {
-            println!(
-                "{}",
-                self.paint(ledger, "No category data for this window.".into(), |s| {
-                    s.bright_black()
-                })
-            );
+            output_info("No category data for this window.");
         } else {
-            println!(
-                "{}",
-                self.paint(ledger, "Categories:".into(), |s| s.bright_white().bold())
-            );
+            output_info("Categories:");
             for cat in summary.per_category.iter().take(5) {
-                println!(
+                output_info(format!(
                     "  {:<20} {} budgeted / {} real ({:?})",
                     cat.name,
                     self.format_amount(ledger, cat.totals.budgeted),
                     self.format_amount(ledger, cat.totals.real),
                     cat.totals.status
-                );
+                ));
             }
             if summary.per_category.len() > 5 {
-                println!(
-                    "{}",
-                    self.paint(
-                        ledger,
-                        format!("  ... {} more categories", summary.per_category.len() - 5),
-                        |s| s.bright_black()
-                    )
-                );
+                output_info(format!(
+                    "  ... {} more categories",
+                    summary.per_category.len() - 5
+                ));
             }
         }
 
         if !summary.per_account.is_empty() {
-            println!(
-                "{}",
-                self.paint(ledger, "Accounts:".into(), |s| s.bright_white().bold())
-            );
+            output_info("Accounts:");
             for acct in summary.per_account.iter().take(5) {
-                println!(
+                output_info(format!(
                     "  {:<20} {} budgeted / {} real ({:?})",
                     acct.name,
                     self.format_amount(ledger, acct.totals.budgeted),
                     self.format_amount(ledger, acct.totals.real),
                     acct.totals.status
-                );
+                ));
             }
             if summary.per_account.len() > 5 {
-                println!(
-                    "{}",
-                    self.paint(
-                        ledger,
-                        format!("  ... {} more accounts", summary.per_account.len() - 5),
-                        |s| s.bright_black()
-                    )
-                );
+                output_info(format!(
+                    "  ... {} more accounts",
+                    summary.per_account.len() - 5
+                ));
             }
         }
 
         if !summary.disclosures.is_empty() {
-            println!(
-                "{}",
-                self.paint(ledger, "Disclosures:".into(), |s| s.bright_white().bold())
-            );
+            output_info("Disclosures:");
             for note in &summary.disclosures {
-                println!("  - {}", note);
+                output_info(format!("  - {}", note));
             }
         }
     }
 
-    fn print_simulation_impact(&self, impact: &SimulationBudgetImpact) {
-        let ledger = match self.current_ledger() {
-            Ok(ledger) => ledger,
-            Err(_) => {
-                println!("{}", "Ledger not loaded".red());
-                return;
-            }
-        };
-        println!(
-            "{}",
-            self.paint(
-                ledger,
-                format!("Simulation `{}`", impact.simulation_name),
-                |s| s.bright_magenta().bold()
-            )
-        );
-        println!("Base totals:");
-        println!(
+    fn print_simulation_impact(&self, ledger: &Ledger, impact: &SimulationBudgetImpact) {
+        output_section(format!("Simulation `{}`", impact.simulation_name));
+        output_info("Base totals:");
+        output_info(format!(
             "  Budgeted: {} | Real: {} | Remaining: {} | Variance: {}",
             self.format_amount(ledger, impact.base.totals.budgeted),
             self.format_amount(ledger, impact.base.totals.real),
             self.format_amount(ledger, impact.base.totals.remaining),
             self.format_amount(ledger, impact.base.totals.variance)
-        );
-        println!("Simulated totals:");
-        println!(
+        ));
+        output_info("Simulated totals:");
+        output_info(format!(
             "  Budgeted: {} | Real: {} | Remaining: {} | Variance: {}",
             self.format_amount(ledger, impact.simulated.totals.budgeted),
             self.format_amount(ledger, impact.simulated.totals.real),
             self.format_amount(ledger, impact.simulated.totals.remaining),
             self.format_amount(ledger, impact.simulated.totals.variance)
-        );
-        println!("Delta:");
-        println!(
+        ));
+        output_info("Delta:");
+        output_info(format!(
             "  Budgeted: {} | Real: {} | Remaining: {} | Variance: {}",
             self.format_amount(ledger, impact.delta.budgeted),
             self.format_amount(ledger, impact.delta.real),
             self.format_amount(ledger, impact.delta.remaining),
             self.format_amount(ledger, impact.delta.variance)
-        );
+        ));
     }
 
     fn print_forecast_report(
@@ -2408,21 +2323,18 @@ impl CliApp {
         report: &ForecastReport,
     ) {
         let window = report.forecast.window;
-        let header = if let Some(name) = simulation {
-            format!("Forecast (`{}`)", name)
-        } else {
-            "Forecast".into()
-        };
+        let header = simulation
+            .map(|name| format!("Forecast `{}`", name))
+            .unwrap_or_else(|| "Forecast".to_string());
         let end_display = window
             .end
             .checked_sub_signed(Duration::days(1))
             .unwrap_or(window.end);
-        println!(
-            "{} {} → {}",
-            self.paint(ledger, header, |s| s.bright_cyan().bold()),
+        output_section(format!(
+            "{header} {} → {}",
             self.format_date(ledger, window.start),
             self.format_date(ledger, end_display)
-        );
+        ));
 
         let totals = &report.forecast.totals;
         let instance_count = report.forecast.instances.len();
@@ -2446,49 +2358,38 @@ impl CliApp {
             .iter()
             .filter(|inst| matches!(inst.status, ScheduledStatus::Future))
             .count();
-
-        println!(
-            "Occurrences: {} total | {} already scheduled | {} projected",
-            instance_count, existing_count, generated_count
-        );
-        println!(
-            "Status mix → {} overdue | {} pending | {} future",
-            overdue, pending, future
-        );
-        println!(
-            "Projected totals → Inflow: {} | Outflow: {} | Net: {}",
+        output_info(format!(
+            "Occurrences: {instance_count} total | {existing_count} already scheduled | {generated_count} projected"
+        ));
+        output_info(format!(
+            "Status mix: {overdue} overdue | {pending} pending | {future} future"
+        ));
+        output_info(format!(
+            "Projected totals: Inflow {} | Outflow {} | Net {}",
             self.format_amount(ledger, totals.projected_inflow),
             self.format_amount(ledger, totals.projected_outflow),
             self.format_amount(ledger, totals.net)
-        );
-        println!(
-            "Budget impact → Budgeted: {} | Real: {} | Remaining: {} | Variance: {}",
+        ));
+        output_info(format!(
+            "Budget impact: Budgeted {} | Real {} | Remaining {} | Variance {}",
             self.format_amount(ledger, report.summary.totals.budgeted),
             self.format_amount(ledger, report.summary.totals.real),
             self.format_amount(ledger, report.summary.totals.remaining),
             self.format_amount(ledger, report.summary.totals.variance)
-        );
+        ));
         if !report.summary.disclosures.is_empty() {
-            println!("{}", "Disclosures:".bright_white().bold());
+            output_info("Disclosures:");
             for note in &report.summary.disclosures {
-                println!("  - {}", note);
+                output_info(format!("  - {}", note));
             }
         }
 
         if report.forecast.transactions.is_empty() {
-            println!(
-                "{}",
-                "No additional projections required within this window.".bright_black()
-            );
+            output_info("No additional projections required within this window.");
             return;
         }
 
-        println!(
-            "{}",
-            self.paint(ledger, "Upcoming projections:".into(), |s| s
-                .bright_white()
-                .bold())
-        );
+        output_info("Upcoming projections:");
         for item in report.forecast.transactions.iter().take(8) {
             let status = self.scheduled_status_label(item.status);
             let route = self.describe_transaction_route(ledger, &item.transaction);
@@ -2504,31 +2405,28 @@ impl CliApp {
                 &ledger.locale,
                 &ledger.format,
             );
-            println!(
-                "  {} | {} | {} | {}",
-                self.format_date(ledger, item.transaction.scheduled_date),
-                amount,
-                status,
-                format!("{} ({})", route, category)
-            );
+            output_info(format!(
+                "  {date} | {amount} | {status:<8} | {route} ({category})",
+                date = self.format_date(ledger, item.transaction.scheduled_date),
+                amount = amount,
+                status = status,
+                route = route,
+                category = category
+            ));
         }
         if report.forecast.transactions.len() > 8 {
-            println!(
-                "{}",
-                format!(
-                    "  ... {} additional projections",
-                    report.forecast.transactions.len() - 8
-                )
-                .bright_black()
-            );
+            output_info(format!(
+                "  ... {} additional projections",
+                report.forecast.transactions.len() - 8
+            ));
         }
     }
 
-    fn scheduled_status_label(&self, status: ScheduledStatus) -> colored::ColoredString {
+    fn scheduled_status_label(&self, status: ScheduledStatus) -> &'static str {
         match status {
-            ScheduledStatus::Overdue => "Overdue".red().bold(),
-            ScheduledStatus::Pending => "Pending".yellow(),
-            ScheduledStatus::Future => "Future".bright_cyan(),
+            ScheduledStatus::Overdue => "Overdue",
+            ScheduledStatus::Pending => "Pending",
+            ScheduledStatus::Future => "Future",
         }
     }
 
