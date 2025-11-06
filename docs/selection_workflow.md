@@ -27,13 +27,13 @@ current CLI implementation.
 4. **`SelectionManager`** – orchestrates user interaction. Providers hand their
    items to the manager, which renders labels and delegates the actual choice to
    a selector function. The default selector uses `dialoguer::Select`, while
-   tests can inject deterministic selectors via `CliApp::set_selection_choices`
+   tests can inject deterministic selectors via `ShellContext::set_selection_choices`
    (which feeds a queue consumed by `SelectionManager::choose_with`).
 
 ## Runtime Flow
 
 1. **Detection** – command handlers call helper methods such as
-   `CliApp::transaction_index_from_arg` or `CliApp::resolve_simulation_name`.
+   `ShellContext::transaction_index_from_arg` or `ShellContext::resolve_simulation_name`.
    These detect missing arguments and trigger a selection only when interactive
    input (or a queued test override) is available. With Phase 16, the
    `transaction remove/show/complete` commands lean on the same helper, so
@@ -58,6 +58,6 @@ agnostic of domain specifics and makes it trivial to add new providers later.
 
 Script mode remains non-interactive, but unit tests can still exercise
 selection-driven branches by pushing `Option<usize>` values into the
-`SelectionOverride` queue (`CliApp::set_selection_choices`). This bypasses the
+`SelectionOverride` queue (`ShellContext::set_selection_choices`). This bypasses the
 Dialoguer TTY requirements, keeps command behaviour deterministic, and ensures
 that cancel flows are covered alongside the happy paths.

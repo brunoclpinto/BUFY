@@ -220,7 +220,7 @@ The CLI is now split into focused modules so future interactive features can plu
 Command handlers still live alongside the shell for now, but they interact with the registry/state/output instead of writing directly to stdout or poking global variables. Script mode continues to use the same entry point (`run_cli`) and benefits from the new modular boundary.
 
 When a required argument is omitted in interactive mode, the handler calls into
-`CliApp::select_with`, which delegates to the appropriate provider and prompts
+`ShellContext::select_with`, which delegates to the appropriate provider and prompts
 the user to choose an entry. Cancelling simply returns control to the prompt;
 supplying a value proceeds exactly as if it had been typed initially. Tests can
 exercise the same code paths by queueing deterministic selections via the
@@ -300,7 +300,7 @@ CLI helpers map these into `CommandError`, allowing interactive sessions to prov
 
 - **Selection integration** – `transaction edit`, `transaction remove`, `transaction show`, and `transaction complete` all reuse the global selection manager when the caller omits an index. Empty ledgers short-circuit the workflow with a friendly "No transactions available" banner rather than dropping into a prompt.
 
-- **Developer note:** adding another transaction field requires updating the descriptor list in `TransactionWizard::build`, wiring the validator, and extending `CliApp::populate_transaction_from_form`. The form engine takes care of navigation, confirmation, and cancellation semantics once the descriptor is in place.
+- **Developer note:** adding another transaction field requires updating the descriptor list in `TransactionWizard::build`, wiring the validator, and extending `ShellContext::populate_transaction_from_form`. The form engine takes care of navigation, confirmation, and cancellation semantics once the descriptor is in place.
 - **Selection examples** – interactive flows now look identical across domains:
 
 ```text

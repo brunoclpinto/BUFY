@@ -54,7 +54,7 @@ isolated in `utils::persistence`, ensuring atomic save/restore semantics.
 | `simulation` family, `create-simulation`, `enter-simulation`, `leave-simulation`, `apply-simulation`, `discard-simulation` | Simulation lifecycle | Simulations | Selection prompts appear whenever the identifier is omitted. |
 
 Adding a new command requires registering a `CommandDefinition` in
-`build_commands()`; the handler receives `&mut CliApp` and `&[&str]`, enabling
+`build_commands()`; the handler receives `&mut ShellContext` and `&[&str]`, enabling
 access to shared state plus the output utilities.
 
 ## Wizard & Selection APIs
@@ -69,7 +69,7 @@ access to shared state plus the output utilities.
    result, mutate the ledger, and then lean on `output_success` for messaging.
 
 Selections follow the same pattern: implement `SelectionProvider` (see
-`cli::selection::providers`), then call `CliApp::select_with`. Cancels always
+`cli::selection::providers`), then call `ShellContext::select_with`. Cancels always
 return `None`, ensuring callers decide whether to abort or continue.
 
 ## Persistence Specification
@@ -103,7 +103,7 @@ All writes use atomic temp-file swaps. Restore operations (`restore-ledger`,
   high-contrast mode bolds important lines; optional audio feedback appends
   `[ding]` to warnings/errors.
 - Exception boundaries: command handlers bubble `CommandError` back to
-  `CliApp::process_line`, which converts them to friendly messages without
+  `ShellContext::process_line`, which converts them to friendly messages without
   dropping the REPL.
 
 ## Testing Strategy Snapshot
