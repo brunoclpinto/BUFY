@@ -1,8 +1,28 @@
 use std::collections::HashMap;
 
-use crate::cli::shell::{CliApp, CommandResult};
+pub mod account;
+pub mod category;
+pub mod config;
+pub mod ledger;
+pub mod simulation;
+pub mod system;
+pub mod transaction;
 
-pub type CommandHandler = fn(&mut CliApp, &[&str]) -> CommandResult;
+use crate::cli::core::{CommandResult, ShellContext};
+
+pub(crate) fn all_definitions() -> Vec<CommandDefinition> {
+    let mut commands = Vec::new();
+    commands.extend(system::definitions());
+    commands.extend(ledger::definitions());
+    commands.extend(config::definitions());
+    commands.extend(account::definitions());
+    commands.extend(category::definitions());
+    commands.extend(transaction::definitions());
+    commands.extend(simulation::definitions());
+    commands
+}
+
+pub type CommandHandler = fn(&mut ShellContext, &[&str]) -> CommandResult;
 
 #[derive(Clone)]
 pub struct CommandDefinition {
@@ -25,10 +45,6 @@ impl CommandDefinition {
             usage,
             handler,
         }
-    }
-
-    pub fn execute(&self, app: &mut CliApp, args: &[&str]) -> CommandResult {
-        (self.handler)(app, args)
     }
 }
 

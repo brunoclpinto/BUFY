@@ -1,0 +1,335 @@
+use chrono::Local;
+use dialoguer::{Confirm, Input};
+
+use super::CommandDefinition;
+use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
+use crate::cli::io;
+use crate::cli::output::section as output_section;
+use crate::ledger::SimulationStatus;
+
+pub(crate) fn definitions() -> Vec<CommandDefinition> {
+    vec![
+        CommandDefinition::new(
+            "list-simulations",
+            "List saved simulations",
+            "list-simulations",
+            cmd_list_simulations,
+        ),
+        CommandDefinition::new(
+            "create-simulation",
+            "Create a new named simulation",
+            "create-simulation [name]",
+            cmd_create_simulation,
+        ),
+        CommandDefinition::new(
+            "enter-simulation",
+            "Activate a simulation for editing",
+            "enter-simulation <name>",
+            cmd_enter_simulation,
+        ),
+        CommandDefinition::new(
+            "leave-simulation",
+            "Leave the active simulation",
+            "leave-simulation",
+            cmd_leave_simulation,
+        ),
+        CommandDefinition::new(
+            "apply-simulation",
+            "Apply a simulation to the ledger",
+            "apply-simulation <name>",
+            cmd_apply_simulation,
+        ),
+        CommandDefinition::new(
+            "discard-simulation",
+            "Discard a simulation permanently",
+            "discard-simulation <name>",
+            cmd_discard_simulation,
+        ),
+        CommandDefinition::new(
+            "simulation",
+            "Manage pending simulation changes",
+            "simulation <changes|add|modify|exclude> [simulation_name]",
+            cmd_simulation,
+        ),
+    ]
+}
+
+fn cmd_list_simulations(context: &mut ShellContext, _args: &[&str]) -> CommandResult {
+    let ledger = context.current_ledger()?;
+    let sims = ledger.simulations();
+    if sims.is_empty() {
+        io::print_warning("No simulations defined.");
+        return Ok(());
+    }
+    output_section("Simulations");
+    for sim in sims {
+        io::print_info(format!(
+            "  {:<20} {:<10} changes:{:>2} updated:{}",
+            sim.name,
+            format!("{:?}", sim.status),
+            sim.changes.len(),
+            sim.updated_at
+        ));
+    }
+    Ok(())
+}
+
+fn cmd_create_simulation(context: &mut ShellContext, args: &[&str]) -> CommandResult {
+    let name = if let Some(name) = args.first() {
+        (*name).to_string()
+    } else {
+        Input::with_theme(context.theme())
+            .with_prompt("Simulation name")
+            .validate_with(|input: &String| -> Result<(), &str> {
+                if input.trim().is_empty() {
+                    Err("Name cannot be empty")
+                } else {
+                    Ok(())
+                }
+            })
+            .interact_text()
+            .map_err(CommandError::from)?
+    };
+    let notes: Option<String> = if context.mode() == CliMode::Interactive {
+        let text: String = Input::with_theme(context.theme())
+            .with_prompt("Notes (optional)")
+            .interact_text()
+            .map_err(CommandError::from)?;
+        if text.trim().is_empty() {
+            None
+        } else {
+            Some(text)
+        }
+    } else {
+        None
+    };
+    let ledger = context.current_ledger_mut()?;
+    ledger
+        .create_simulation(name.clone(), notes)
+        .map_err(CommandError::from_ledger)?;
+    io::print_success(format!("Simulation `{}` created.", name));
+    Ok(())
+}
+
+fn cmd_enter_simulation(context: &mut ShellContext, args: &[&str]) -> CommandResult {
+    let name = match context.resolve_simulation_name(
+        args.first().copied(),
+        "Select a simulation to enter:",
+        false,
+        "usage: enter-simulation <name>",
+    )? {
+        Some(name) => name,
+        None => {
+            io::print_info("Operation cancelled.");
+            return Ok(());
+        }
+    };
+    let (canonical, created) = {
+        let ledger = context.current_ledger()?;
+        let sim = ledger.simulation(&name).ok_or_else(|| {
+            CommandError::InvalidArguments(format!("simulation `{}` not found", name))
+        })?;
+        if sim.status != SimulationStatus::Pending {
+            return Err(CommandError::InvalidArguments(format!(
+                "simulation `{}` is not editable",
+                name
+            )));
+        }
+        (sim.name.clone(), sim.created_at)
+    };
+    context.set_active_simulation(Some(canonical.clone()));
+    let created = created.with_timezone(&Local);
+    io::print_success(format!(
+        "Entered simulation `{}` (Created: {})",
+        canonical,
+        created.format("%Y-%m-%d %H:%M")
+    ));
+    Ok(())
+}
+
+fn cmd_leave_simulation(context: &mut ShellContext, _args: &[&str]) -> CommandResult {
+    if context.active_simulation_name().is_none() {
+        return Err(CommandError::InvalidArguments(
+            "No active simulation to leave".into(),
+        ));
+    }
+    context.clear_active_simulation();
+    io::print_success("Simulation mode cleared.");
+    Ok(())
+}
+
+fn cmd_apply_simulation(context: &mut ShellContext, args: &[&str]) -> CommandResult {
+    let name = match context.resolve_simulation_name(
+        args.first().copied(),
+        "Select a simulation to apply:",
+        false,
+        "usage: apply-simulation <name>",
+    )? {
+        Some(name) => name,
+        None => {
+            io::print_info("Operation cancelled.");
+            return Ok(());
+        }
+    };
+    let created = {
+        let ledger = context.current_ledger()?;
+        ledger
+            .simulation(&name)
+            .map(|sim| sim.created_at)
+            .ok_or_else(|| {
+                CommandError::InvalidArguments(format!("simulation `{}` not found", name))
+            })?
+    };
+    context
+        .current_ledger_mut()?
+        .apply_simulation(&name)
+        .map_err(CommandError::from_ledger)?;
+    if context
+        .active_simulation_name()
+        .map(|active| active.eq_ignore_ascii_case(&name))
+        .unwrap_or(false)
+    {
+        context.clear_active_simulation();
+    }
+    let created_local = created.with_timezone(&Local);
+    io::print_success(format!(
+        "Simulation `{}` applied (Created: {})",
+        name,
+        created_local.format("%Y-%m-%d %H:%M")
+    ));
+    Ok(())
+}
+
+fn cmd_discard_simulation(context: &mut ShellContext, args: &[&str]) -> CommandResult {
+    let name = match context.resolve_simulation_name(
+        args.first().copied(),
+        "Select a simulation to discard:",
+        false,
+        "usage: discard-simulation <name>",
+    )? {
+        Some(name) => name,
+        None => {
+            io::print_info("Operation cancelled.");
+            return Ok(());
+        }
+    };
+    let (created, was_active) = {
+        let ledger = context.current_ledger()?;
+        let sim = ledger.simulation(&name).ok_or_else(|| {
+            CommandError::InvalidArguments(format!("simulation `{}` not found", name))
+        })?;
+        (
+            Some(sim.created_at),
+            context
+                .active_simulation_name()
+                .map(|active| active.eq_ignore_ascii_case(&name))
+                .unwrap_or(false),
+        )
+    };
+    if context.mode() == CliMode::Interactive {
+        let confirm = Confirm::with_theme(context.theme())
+            .with_prompt(format!("Discard simulation `{}`?", name))
+            .default(false)
+            .interact()
+            .map_err(CommandError::from)?;
+        if !confirm {
+            io::print_info("Operation cancelled.");
+            return Ok(());
+        }
+    }
+    context
+        .current_ledger_mut()?
+        .discard_simulation(&name)
+        .map_err(CommandError::from_ledger)?;
+    if was_active {
+        context.clear_active_simulation();
+    }
+    let summary = created
+        .map(|ts| {
+            let local_ts = ts.with_timezone(&Local);
+            format!(
+                "Simulation `{}` discarded (Created: {})",
+                name,
+                local_ts.format("%Y-%m-%d %H:%M")
+            )
+        })
+        .unwrap_or_else(|| format!("Simulation `{}` discarded", name));
+    io::print_success(summary);
+    Ok(())
+}
+
+fn cmd_simulation(context: &mut ShellContext, args: &[&str]) -> CommandResult {
+    if args.is_empty() {
+        return Err(CommandError::InvalidArguments(
+            "usage: simulation <changes|add|modify|exclude> [simulation_name]".into(),
+        ));
+    }
+    let sub = args[0].to_lowercase();
+    let target_name = args.get(1).copied();
+    match sub.as_str() {
+        "changes" | "show" => {
+            let name = match context.resolve_simulation_name(
+                target_name,
+                "Select a simulation to inspect:",
+                true,
+                "usage: simulation changes [simulation_name]",
+            )? {
+                Some(name) => name,
+                None => {
+                    io::print_info("Operation cancelled.");
+                    return Ok(());
+                }
+            };
+            context.print_simulation_changes(&name)
+        }
+        "add" => {
+            let name = match context.resolve_simulation_name(
+                target_name,
+                "Select a simulation to add a transaction to:",
+                true,
+                "usage: simulation add [simulation_name]",
+            )? {
+                Some(name) => name,
+                None => {
+                    io::print_info("Operation cancelled.");
+                    return Ok(());
+                }
+            };
+            context.simulation_add_transaction(&name)
+        }
+        "exclude" => {
+            let name = match context.resolve_simulation_name(
+                target_name,
+                "Select a simulation to exclude a transaction from:",
+                true,
+                "usage: simulation exclude [simulation_name]",
+            )? {
+                Some(name) => name,
+                None => {
+                    io::print_info("Operation cancelled.");
+                    return Ok(());
+                }
+            };
+            context.simulation_exclude_transaction(&name)
+        }
+        "modify" => {
+            let name = match context.resolve_simulation_name(
+                target_name,
+                "Select a simulation to modify:",
+                true,
+                "usage: simulation modify [simulation_name]",
+            )? {
+                Some(name) => name,
+                None => {
+                    io::print_info("Operation cancelled.");
+                    return Ok(());
+                }
+            };
+            context.simulation_modify_transaction(&name)
+        }
+        _ => Err(CommandError::InvalidArguments(format!(
+            "unknown simulation subcommand `{}`",
+            sub
+        ))),
+    }
+}
