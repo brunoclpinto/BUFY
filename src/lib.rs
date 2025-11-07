@@ -5,6 +5,7 @@
 
 pub mod cli;
 pub mod currency;
+pub mod domain;
 pub mod errors;
 #[cfg(feature = "ffi")]
 pub mod ffi;
