@@ -77,7 +77,7 @@ return `None`, ensuring callers decide whether to abort or continue.
 - **Ledger files**: `~/.budget_core/<name>.json` using schema version
   `CURRENT_SCHEMA_VERSION` (`v4`). The ledger struct persists accounts,
   categories, transactions, simulations, config, and metadata.
-- **Ledger backups**: `~/.budget_core/backups/<name>/YYYY-MM-DDTHH-MM-SS.json.bak`
+- **Ledger backups**: `~/.budget_core/backups/<slug>/<slug>_YYYYMMDD_HHMM[_note].json`
   created before each save; retention is configurable at `LedgerStore`
   construction time.
 - **Config backups**: `~/.budget_core/config_backups/config_<timestamp>.json`

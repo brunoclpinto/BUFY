@@ -13,6 +13,7 @@ use strsim::levenshtein;
 use uuid::Uuid;
 
 use crate::{
+    core::ledger_manager::LedgerManager,
     core::services::{
         AccountService, CategoryService, ServiceError, SummaryService, TransactionService,
     },
@@ -96,7 +97,6 @@ pub struct ShellContext {
     registry: CommandRegistry,
     state: CliState,
     theme: ColorfulTheme,
-    store: LedgerStore,
     selection_override: Option<SelectionOverride>,
 }
 
@@ -105,10 +105,10 @@ impl ShellContext {
         if self.mode != CliMode::Interactive {
             return Ok(());
         }
-        if self.state.ledger.is_some() {
+        if self.state.ledger_ref().is_some() {
             return Ok(());
         }
-        let last = match self.store.last_ledger() {
+        let last = match self.manager().last_opened() {
             Ok(value) => value,
             Err(err) => {
                 tracing::warn!("last ledger lookup failed: {err}");
@@ -118,14 +118,20 @@ impl ShellContext {
         let Some(name) = last else {
             return Ok(());
         };
-        if let Ok(report) = self.store.load_named(&name) {
-            let path = self.store.ledger_path(&name);
-            self.state
-                .set_ledger(report.ledger, Some(path), Some(name.clone()));
+        if let Ok(report) = self.manager_mut().load(&name) {
+            self.state.set_active_simulation(None);
             self.report_load(&report.warnings, &report.migrations);
             output_success(format!("Automatically loaded last ledger `{}`.", name));
         }
         Ok(())
+    }
+
+    fn manager(&self) -> &LedgerManager {
+        self.state.manager()
+    }
+
+    fn manager_mut(&mut self) -> &mut LedgerManager {
+        self.state.manager_mut()
     }
 
     pub fn new(mode: CliMode) -> Result<Self, CliError> {
@@ -133,13 +139,13 @@ impl ShellContext {
 
         let store =
             LedgerStore::new_default().map_err(|err| CliError::Internal(err.to_string()))?;
+        let manager = LedgerManager::new(Box::new(store));
 
         let mut app = Self {
             mode,
             registry,
-            state: CliState::new(),
+            state: CliState::new(manager),
             theme: ColorfulTheme::default(),
-            store,
             selection_override: None,
         };
 
@@ -160,7 +166,7 @@ impl ShellContext {
     }
 
     pub(crate) fn ledger_path(&self) -> Option<PathBuf> {
-        self.state.ledger_path.clone()
+        self.state.ledger_path()
     }
 
     pub(crate) fn set_active_simulation(&mut self, name: Option<String>) {
@@ -238,8 +244,7 @@ impl ShellContext {
     pub(crate) fn prompt(&self) -> String {
         let context = self
             .state
-            .ledger
-            .as_ref()
+            .ledger_ref()
             .map(|ledger| format!("ledger({})", ledger.name))
             .unwrap_or_else(|| "no-ledger".to_string());
 
@@ -355,16 +360,12 @@ impl ShellContext {
     }
 
     pub(crate) fn current_ledger(&self) -> Result<&Ledger, CommandError> {
-        self.state
-            .ledger
-            .as_ref()
-            .ok_or(CommandError::LedgerNotLoaded)
+        self.state.ledger_ref().ok_or(CommandError::LedgerNotLoaded)
     }
 
     pub(crate) fn current_ledger_mut(&mut self) -> Result<&mut Ledger, CommandError> {
         self.state
-            .ledger
-            .as_mut()
+            .ledger_mut_ref()
             .ok_or(CommandError::LedgerNotLoaded)
     }
 
@@ -434,7 +435,7 @@ impl ShellContext {
         prompt: &str,
     ) -> Result<Option<PathBuf>, CommandError> {
         self.select_with(
-            LedgerBackupSelectionProvider::new(&self.state, &self.store),
+            LedgerBackupSelectionProvider::new(&self.state, self.manager()),
             prompt,
             "No backups available.",
         )
@@ -445,7 +446,7 @@ impl ShellContext {
         prompt: &str,
     ) -> Result<Option<PathBuf>, CommandError> {
         self.select_with(
-            ConfigBackupSelectionProvider::new(&self.store),
+            ConfigBackupSelectionProvider::new(self.manager()),
             prompt,
             "No configuration backups found.",
         )
@@ -1115,57 +1116,54 @@ impl ShellContext {
 
     pub(crate) fn load_ledger(&mut self, path: &Path) -> CommandResult {
         let report = self
-            .store
+            .manager_mut()
             .load_from_path(path)
             .map_err(CommandError::from_ledger)?;
-        self.set_ledger(report.ledger, Some(path.to_path_buf()), None);
+        self.state.set_active_simulation(None);
         output_success(format!("Ledger loaded from {}.", path.display()));
         self.report_load(&report.warnings, &report.migrations);
-        let _ = self.store.record_last_ledger(None);
+        let _ = self.manager().record_last_opened(None);
         Ok(())
     }
 
     pub(crate) fn save_to_path(&mut self, path: &Path) -> CommandResult {
-        let mut snapshot = self.current_ledger()?.clone();
-        self.store
-            .save_to_path(&mut snapshot, path)
+        self.manager_mut()
+            .save_to_path(path)
             .map_err(CommandError::from_ledger)?;
-        self.state.set_path(Some(path.to_path_buf()));
-        self.state.set_named(None);
         output_success(format!("Ledger saved to {}.", path.display()));
         Ok(())
     }
 
     pub(crate) fn load_named_ledger(&mut self, name: &str) -> CommandResult {
         let report = self
-            .store
-            .load_named(name)
+            .manager_mut()
+            .load(name)
             .map_err(CommandError::from_ledger)?;
-        let path = self.store.ledger_path(name);
-        self.set_ledger(report.ledger, Some(path.clone()), Some(name.to_string()));
-        output_success(format!("Ledger `{}` loaded from {}.", name, path.display()));
+        self.state.set_active_simulation(None);
+        output_success(format!(
+            "Ledger `{}` loaded from {}.",
+            name,
+            report.path.display()
+        ));
         self.report_load(&report.warnings, &report.migrations);
-        let _ = self.store.record_last_ledger(Some(name));
+        let _ = self.manager().record_last_opened(Some(name));
         Ok(())
     }
 
     pub(crate) fn save_named_ledger(&mut self, name: &str) -> CommandResult {
-        let mut snapshot = self.current_ledger()?.clone();
         let path = self
-            .store
-            .save_named(&mut snapshot, name)
+            .manager_mut()
+            .save_as(name)
             .map_err(CommandError::from_ledger)?;
-        self.state.set_path(Some(path.clone()));
-        self.state.set_named(Some(name.to_string()));
         output_success(format!("Ledger `{}` saved to {}.", name, path.display()));
-        let _ = self.store.record_last_ledger(Some(name));
+        let _ = self.manager().record_last_opened(Some(name));
         Ok(())
     }
 
     pub(crate) fn create_backup(&mut self, name: &str) -> CommandResult {
         let path = self
-            .store
-            .backup_named(name)
+            .manager()
+            .backup_named(name, None)
             .map_err(CommandError::from_ledger)?;
         output_success(format!("Backup created at {}.", path.display()));
         Ok(())
@@ -1173,7 +1171,7 @@ impl ShellContext {
 
     pub(crate) fn list_backups(&self, name: &str) -> CommandResult {
         let backups = self
-            .store
+            .manager()
             .list_backups(name)
             .map_err(CommandError::from_ledger)?;
         if backups.is_empty() {
@@ -1202,7 +1200,7 @@ impl ShellContext {
 
     pub(crate) fn restore_backup(&mut self, name: &str, reference: &str) -> CommandResult {
         let backups = self
-            .store
+            .manager()
             .list_backups(name)
             .map_err(CommandError::from_ledger)?;
         if backups.is_empty() {
@@ -1261,7 +1259,7 @@ impl ShellContext {
             output_info("Operation cancelled.");
             return Ok(());
         }
-        self.store
+        self.manager()
             .restore_backup(name, &target)
             .map_err(CommandError::from_ledger)?;
         self.load_named_ledger(name)
@@ -1273,10 +1271,10 @@ impl ShellContext {
         let config = ConfigData::from_ledger(ledger);
         let snapshot = ConfigSnapshot::new(config, note);
         let path = self
-            .store
+            .manager()
             .create_config_backup(&snapshot)
             .map_err(CommandError::from_ledger)?;
-        self.store
+        self.manager()
             .save_active_config(&snapshot.config)
             .map_err(CommandError::from_ledger)?;
         let file_name = path
@@ -1295,7 +1293,7 @@ impl ShellContext {
 
     pub(crate) fn list_config_backups(&self) -> CommandResult {
         let backups = self
-            .store
+            .manager()
             .list_config_backups()
             .map_err(CommandError::from_ledger)?;
         if backups.is_empty() {
@@ -1331,7 +1329,7 @@ impl ShellContext {
 
     pub(crate) fn restore_config_by_reference(&mut self, reference: &str) -> CommandResult {
         let backups = self
-            .store
+            .manager()
             .list_config_backups()
             .map_err(CommandError::from_ledger)?;
         if backups.is_empty() {
@@ -1379,7 +1377,7 @@ impl ShellContext {
 
     pub(crate) fn restore_config_from_path(&mut self, path: PathBuf) -> CommandResult {
         let snapshot = self
-            .store
+            .manager()
             .load_config_snapshot(&path)
             .map_err(CommandError::from_ledger)?;
         let file_name = path
@@ -1440,7 +1438,7 @@ impl ShellContext {
             snapshot.config.apply_to_ledger(ledger);
             ledger.touch();
         }
-        self.store
+        self.manager()
             .save_active_config(&snapshot.config)
             .map_err(CommandError::from_ledger)?;
         output_success(format!(
@@ -3111,7 +3109,7 @@ pub(crate) fn process_script(lines: &[&str]) -> Result<CliState, CliError> {
 impl CliState {
     #[cfg(test)]
     pub fn ledger(&self) -> Option<&Ledger> {
-        self.ledger.as_ref()
+        self.ledger_ref()
     }
 }
 
@@ -3124,6 +3122,7 @@ mod tests {
     };
     use crate::cli::selection::SelectionManager;
     use crate::cli::selectors::SelectionOutcome;
+    use crate::core::ledger_manager::LedgerManager;
     use crate::currency::{CurrencyDisplay, LocaleConfig, NegativeStyle, ValuationPolicy};
     use crate::ledger::{Simulation, SimulationStatus};
     use crate::utils::persistence::{ConfigData, ConfigSnapshot, LedgerStore};
@@ -3230,7 +3229,10 @@ mod tests {
     }
 
     fn state_with_ledger() -> CliState {
-        let mut state = CliState::new();
+        let temp = tempdir().unwrap();
+        let store = LedgerStore::new(Some(temp.path().to_path_buf()), Some(5)).unwrap();
+        let manager = LedgerManager::new(Box::new(store));
+        let mut state = CliState::new(manager);
         let ledger = sample_ledger();
         state.set_ledger(ledger, None, Some("sample".into()));
         state
@@ -3323,25 +3325,29 @@ mod tests {
     fn ledger_backup_selection_paths() {
         let temp = tempdir().unwrap();
         let store = LedgerStore::new(Some(temp.path().to_path_buf()), Some(5)).unwrap();
-        let mut state = state_with_ledger();
-        state.set_named(Some("Sample".into()));
+        let base_dir = store.base_dir().to_path_buf();
+        let manager = LedgerManager::new(Box::new(store));
+        let mut state = CliState::new(manager);
+        state.set_ledger(sample_ledger(), None, Some("sample".into()));
 
-        let backup_dir = store.base_dir().join("backups").join("sample");
+        let backup_dir = base_dir.join("backups").join("sample");
         fs::create_dir_all(&backup_dir).unwrap();
-        let backup_path = backup_dir.join("2024-01-01T00-00-00.json.bak");
+        let backup_path = backup_dir.join("sample_20240101_0000.json");
         fs::write(&backup_path, "{}").unwrap();
 
-        let outcome = SelectionManager::new(LedgerBackupSelectionProvider::new(&state, &store))
-            .choose_with("Select backup", "No backups available.", |_, _| Ok(Some(0)))
-            .unwrap();
+        let outcome =
+            SelectionManager::new(LedgerBackupSelectionProvider::new(&state, state.manager()))
+                .choose_with("Select backup", "No backups available.", |_, _| Ok(Some(0)))
+                .unwrap();
         match outcome {
             SelectionOutcome::Selected(path) => assert_eq!(path, backup_path),
             _ => panic!("expected backup selection"),
         }
 
-        let outcome = SelectionManager::new(LedgerBackupSelectionProvider::new(&state, &store))
-            .choose_with("Select backup", "No backups available.", |_, _| Ok(None))
-            .unwrap();
+        let outcome =
+            SelectionManager::new(LedgerBackupSelectionProvider::new(&state, state.manager()))
+                .choose_with("Select backup", "No backups available.", |_, _| Ok(None))
+                .unwrap();
         assert!(matches!(outcome, SelectionOutcome::Cancelled));
     }
 
@@ -3362,8 +3368,9 @@ mod tests {
             Some("baseline".into()),
         );
         let config_path = store.create_config_backup(&snapshot).unwrap();
+        let manager = LedgerManager::new(Box::new(store));
 
-        let outcome = SelectionManager::new(ConfigBackupSelectionProvider::new(&store))
+        let outcome = SelectionManager::new(ConfigBackupSelectionProvider::new(&manager))
             .choose_with(
                 "Select config",
                 "No configuration backups found.",
@@ -3375,7 +3382,7 @@ mod tests {
             _ => panic!("expected config selection"),
         }
 
-        let outcome = SelectionManager::new(ConfigBackupSelectionProvider::new(&store))
+        let outcome = SelectionManager::new(ConfigBackupSelectionProvider::new(&manager))
             .choose_with(
                 "Select config",
                 "No configuration backups found.",

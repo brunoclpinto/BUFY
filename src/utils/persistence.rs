@@ -17,7 +17,9 @@ use crate::{
 
 const DEFAULT_DIR_NAME: &str = ".budget_core";
 const LEDGER_EXTENSION: &str = "json";
-const BACKUP_SUFFIX: &str = ".json.bak";
+const LEGACY_BACKUP_SUFFIX: &str = ".json.bak";
+const BACKUP_EXTENSION: &str = "json";
+const BACKUP_TIMESTAMP_FORMAT: &str = "%Y%m%d_%H%M";
 const BACKUP_DIR: &str = "backups";
 const STATE_FILE: &str = "state.json";
 const TMP_SUFFIX: &str = "tmp";
@@ -51,6 +53,7 @@ pub struct LoadReport {
     pub migrations: Vec<String>,
     pub path: PathBuf,
     pub name: Option<String>,
+    pub schema_version: u8,
 }
 
 /// Backup metadata used when listing and restoring snapshots.
@@ -198,6 +201,7 @@ impl LedgerStore {
             migrations,
             warnings,
             path: path.to_path_buf(),
+            schema_version: original_version,
         })
     }
 
@@ -217,7 +221,7 @@ impl LedgerStore {
         let json = serde_json::to_string_pretty(ledger)?;
         validate_json(&json)?;
         if path.exists() {
-            self.create_backup(path)?;
+            self.create_backup(path, None)?;
         }
         let tmp_path = tmp_path(path);
         write_atomic(&tmp_path, &json)?;
@@ -226,7 +230,7 @@ impl LedgerStore {
     }
 
     /// Creates a manual snapshot for the named ledger.
-    pub fn backup_named(&self, name: &str) -> Result<PathBuf, LedgerError> {
+    pub fn backup_named(&self, name: &str, note: Option<&str>) -> Result<PathBuf, LedgerError> {
         let path = self.ledger_path_for(name);
         if !path.exists() {
             return Err(LedgerError::Persistence(format!(
@@ -234,7 +238,7 @@ impl LedgerStore {
                 name
             )));
         }
-        self.create_backup(&path)
+        self.create_backup(&path, note)
     }
 
     /// Lists existing backups for the provided ledger name.
@@ -247,12 +251,17 @@ impl LedgerStore {
         for entry in fs::read_dir(dir)? {
             let entry = entry?;
             let path = entry.path();
-            if !path
+            let is_new_format = path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext.eq_ignore_ascii_case(BACKUP_EXTENSION))
+                .unwrap_or(false);
+            let is_legacy_format = path
                 .file_name()
                 .and_then(|name| name.to_str())
-                .map(|name| name.ends_with(BACKUP_SUFFIX))
-                .unwrap_or(false)
-            {
+                .map(|name| name.ends_with(LEGACY_BACKUP_SUFFIX))
+                .unwrap_or(false);
+            if !is_new_format && !is_legacy_format {
                 continue;
             }
             if let Some(ts) = parse_backup_timestamp(&path) {
@@ -379,18 +388,23 @@ impl LedgerStore {
         Ok(StoreState::default())
     }
 
-    fn create_backup(&self, path: &Path) -> Result<PathBuf, LedgerError> {
+    fn create_backup(&self, path: &Path, note: Option<&str>) -> Result<PathBuf, LedgerError> {
         let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
             return Err(LedgerError::Persistence(format!(
                 "unable to derive ledger name from {}",
                 path.display()
             )));
         };
-        let slug = name.to_string();
+        let slug = canonical_name(name);
         let backup_dir = self.backups_dir_for(&slug);
         fs::create_dir_all(&backup_dir)?;
-        let timestamp = Utc::now().format("%Y-%m-%dT%H-%M-%S");
-        let backup_path = backup_dir.join(format!("{}{}", timestamp, BACKUP_SUFFIX));
+        let timestamp = Utc::now().format(BACKUP_TIMESTAMP_FORMAT).to_string();
+        let mut file_stem = format!("{}_{}", slug, timestamp);
+        if let Some(label) = sanitize_backup_note(note) {
+            file_stem.push('_');
+            file_stem.push_str(&label);
+        }
+        let backup_path = backup_dir.join(format!("{}.{}", file_stem, BACKUP_EXTENSION));
         fs::copy(path, &backup_path)?;
         self.prune_backups(&slug)?;
         Ok(backup_path)
@@ -500,12 +514,71 @@ fn validate_ledger(ledger: &Ledger) -> Vec<String> {
     warnings
 }
 
+fn sanitize_backup_note(note: Option<&str>) -> Option<String> {
+    let raw = note?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let mut sanitized = String::new();
+    let mut last_was_dash = false;
+    for ch in raw.chars() {
+        if ch.is_ascii_alphanumeric() {
+            sanitized.push(ch.to_ascii_lowercase());
+            last_was_dash = false;
+        } else if ch.is_whitespace() || matches!(ch, '-' | '.') {
+            if !sanitized.is_empty() && !last_was_dash {
+                sanitized.push('-');
+                last_was_dash = true;
+            }
+        }
+    }
+    let trimmed = sanitized.trim_matches('-').to_string();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
 fn parse_backup_timestamp(path: &Path) -> Option<DateTime<Utc>> {
-    let stem = path.file_stem()?.to_str()?;
-    let ts = stem.trim_end_matches(".json");
-    NaiveDateTime::parse_from_str(ts, "%Y-%m-%dT%H-%M-%S")
+    let file_name = path.file_name()?.to_str()?;
+    if file_name.ends_with(LEGACY_BACKUP_SUFFIX) {
+        let trimmed = file_name.trim_end_matches(LEGACY_BACKUP_SUFFIX);
+        return parse_legacy_backup_timestamp(trimmed);
+    }
+    if let Some(trimmed) = file_name.strip_suffix(&format!(".{}", BACKUP_EXTENSION)) {
+        if let Some(ts) = parse_structured_backup_timestamp(trimmed) {
+            return Some(ts);
+        }
+        return parse_legacy_backup_timestamp(trimmed);
+    }
+    None
+}
+
+fn parse_structured_backup_timestamp(stem: &str) -> Option<DateTime<Utc>> {
+    let segments: Vec<&str> = stem.split('_').collect();
+    if segments.len() < 3 {
+        return None;
+    }
+    let time_part = segments.last()?;
+    let date_part = segments.get(segments.len() - 2)?;
+    if !is_digit_segment(date_part, 8) || !is_digit_segment(time_part, 4) {
+        return None;
+    }
+    let raw = format!("{}{}", date_part, time_part);
+    NaiveDateTime::parse_from_str(&raw, "%Y%m%d%H%M")
         .ok()
         .map(|naive| DateTime::from_naive_utc_and_offset(naive, Utc))
+}
+
+fn parse_legacy_backup_timestamp(stem: &str) -> Option<DateTime<Utc>> {
+    NaiveDateTime::parse_from_str(stem, "%Y-%m-%dT%H-%M-%S")
+        .ok()
+        .map(|naive| DateTime::from_naive_utc_and_offset(naive, Utc))
+}
+
+fn is_digit_segment(value: &str, len: usize) -> bool {
+    value.len() == len && value.chars().all(|c| c.is_ascii_digit())
 }
 
 #[cfg(test)]

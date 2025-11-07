@@ -90,13 +90,13 @@ Decision rationale:
 Utility helpers house cross-cutting concerns.
 
 - `budget_core::utils::init_tracing` sets up an `EnvFilter`-driven `tracing` subscriber so both CLI and tests get consistent logging.
-- `budget_core::utils::persistence::LedgerStore` (Phase 7) is the single entry point for persistence. Responsibilities:
+- `budget_core::core::ledger_manager::LedgerManager` (Phase 7) is the single entry point for persistence, delegating on-disk work to `utils::persistence::LedgerStore`. Responsibilities:
   - Resolve the base directory (`~/.budget_core` or `BUDGET_CORE_HOME`).
   - Generate canonical filenames (slugified ledger names), temp-file paths, and backup directories.
   - Perform deterministic, pretty JSON serialization (`serde_json::to_string_pretty`) and atomic writes via `<file>.tmp` + `rename`.
   - Run schema migrations by calling `Ledger::migrate_from_schema` and `refresh_recurrence_metadata` on load, recording any warnings.
   - Maintain `state.json` so the CLI can auto-load the previous ledger.
-  - Manage retention-limited backups (`YYYY-MM-DDTHH-MM-SS.json.bak`) and expose `backup_named`, `list_backups`, and `restore_backup` APIs.
+  - Manage retention-limited backups (`<slug>_YYYYMMDD_HHMM[_note].json`) and expose `backup`, `backup_named`, `list_backups`, and `restore_backup` APIs.
   - Manage configuration snapshots (`config_backups/config_<timestamp>.json`) via `create_config_backup`, `list_config_backups`, `load_config_snapshot`, and `save_active_config`. Snapshots always include `schema_version`, `created_at`, `note`, and a strongly typed `config` payload so restores can validate structure before touching the active ledger.
 
 Error handling:
@@ -108,14 +108,14 @@ Error handling:
 
 1. **Save**
    - CLI mutates the in-memory `Ledger`.
-   - `LedgerStore::save_named` or `save_to_path` clones the ledger (immutability ensures we don’t partially mutate state if a write fails), serializes to pretty JSON, writes `<file>.tmp`, and atomically renames to the final path.
-   - If an existing file is being overwritten, a `.json.bak` snapshot is created first and old backups are pruned to respect retention.
+   - `LedgerManager::save` / `save_as` clones the ledger (immutability ensures we don’t partially mutate state if a write fails), serializes to pretty JSON, writes `<file>.tmp`, and atomically renames to the final path via `LedgerStore`.
+  - If an existing file is being overwritten, a timestamped `.json` snapshot is created first and old backups are pruned to respect retention.
    - `schema_version` is updated and `updated_at` re-stamped.
 2. **Load**
-   - `LedgerStore::load_named` reads JSON, deserializes into a `Ledger`, runs migrations, refreshes recurrence metadata, and validates references (issues are surfaced as CLI warnings).
+   - `LedgerManager::load` (or `load_from_path`) reads JSON, deserializes into a `Ledger`, runs migrations, refreshes recurrence metadata, validates references (issues are surfaced as CLI warnings), and stores the current ledger in memory.
    - The CLI records the ledger name/path, resets active simulations, and updates `state.json`.
 3. **Backup / Restore**
-   - `backup-ledger` is an alias for `LedgerStore::backup_named`, giving the user an explicit restore point.
+   - `backup-ledger` is an alias for `LedgerManager::backup`, giving the user an explicit restore point with slugged filenames.
    - `restore-ledger` copies the selected snapshot into place (also backing up the current file for safety) and immediately reloads it so the user sees the resulting warnings/migrations.
 4. **Script mode**
    - Scripted flows (tests or automation) often chain commands such as `new-ledger Demo monthly` / `save-ledger demo`. Because script mode runs non-interactively, all prompts fall back to defaults or require explicit arguments.
@@ -169,7 +169,7 @@ Unknown keys are preserved during round-trips so future schema versions can add 
 | Authoring | Users create ledgers, accounts, categories, and transactions via CLI. Script mode allows fixtures/tests to do the same. | Keeps all state mutations explicit and traceable; no hidden side effects. |
 | Scheduling | Recurrence definitions live inside transactions, and metadata is auto-refreshed. | Embedding the schedule with its template keeps files self-documenting and avoids separate recurrence tables. |
 | Forecasting | For any window, the ledger merges planned, pending, and projected transactions into a `ForecastReport`. | Budget summaries remain deterministic and inspectable without mutating the ledger. |
-| Persistence | Saves always go through `LedgerStore`, ensuring atomic writes + backups + schema versioning. | Prevents corruption and provides a single seam for future storage backends (e.g., SQLite/cloud). |
+| Persistence | Saves always go through `LedgerManager` (and its `LedgerStore` backend), ensuring atomic writes + backups + schema versioning. | Prevents corruption and provides a single seam for future storage backends (e.g., SQLite/cloud). |
 | Recovery | Built-in CLI commands discover backups, restore snapshots, and surface warnings/migrations. | Users don’t need to leave the shell or manually manipulate files to recover from mistakes. |
 
 Key decisions:
@@ -311,9 +311,9 @@ Select a simulation to apply:
    Type cancel or press Esc to abort.
 
 Select a backup to restore:
-   1. home_2025-11-01.json.bak     (Created: 2025-11-01 07:30)
-      /Users/.../BUFY/backups/home/home_2025-11-01.json.bak
-   2. home_2025-10-01.json.bak     (Created: 2025-10-01 07:25)
-      /Users/.../BUFY/backups/home/home_2025-10-01.json.bak
+   1. home_20251101_0730.json      (Created: 2025-11-01 07:30)
+      /Users/.../BUFY/backups/home/home_20251101_0730.json
+   2. home_20251001_0725.json      (Created: 2025-10-01 07:25)
+      /Users/.../BUFY/backups/home/home_20251001_0725.json
    Type cancel or press Esc to abort.
 ```

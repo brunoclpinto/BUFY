@@ -71,10 +71,10 @@ fn atomic_save_failure_preserves_original_file() {
             info.path
                 .file_name()
                 .and_then(|name| name.to_str())
-                .map(|name| name.ends_with(".json.bak"))
+                .map(|name| name.starts_with("reliable_ledger_") && name.ends_with(".json"))
                 .unwrap_or(false)
         }),
-        "backup filename should retain .json.bak suffix"
+        "backup filename should include the ledger slug and use the .json extension"
     );
 
     let _ = fs::remove_dir_all(&tmp_path);

@@ -56,7 +56,7 @@ For architectural background see `docs/design_overview.md`.
 | Area | Commands | Notes |
 | --- | --- | --- |
 | Ledger lifecycle | `new-ledger`, `load [path]`, `save [path]`, `load-ledger <name>`, `save-ledger [name]` | Named saves use the managed store; path-based commands operate on arbitrary JSON files. |
-| Persistence tooling | `backup-ledger [name]`, `list-backups [name]`, `restore-ledger <idx|pattern> [name]` | Snapshots live under `~/.budget_core/backups/<name>/YYYY-MM-DDTHH-MM-SS.json.bak`. |
+| Persistence tooling | `backup-ledger [name]`, `list-backups [name]`, `restore-ledger <idx|pattern> [name]` | Snapshots live under `~/.budget_core/backups/<slug>/<slug>_YYYYMMDD_HHMM[_note].json`. |
 | Currency & locale | `config [show|base-currency|locale|negative-style|screen-reader|high-contrast|valuation]` | Persisted per-ledger settings for currency display, locale defaults, valuation policies, and accessibility. |
 | Data entry | `transaction add/edit/remove/show/complete`, `add account`, `add category`, `add transaction`, `list [accounts|categories|transactions]` | Transaction list output shows recurrence hints (`[recurring]`, `[instance]`). |
 | Backups & selection | `config backup [--note <text>]`, `config backups`, `config restore <backup?>`, `restore-ledger <backup?>`, `simulation apply/discard/enter <name?>` | Omit the identifier to open an interactive list (two-space numbered rows, `Type cancel` prompt); success messages echo the chosen item and timestamp. |
@@ -90,7 +90,7 @@ Recurrence state is persisted with the ledger JSON so restarting the CLI preserv
 
 ## Persistence & Backups
 
-Phase 7 introduces a fully managed JSON store rooted at `~/.budget_core` (override with `BUDGET_CORE_HOME`). Each ledger is saved as `<name>.json`, accompanied by a rotating set of timestamped backups under `backups/<name>/YYYY-MM-DDTHH-MM-SS.json.bak`.
+Phase 7 introduces a fully managed JSON store rooted at `~/.budget_core` (override with `BUDGET_CORE_HOME`). Each ledger is saved as `<slug>.json`, accompanied by rotating backups named `<slug>_YYYYMMDD_HHMM[_note].json` under `backups/<slug>/`.
 
 - `save-ledger [name]` writes the in-memory ledger using atomic temp-file swaps and records the name for future quick saves.
 - `load-ledger <name>` retrieves a named ledger while validating schema versions, rebuilding recurrence metadata, and surfacing any migration warnings.
@@ -108,7 +108,7 @@ Additional architectural notes are captured in `docs/design_overview.md`.
 ├── demo.json                 # canonical ledger save
 ├── backups/
 │   └── demo/
-│       ├── 2025-10-26T08-20-00.json.bak
+│       ├── home_20251026_0820.json
 │       └── …
 └── state.json                # remembers the last opened ledger
 ```

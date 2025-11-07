@@ -55,7 +55,7 @@ experience accessible on any terminal.
 ## Backups & Persistence
 
 - **Ledger backups**: created automatically before every save at
-  `~/.budget_core/backups/<ledger-name>/YYYY-MM-DDTHH-MM-SS.json.bak`.
+  `~/.budget_core/backups/<slug>/<slug>_YYYYMMDD_HHMM[_note].json`.
 - **Config backups**: create snapshots with `config backup [--note <text>]` and
   list them via `config backups`.
 - **Restore workflows**:

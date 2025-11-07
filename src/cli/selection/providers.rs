@@ -2,8 +2,9 @@ use std::path::PathBuf;
 
 use crate::{
     cli::selectors::{SelectionItem, SelectionProvider},
+    core::ledger_manager::LedgerManager,
     ledger::{Account, Category, Ledger, Simulation, Transaction},
-    utils::persistence::{BackupInfo, LedgerStore},
+    utils::persistence::BackupInfo,
 };
 use chrono::Local;
 
@@ -130,12 +131,12 @@ impl<'a> SelectionProvider for SimulationSelectionProvider<'a> {
 
 pub struct LedgerBackupSelectionProvider<'a> {
     state: &'a CliState,
-    store: &'a LedgerStore,
+    manager: &'a LedgerManager,
 }
 
 impl<'a> LedgerBackupSelectionProvider<'a> {
-    pub fn new(state: &'a CliState, store: &'a LedgerStore) -> Self {
-        Self { state, store }
+    pub fn new(state: &'a CliState, manager: &'a LedgerManager) -> Self {
+        Self { state, manager }
     }
 }
 
@@ -149,7 +150,7 @@ impl<'a> SelectionProvider for LedgerBackupSelectionProvider<'a> {
             .ledger_name()
             .ok_or(ProviderError::MissingLedger)?;
         let backups = self
-            .store
+            .manager
             .list_backups(name)
             .map_err(|err| ProviderError::Store(err.to_string()))?;
         Ok(backups.into_iter().map(backup_item).collect())
@@ -157,12 +158,12 @@ impl<'a> SelectionProvider for LedgerBackupSelectionProvider<'a> {
 }
 
 pub struct ConfigBackupSelectionProvider<'a> {
-    store: &'a LedgerStore,
+    manager: &'a LedgerManager,
 }
 
 impl<'a> ConfigBackupSelectionProvider<'a> {
-    pub fn new(store: &'a LedgerStore) -> Self {
-        Self { store }
+    pub fn new(manager: &'a LedgerManager) -> Self {
+        Self { manager }
     }
 }
 
@@ -172,7 +173,7 @@ impl<'a> SelectionProvider for ConfigBackupSelectionProvider<'a> {
 
     fn items(&mut self) -> Result<Vec<SelectionItem<Self::Id>>, Self::Error> {
         let backups = self
-            .store
+            .manager
             .list_config_backups()
             .map_err(|err| ProviderError::Store(err.to_string()))?;
         Ok(backups
