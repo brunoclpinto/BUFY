@@ -13,6 +13,7 @@ use strsim::levenshtein;
 use uuid::Uuid;
 
 use crate::{
+    core::services::{AccountService, CategoryService, ServiceError},
     currency::{format_currency_value, format_date},
     errors::LedgerError,
     ledger::{
@@ -280,6 +281,25 @@ impl ShellContext {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn process_line(&mut self, line: &str) -> Result<LoopControl, CommandError> {
+        let tokens = match crate::cli::shell::parse_command_line(line) {
+            Ok(tokens) => tokens,
+            Err(err) => {
+                self.print_warning(&err.to_string());
+                return Ok(LoopControl::Continue);
+            }
+        };
+
+        if tokens.is_empty() {
+            return Ok(LoopControl::Continue);
+        }
+
+        let command = tokens[0].to_lowercase();
+        let args: Vec<&str> = tokens.iter().skip(1).map(String::as_str).collect();
+        self.dispatch(&command, &tokens[0], &args)
+    }
+
     pub(crate) fn suggest_command(&self, input: &str) {
         output_warning(format!(
             "Unknown command `{}`. Type `help` to see available commands.",
@@ -525,29 +545,23 @@ impl ShellContext {
     }
 
     fn apply_account_form(&mut self, data: AccountFormData) -> CommandResult {
+        let ledger = self.current_ledger_mut()?;
         match data.id {
             Some(id) => {
-                let ledger = self.current_ledger_mut()?;
-                let updated_name = {
-                    let account = ledger.account_mut(id).ok_or_else(|| {
-                        CommandError::InvalidArguments("Account not found".into())
-                    })?;
-                    account.name = data.name.clone();
-                    account.kind = data.kind;
-                    account.category_id = data.category_id;
-                    account.opening_balance = data.opening_balance;
-                    account.notes = data.notes;
-                    account.name.clone()
-                };
-                ledger.touch();
-                output_success(format!("Account `{}` updated.", updated_name));
+                let mut changes = Account::new(data.name.clone(), data.kind);
+                changes.id = id;
+                changes.category_id = data.category_id;
+                changes.opening_balance = data.opening_balance;
+                changes.notes = data.notes.clone();
+                AccountService::edit(ledger, id, changes)?;
+                output_success(format!("Account `{}` updated.", data.name));
             }
             None => {
                 let mut account = Account::new(data.name.clone(), data.kind);
                 account.category_id = data.category_id;
                 account.opening_balance = data.opening_balance;
-                account.notes = data.notes;
-                self.current_ledger_mut()?.add_account(account);
+                account.notes = data.notes.clone();
+                AccountService::add(ledger, account)?;
                 output_success(format!("Account `{}` added.", data.name));
             }
         }
@@ -555,29 +569,23 @@ impl ShellContext {
     }
 
     fn apply_category_form(&mut self, data: CategoryFormData) -> CommandResult {
+        let ledger = self.current_ledger_mut()?;
         match data.id {
             Some(id) => {
-                let ledger = self.current_ledger_mut()?;
-                let updated_name = {
-                    let category = ledger.category_mut(id).ok_or_else(|| {
-                        CommandError::InvalidArguments("Category not found".into())
-                    })?;
-                    category.name = data.name.clone();
-                    category.kind = data.kind;
-                    category.parent_id = data.parent_id;
-                    category.is_custom = data.is_custom;
-                    category.notes = data.notes;
-                    category.name.clone()
-                };
-                ledger.touch();
-                output_success(format!("Category `{}` updated.", updated_name));
+                let mut changes = Category::new(data.name.clone(), data.kind);
+                changes.id = id;
+                changes.parent_id = data.parent_id;
+                changes.is_custom = data.is_custom;
+                changes.notes = data.notes.clone();
+                CategoryService::edit(ledger, id, changes)?;
+                output_success(format!("Category `{}` updated.", data.name));
             }
             None => {
                 let mut category = Category::new(data.name.clone(), data.kind);
                 category.parent_id = data.parent_id;
                 category.is_custom = data.is_custom;
-                category.notes = data.notes;
-                self.current_ledger_mut()?.add_category(category);
+                category.notes = data.notes.clone();
+                CategoryService::add(ledger, category)?;
                 output_success(format!("Category `{}` added.", data.name));
             }
         }
@@ -3059,6 +3067,15 @@ pub enum CommandError {
     Dialoguer(#[from] dialoguer::Error),
     #[error("exit requested")]
     ExitRequested,
+}
+
+impl From<ServiceError> for CommandError {
+    fn from(err: ServiceError) -> Self {
+        match err {
+            ServiceError::Ledger(err) => CommandError::Ledger(err),
+            ServiceError::Invalid(message) => CommandError::InvalidArguments(message),
+        }
+    }
 }
 
 impl CommandError {

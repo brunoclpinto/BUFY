@@ -19,3 +19,6 @@ pub enum ServiceError {
     #[error("{0}")]
     Invalid(String),
 }
+
+#[cfg(test)]
+mod tests;

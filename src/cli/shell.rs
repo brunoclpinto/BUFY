@@ -1,4 +1,4 @@
-use std::io::{self, BufRead};
+use std::{fmt, io::{self, BufRead}};
 
 use rustyline::{error::ReadlineError, DefaultEditor};
 use shell_words::split;
@@ -98,6 +98,13 @@ pub(crate) fn parse_command_line(input: &str) -> Result<Vec<String>, ParseError>
     })
 }
 
+#[derive(Debug)]
 pub(crate) struct ParseError {
     message: String,
+}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.message)
+    }
 }
