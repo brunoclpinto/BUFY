@@ -13,7 +13,9 @@ use strsim::levenshtein;
 use uuid::Uuid;
 
 use crate::{
-    core::services::{AccountService, CategoryService, ServiceError, TransactionService},
+    core::services::{
+        AccountService, CategoryService, ServiceError, SummaryService, TransactionService,
+    },
     currency::{format_currency_value, format_date},
     errors::LedgerError,
     ledger::{
@@ -2035,14 +2037,13 @@ impl ShellContext {
         let (window, scope) = self.resolve_summary_window(ledger, remainder, today)?;
 
         if let Some(name) = simulation_name {
-            let impact = ledger
-                .summarize_simulation_in_window(name, window, scope)
-                .map_err(CommandError::from_ledger)?;
+            let impact = SummaryService::summarize_simulation(ledger, name, window, scope)
+                .map_err(CommandError::from)?;
             self.print_simulation_impact(ledger, &impact);
             return Ok(());
         }
 
-        let summary = ledger.summarize_window_scope(window, scope);
+        let summary = SummaryService::summarize_window(ledger, window, scope);
         self.print_budget_summary(ledger, &summary);
         Ok(())
     }

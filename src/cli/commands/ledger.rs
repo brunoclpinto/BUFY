@@ -6,6 +6,7 @@ use dialoguer::{Input, Select};
 use super::CommandDefinition;
 use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
 use crate::cli::io;
+use crate::core::services::SummaryService;
 
 pub(crate) fn definitions() -> Vec<CommandDefinition> {
     vec![
@@ -249,9 +250,8 @@ fn cmd_forecast(context: &mut ShellContext, args: &[&str]) -> CommandResult {
         (None, args)
     };
     let window = context.resolve_forecast_window(remainder, today)?;
-    let report = ledger
-        .forecast_window_report(window, today, simulation)
-        .map_err(CommandError::from_ledger)?;
+    let report = SummaryService::forecast_window(ledger, window, today, simulation)
+        .map_err(CommandError::from)?;
     context.print_forecast_report(ledger, simulation, &report);
     Ok(())
 }
