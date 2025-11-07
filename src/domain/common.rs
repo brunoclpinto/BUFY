@@ -1,4 +1,7 @@
-use uuid::Uuid;
+pub use chrono::NaiveDate;
+pub use serde::{Deserialize, Serialize};
+use thiserror::Error;
+pub use uuid::Uuid;
 
 /// Identifies entities that expose a stable unique identifier.
 pub trait Identifiable {
@@ -15,7 +18,16 @@ pub trait Displayable {
     fn display_label(&self) -> String;
 }
 
-// Re-export common dependencies so consumers can rely on this module as a façade.
+// Placeholder error type hook for future validation rules.
+#[derive(Debug, Error)]
+pub enum DomainError {
+    #[error("invalid input: {0}")]
+    InvalidInput(String),
+}
+
+pub type DomainResult<T> = Result<T, DomainError>;
+
+// Re-export chrono/serde so downstream modules can import from a single place.
 pub use chrono;
 pub use serde;
 pub use uuid;
