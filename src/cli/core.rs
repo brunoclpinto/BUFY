@@ -13,7 +13,7 @@ use strsim::levenshtein;
 use uuid::Uuid;
 
 use crate::{
-    core::services::{AccountService, CategoryService, ServiceError},
+    core::services::{AccountService, CategoryService, ServiceError, TransactionService},
     currency::{format_currency_value, format_date},
     errors::LedgerError,
     ledger::{
@@ -661,7 +661,7 @@ impl ShellContext {
         } else {
             let id = {
                 let ledger = self.current_ledger_mut()?;
-                ledger.add_transaction(transaction)
+                TransactionService::add(ledger, transaction)?
             };
             let summary = {
                 let ledger = self.current_ledger()?;
@@ -681,12 +681,9 @@ impl ShellContext {
         })?;
         {
             let ledger = self.current_ledger_mut()?;
-            let transaction = ledger
-                .transaction_mut(txn_id)
-                .ok_or_else(|| CommandError::InvalidArguments("Transaction not found".into()))?;
-            Self::populate_transaction_from_form(transaction, &data);
-            ledger.refresh_recurrence_metadata();
-            ledger.touch();
+            TransactionService::update(ledger, txn_id, |transaction| {
+                Self::populate_transaction_from_form(transaction, &data);
+            })?;
         }
         let summary = {
             let ledger = self.current_ledger()?;
@@ -700,19 +697,17 @@ impl ShellContext {
     }
 
     fn remove_transaction_by_index(&mut self, index: usize) -> CommandResult {
-        let (transaction, summary) = {
+        let (transaction_id, summary) = {
             let ledger = self.current_ledger()?;
             let txn = ledger.transactions.get(index).ok_or_else(|| {
                 CommandError::InvalidArguments("transaction index out of range".into())
             })?;
             let summary = self.transaction_summary_line(ledger, txn);
-            (txn.clone(), summary)
+            (txn.id, summary)
         };
-        let ledger = self.current_ledger_mut()?;
-        if ledger.remove_transaction(transaction.id).is_none() {
-            return Err(CommandError::InvalidArguments(
-                "transaction index out of range".into(),
-            ));
+        {
+            let ledger = self.current_ledger_mut()?;
+            TransactionService::remove(ledger, transaction_id)?;
         }
         output_success(format!("Transaction removed: {}", summary));
         Ok(())
@@ -1572,7 +1567,7 @@ impl ShellContext {
         } else {
             let id = {
                 let ledger = self.current_ledger_mut()?;
-                ledger.add_transaction(transaction)
+                TransactionService::add(ledger, transaction)?
             };
             let summary = {
                 let ledger = self.current_ledger()?;
@@ -1793,13 +1788,20 @@ impl ShellContext {
             return Err(CommandError::InvalidArguments(usage.into()));
         };
 
-        let ledger = self.current_ledger_mut()?;
-        let txn = ledger.transactions.get_mut(idx).ok_or_else(|| {
-            CommandError::InvalidArguments("transaction index out of range".into())
-        })?;
-        txn.mark_completed(actual_date, amount);
-        ledger.refresh_recurrence_metadata();
-        ledger.touch();
+        let txn_id = {
+            let ledger = self.current_ledger()?;
+            let txn = ledger.transactions.get(idx).ok_or_else(|| {
+                CommandError::InvalidArguments("transaction index out of range".into())
+            })?;
+            txn.id
+        };
+
+        {
+            let ledger = self.current_ledger_mut()?;
+            TransactionService::update(ledger, txn_id, |txn| {
+                txn.mark_completed(actual_date, amount);
+            })?;
+        }
         output_success(format!("Transaction {} marked completed", idx));
         Ok(())
     }

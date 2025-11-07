@@ -1,4 +1,7 @@
-use std::{fmt, io::{self, BufRead}};
+use std::{
+    fmt,
+    io::{self, BufRead},
+};
 
 use rustyline::{error::ReadlineError, DefaultEditor};
 use shell_words::split;
