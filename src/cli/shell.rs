@@ -28,6 +28,9 @@ fn run_interactive(context: &mut ShellContext) -> Result<(), CliError> {
     let mut editor = DefaultEditor::new()?;
 
     loop {
+        if !context.running {
+            break;
+        }
         let prompt = context.prompt();
         let line = editor.readline(&prompt);
 
@@ -65,6 +68,9 @@ fn run_interactive(context: &mut ShellContext) -> Result<(), CliError> {
 fn run_script(context: &mut ShellContext) -> Result<(), CliError> {
     let stdin = io::stdin();
     for line in stdin.lock().lines() {
+        if !context.running {
+            break;
+        }
         let line = line?;
         match handle_line(context, &line) {
             Ok(LoopControl::Continue) => {}
@@ -92,7 +98,15 @@ fn handle_line(context: &mut ShellContext, line: &str) -> Result<LoopControl, Co
     let command = raw.to_lowercase();
     let args: Vec<&str> = tokens.iter().skip(1).map(String::as_str).collect();
 
-    context.dispatch(&command, raw, &args)
+    context.last_command = Some(line.trim().to_string());
+
+    match context.dispatch(&command, raw, &args) {
+        Ok(LoopControl::Exit) => {
+            context.running = false;
+            Ok(LoopControl::Exit)
+        }
+        other => other,
+    }
 }
 
 pub(crate) fn parse_command_line(input: &str) -> Result<Vec<String>, ParseError> {

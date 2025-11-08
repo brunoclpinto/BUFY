@@ -15,7 +15,7 @@ higher-level `docs/design_overview.md` background document.
         |                         |
         v                         v
 +-------------------+     +------------------+
-| cli::state        |<-->--| cli::output     |
+| cli::shell_context|<-->--| cli::output     |
 |  - active ledger  |     |  - formatting    |
 |  - config prefs   |     |  - accessibility |
 +-------------------+     +------------------+
@@ -36,7 +36,7 @@ higher-level `docs/design_overview.md` background document.
 ```
 
 The shell orchestrates command execution through the registry. Each handler
-uses `CliState` to access the current ledger and configuration, delegating UI
+uses `ShellContext` to access the current ledger and configuration, delegating UI
 responsibilities to the output, forms, and selection modules. Persistence is
 isolated in `utils::persistence`, ensuring atomic save/restore semantics.
 

@@ -16,7 +16,7 @@ current CLI implementation.
    cancelled the prompt. Command handlers can react uniformly regardless of the
    underlying domain.
 3. **`SelectionProvider`** – domain-specific adapters responsible for gathering
-   items from the current CLI state (`CliState`). Providers exist for accounts,
+   items from the current CLI state (`ShellContext`). Providers exist for accounts,
    categories, transactions, simulations, ledger backups, and configuration
    backups. Each provider returns domain-appropriate ids (e.g. list indices for
    ledger collections, `PathBuf` for backup files) while reusing the shared

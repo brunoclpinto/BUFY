@@ -210,11 +210,11 @@ The CLI is now split into focused modules so future interactive features can plu
 
 - `cli::shell` – owns the REPL loop, command parsing, history management, and shared state wiring. It delegates work via a command registry.
 - `cli::commands` – declares `CommandDefinition` metadata (name, description, usage) and the registry that maps identifiers to handler functions.
-- `cli::state` – central storage for loaded ledger, persistence metadata, and active simulation context.
+- `cli::shell_context` – central `ShellContext` that tracks the loaded ledger, persistence metadata, configuration, and active simulation context.
 - `cli::output` – unified helpers for info/warning/error/success messaging so future selectors/forms can render consistently.
 - `cli::selectors` – shared data contracts (`SelectionItem`, `SelectionOutcome`, `SelectionProvider`).
 - `cli::selection` – manager + providers that surface auto-selection lists when commands are missing identifiers. Providers cover accounts, categories, transactions, simulations, and backups; the manager uses Dialoguer by default and supports scripted/test overrides.
-- `cli::forms` – reusable wizard engine (Phase 14). Entities describe their fields via `FieldDescriptor`s, validators, and defaults sourced from `CliState`. The shared `FormEngine` handles prompting, navigation (`back`/`help`/`cancel`), immediate validation feedback, and final confirmation before returning structured results to the caller.
+- `cli::forms` – reusable wizard engine (Phase 14). Entities describe their fields via `FieldDescriptor`s, validators, and defaults sourced from `ShellContext`. The shared `FormEngine` handles prompting, navigation (`back`/`help`/`cancel`), immediate validation feedback, and final confirmation before returning structured results to the caller.
 
 Command handlers still live alongside the shell for now, but they interact with the registry/state/output instead of writing directly to stdout or poking global variables. Script mode continues to use the same entry point (`run_cli`) and benefits from the new modular boundary.
 

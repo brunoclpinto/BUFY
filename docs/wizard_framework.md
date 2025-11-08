@@ -19,7 +19,7 @@ navigation, and confirmation.
 - `FormDescriptor` – ordered collection of `FieldDescriptor`s that describe the
   entire wizard.
 - `FormFlow` – trait implemented by each form; supplies a descriptor, default
-  values derived from `CliState`/domain data, and transforms collected values
+  values derived from `ShellContext`/domain data, and transforms collected values
   into a concrete output type.
 - `FormEngine` – drives a `FormFlow` using a `FormInteraction` implementation
   (the CLI will provide one backed by `dialoguer` and the central output
@@ -65,7 +65,7 @@ navigation, and confirmation.
   String>>)`, allowing complex domain validation while still integrating with
   the shared error messaging.
 - Defaults are supplied through `FormFlow::defaults()`, typically by looking up
-  values in `CliState` or other domain structures. Defaults appear in prompts
+  values in `ShellContext` or other domain structures. Defaults appear in prompts
   and are applied when the user presses Enter without typing a value.
 
 ## Control Commands

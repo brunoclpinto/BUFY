@@ -6,6 +6,6 @@ pub mod output;
 pub mod selection;
 pub mod selectors;
 pub mod shell;
-pub mod state;
+pub mod shell_context;
 
 pub use shell::run_cli;

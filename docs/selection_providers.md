@@ -18,7 +18,7 @@ knowing domain details.
 
 All providers share the following conventions:
 
-- **Fresh data** – providers read directly from `CliState` on each invocation so
+- **Fresh data** – providers read directly from `ShellContext` on each invocation so
   transient CLI mutations are immediately reflected in the prompt.
 - **Deterministic ordering** – `enumerate()` is used for ledger collections so
   indices are stable and match what list commands display.

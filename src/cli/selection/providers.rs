@@ -1,12 +1,10 @@
 use crate::{
     cli::selectors::{SelectionItem, SelectionProvider},
+    cli::shell_context::ShellContext,
     config::ConfigManager,
-    core::ledger_manager::LedgerManager,
     ledger::{Account, Category, Ledger, Simulation, Transaction},
 };
 use chrono::{DateTime, Local, NaiveDateTime, Utc};
-
-use crate::cli::state::CliState;
 
 #[derive(Debug)]
 pub enum ProviderError {
@@ -21,12 +19,12 @@ impl From<std::io::Error> for ProviderError {
 }
 
 pub struct AccountSelectionProvider<'a> {
-    state: &'a CliState,
+    context: &'a ShellContext,
 }
 
 impl<'a> AccountSelectionProvider<'a> {
-    pub fn new(state: &'a CliState) -> Self {
-        Self { state }
+    pub fn new(context: &'a ShellContext) -> Self {
+        Self { context }
     }
 }
 
@@ -36,8 +34,8 @@ impl<'a> SelectionProvider for AccountSelectionProvider<'a> {
 
     fn items(&mut self) -> Result<Vec<SelectionItem<Self::Id>>, Self::Error> {
         let ledger = self
-            .state
-            .ledger_ref()
+            .context
+            .current_ledger_opt()
             .ok_or(ProviderError::MissingLedger)?;
         Ok(ledger
             .accounts
@@ -49,12 +47,12 @@ impl<'a> SelectionProvider for AccountSelectionProvider<'a> {
 }
 
 pub struct CategorySelectionProvider<'a> {
-    state: &'a CliState,
+    context: &'a ShellContext,
 }
 
 impl<'a> CategorySelectionProvider<'a> {
-    pub fn new(state: &'a CliState) -> Self {
-        Self { state }
+    pub fn new(context: &'a ShellContext) -> Self {
+        Self { context }
     }
 }
 
@@ -64,8 +62,8 @@ impl<'a> SelectionProvider for CategorySelectionProvider<'a> {
 
     fn items(&mut self) -> Result<Vec<SelectionItem<Self::Id>>, Self::Error> {
         let ledger = self
-            .state
-            .ledger_ref()
+            .context
+            .current_ledger_opt()
             .ok_or(ProviderError::MissingLedger)?;
         Ok(ledger
             .categories
@@ -77,12 +75,12 @@ impl<'a> SelectionProvider for CategorySelectionProvider<'a> {
 }
 
 pub struct TransactionSelectionProvider<'a> {
-    state: &'a CliState,
+    context: &'a ShellContext,
 }
 
 impl<'a> TransactionSelectionProvider<'a> {
-    pub fn new(state: &'a CliState) -> Self {
-        Self { state }
+    pub fn new(context: &'a ShellContext) -> Self {
+        Self { context }
     }
 }
 
@@ -92,8 +90,8 @@ impl<'a> SelectionProvider for TransactionSelectionProvider<'a> {
 
     fn items(&mut self) -> Result<Vec<SelectionItem<Self::Id>>, Self::Error> {
         let ledger = self
-            .state
-            .ledger_ref()
+            .context
+            .current_ledger_opt()
             .ok_or(ProviderError::MissingLedger)?;
         Ok(ledger
             .transactions
@@ -105,12 +103,12 @@ impl<'a> SelectionProvider for TransactionSelectionProvider<'a> {
 }
 
 pub struct SimulationSelectionProvider<'a> {
-    state: &'a CliState,
+    context: &'a ShellContext,
 }
 
 impl<'a> SimulationSelectionProvider<'a> {
-    pub fn new(state: &'a CliState) -> Self {
-        Self { state }
+    pub fn new(context: &'a ShellContext) -> Self {
+        Self { context }
     }
 }
 
@@ -120,21 +118,20 @@ impl<'a> SelectionProvider for SimulationSelectionProvider<'a> {
 
     fn items(&mut self) -> Result<Vec<SelectionItem<Self::Id>>, Self::Error> {
         let ledger = self
-            .state
-            .ledger_ref()
+            .context
+            .current_ledger_opt()
             .ok_or(ProviderError::MissingLedger)?;
         Ok(ledger.simulations().iter().map(simulation_item).collect())
     }
 }
 
 pub struct LedgerBackupSelectionProvider<'a> {
-    state: &'a CliState,
-    manager: &'a LedgerManager,
+    context: &'a ShellContext,
 }
 
 impl<'a> LedgerBackupSelectionProvider<'a> {
-    pub fn new(state: &'a CliState, manager: &'a LedgerManager) -> Self {
-        Self { state, manager }
+    pub fn new(context: &'a ShellContext) -> Self {
+        Self { context }
     }
 }
 
@@ -144,11 +141,12 @@ impl<'a> SelectionProvider for LedgerBackupSelectionProvider<'a> {
 
     fn items(&mut self) -> Result<Vec<SelectionItem<Self::Id>>, Self::Error> {
         let name = self
-            .state
+            .context
             .ledger_name()
             .ok_or(ProviderError::MissingLedger)?;
         let backups = self
-            .manager
+            .context
+            .manager()
             .list_backups(name)
             .map_err(|err| ProviderError::Store(err.to_string()))?;
         Ok(backups
