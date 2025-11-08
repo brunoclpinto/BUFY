@@ -1,13 +1,13 @@
 use std::cmp::Ordering;
 
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
     core::errors::BudgetError,
     currency::{policy_date, ValuationPolicy},
-    domain::transaction::{TimeInterval, Transaction},
+    domain::transaction::TimeInterval,
 };
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -158,72 +158,5 @@ pub struct ConversionContext {
 impl ConversionContext {
     pub fn effective_date(&self, txn_date: NaiveDate) -> NaiveDate {
         policy_date(&self.policy, txn_date, self.report_date)
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SimulationBudgetImpact {
-    pub simulation_name: String,
-    pub base: BudgetSummary,
-    pub simulated: BudgetSummary,
-    pub delta: BudgetTotalsDelta,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Simulation {
-    pub name: String,
-    pub notes: Option<String>,
-    pub status: SimulationStatus,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    #[serde(default)]
-    pub applied_at: Option<DateTime<Utc>>,
-    #[serde(default)]
-    pub changes: Vec<SimulationChange>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum SimulationStatus {
-    Pending,
-    Applied,
-    Discarded,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum SimulationChange {
-    AddTransaction { transaction: Transaction },
-    ModifyTransaction(SimulationTransactionPatch),
-    ExcludeTransaction { transaction_id: Uuid },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SimulationTransactionPatch {
-    pub transaction_id: Uuid,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub from_account: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub to_account: Option<Uuid>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub category_id: Option<Option<Uuid>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub scheduled_date: Option<NaiveDate>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub actual_date: Option<Option<NaiveDate>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub budgeted_amount: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub actual_amount: Option<Option<f64>>,
-}
-
-impl SimulationTransactionPatch {
-    pub fn has_effect(&self) -> bool {
-        self.from_account.is_some()
-            || self.to_account.is_some()
-            || self.category_id.is_some()
-            || self.scheduled_date.is_some()
-            || self.actual_date.is_some()
-            || self.budgeted_amount.is_some()
-            || self.actual_amount.is_some()
     }
 }

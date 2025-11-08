@@ -34,7 +34,7 @@ Simulations are modeled as change sets on top of a ledger snapshot:
 
 - `Simulation` captures metadata (name, notes, timestamps, status).
 - `SimulationChange` enumerates add/modify/exclude operations.
-- `ledger::Ledger::transactions_with_simulation` materializes an “overlay” list to feed budgeting/reporting APIs, while `apply_simulation` rewrites the canonical ledger when the user commits the plan.
+- `core::simulation::SimulationEngine::run` materializes an overlay ledger used by forecasting/reporting APIs, while `SimulationEngine::apply` rewrites the canonical ledger when the user commits the plan.
 
 Design trade-offs:
 

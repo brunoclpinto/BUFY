@@ -3196,6 +3196,7 @@ mod tests {
 
         let now = Utc::now();
         ledger.simulations.push(Simulation {
+            id: Uuid::new_v4(),
             name: "Scenario".into(),
             notes: None,
             status: SimulationStatus::Pending,

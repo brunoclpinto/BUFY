@@ -9,13 +9,16 @@ pub mod recurring;
 pub mod time_interval;
 pub mod transaction;
 
+pub use crate::core::simulation::types::{
+    Simulation, SimulationBudgetImpact, SimulationChange, SimulationStatus,
+    SimulationTransactionPatch,
+};
 pub use account::{Account, AccountKind};
 pub use budget::Budget;
 pub use category::{Category, CategoryKind};
 pub use ledger::{
     AccountBudget, BudgetPeriod, BudgetScope, BudgetStatus, BudgetSummary, BudgetTotals,
-    DateWindow, ForecastReport, Ledger, Simulation, SimulationBudgetImpact, SimulationChange,
-    SimulationStatus, SimulationTransactionPatch,
+    BudgetTotalsDelta, DateWindow, ForecastReport, Ledger,
 };
 pub use recurring::{
     ForecastResult, ForecastTotals, ForecastTransaction, RecurrenceSnapshot, ScheduledStatus,

@@ -5,8 +5,7 @@ use uuid::Uuid;
 
 pub use crate::domain::ledger::{
     AccountBudget, BudgetScope, BudgetStatus, BudgetSummary, BudgetTotals, BudgetTotalsDelta,
-    CategoryBudget, ConversionContext, DateWindow, Simulation, SimulationBudgetImpact,
-    SimulationChange, SimulationStatus, SimulationTransactionPatch,
+    CategoryBudget, ConversionContext, DateWindow,
 };
 
 #[derive(Debug, Clone)]
@@ -26,7 +25,16 @@ use super::{
     transaction::Transaction,
 };
 use crate::{
-    core::errors::BudgetError,
+    core::{
+        errors::BudgetError,
+        simulation::{
+            engine::SimulationEngine,
+            types::{
+                Simulation, SimulationBudgetImpact, SimulationChange, SimulationStatus,
+                SimulationTransactionPatch,
+            },
+        },
+    },
     currency::{ConvertedAmount, CurrencyCode, FormatOptions, LocaleConfig, ValuationPolicy},
 };
 
@@ -298,6 +306,7 @@ impl Ledger {
         }
         let now = Utc::now();
         let simulation = Simulation {
+            id: Uuid::new_v4(),
             name,
             notes,
             status: SimulationStatus::Pending,
@@ -383,7 +392,7 @@ impl Ledger {
             let sim = self.simulation(name).ok_or_else(|| {
                 BudgetError::InvalidReference(format!("simulation `{}` not found", name))
             })?;
-            self.transactions_with_simulation(sim)?
+            SimulationEngine::run(self, sim).transactions
         } else {
             self.transactions.clone()
         };
@@ -509,52 +518,9 @@ impl Ledger {
             .ok_or_else(|| {
                 BudgetError::InvalidReference(format!("simulation `{}` not found", sim_name))
             })?;
-        if self.simulations[index].status != SimulationStatus::Pending {
-            return Err(BudgetError::InvalidInput(format!(
-                "simulation `{}` is not pending",
-                sim_name
-            )));
-        }
-
-        let changes = self.simulations[index].changes.clone();
-
-        let mut applied = self.transactions.clone();
-        for change in &changes {
-            match change {
-                SimulationChange::AddTransaction { transaction } => {
-                    applied.push(transaction.clone());
-                }
-                SimulationChange::ModifyTransaction(patch) => {
-                    let txn = applied
-                        .iter_mut()
-                        .find(|t| t.id == patch.transaction_id)
-                        .ok_or_else(|| {
-                            BudgetError::InvalidReference(format!(
-                                "transaction {} not found",
-                                patch.transaction_id
-                            ))
-                        })?;
-                    apply_patch(txn, patch);
-                }
-                SimulationChange::ExcludeTransaction { transaction_id } => {
-                    let before = applied.len();
-                    applied.retain(|t| t.id != *transaction_id);
-                    if before == applied.len() {
-                        return Err(BudgetError::InvalidReference(format!(
-                            "transaction {} not found",
-                            transaction_id
-                        )));
-                    }
-                }
-            }
-        }
-
-        self.transactions = applied;
-        self.refresh_recurrence_metadata();
-        let simulation = &mut self.simulations[index];
-        simulation.status = SimulationStatus::Applied;
-        simulation.applied_at = Some(Utc::now());
-        simulation.updated_at = Utc::now();
+        let mut simulation = self.simulations.remove(index);
+        SimulationEngine::apply(self, &mut simulation)?;
+        self.simulations.insert(index, simulation);
         self.touch();
         Ok(())
     }
@@ -595,9 +561,9 @@ impl Ledger {
                 simulation_name
             )));
         }
-        let simulated_transactions = self.transactions_with_simulation(simulation)?;
+        let simulated_ledger = SimulationEngine::run(self, simulation);
         let base = self.summarize_window(window, scope, None);
-        let simulated = self.summarize_window(window, scope, Some(&simulated_transactions));
+        let simulated = simulated_ledger.summarize_window(window, scope, None);
         let delta = BudgetTotalsDelta {
             budgeted: simulated.totals.budgeted - base.totals.budgeted,
             real: simulated.totals.real - base.totals.real,
@@ -818,43 +784,6 @@ impl Ledger {
         DateWindow { start, end }
     }
 
-    fn transactions_with_simulation(
-        &self,
-        simulation: &Simulation,
-    ) -> Result<Vec<Transaction>, BudgetError> {
-        let mut snapshot = self.transactions.clone();
-        for change in &simulation.changes {
-            match change {
-                SimulationChange::AddTransaction { transaction } => {
-                    snapshot.push(transaction.clone());
-                }
-                SimulationChange::ModifyTransaction(patch) => {
-                    let txn = snapshot
-                        .iter_mut()
-                        .find(|t| t.id == patch.transaction_id)
-                        .ok_or_else(|| {
-                            BudgetError::InvalidReference(format!(
-                                "transaction {} not found for simulation `{}`",
-                                patch.transaction_id, simulation.name
-                            ))
-                        })?;
-                    apply_patch(txn, patch);
-                }
-                SimulationChange::ExcludeTransaction { transaction_id } => {
-                    let before = snapshot.len();
-                    snapshot.retain(|t| t.id != *transaction_id);
-                    if before == snapshot.len() {
-                        return Err(BudgetError::InvalidReference(format!(
-                            "transaction {} not found for simulation `{}`",
-                            transaction_id, simulation.name
-                        )));
-                    }
-                }
-            }
-        }
-        Ok(snapshot)
-    }
-
     fn editable_simulation(&mut self, name: &str) -> Result<&mut Simulation, BudgetError> {
         let sim = self.simulation_mut(name).ok_or_else(|| {
             BudgetError::InvalidReference(format!("simulation `{}` not found", name))
@@ -866,30 +795,6 @@ impl Ledger {
             )));
         }
         Ok(sim)
-    }
-}
-
-fn apply_patch(txn: &mut Transaction, patch: &SimulationTransactionPatch) {
-    if let Some(value) = patch.from_account {
-        txn.from_account = value;
-    }
-    if let Some(value) = patch.to_account {
-        txn.to_account = value;
-    }
-    if let Some(category) = &patch.category_id {
-        txn.category_id = *category;
-    }
-    if let Some(date) = patch.scheduled_date {
-        txn.scheduled_date = date;
-    }
-    if let Some(actual_date) = &patch.actual_date {
-        txn.actual_date = *actual_date;
-    }
-    if let Some(amount) = patch.budgeted_amount {
-        txn.budgeted_amount = amount;
-    }
-    if let Some(actual_amount) = &patch.actual_amount {
-        txn.actual_amount = *actual_amount;
     }
 }
 
