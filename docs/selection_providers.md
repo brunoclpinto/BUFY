@@ -13,7 +13,7 @@ knowing domain details.
 | `CategorySelectionProvider` | `usize` | Category name with kind, optional parent marker in the category field | Parent ids are shown in the `category` field to disambiguate similarly named sub-categories. |
 | `TransactionSelectionProvider` | `usize` | Scheduled date (`YYYY-MM-DD`), budgeted/actual amount in subtitle, recurrence hint in label | Labels call out recurring entries (`• recurring`) to make schedule-driven selections easier. |
 | `SimulationSelectionProvider` | `String` (simulation name) | Simulation name with status subtitle | Names remain the authoritative handle for simulations, matching CLI commands and persistence. |
-| `LedgerBackupSelectionProvider` | `PathBuf` | Backup timestamp (ISO format) with file path in subtitle | Requires an active named ledger; errors bubble through `ProviderError::Store`. |
+| `LedgerBackupSelectionProvider` | `String` (backup file name) | `<slug>_YYYYMMDD_HHMM[_note].json (Created: …)` | Requires an active named ledger; errors bubble through `ProviderError::Store`. |
 | `ConfigBackupSelectionProvider` | `PathBuf` | `<filename> (Created: YYYY-MM-DD HH:MM) [note: …]` | Scans the `config_backups/` directory for `.json` snapshots and surfaces the newest-first list used by `config restore`. |
 
 All providers share the following conventions:
@@ -28,5 +28,5 @@ All providers share the following conventions:
 
 Providers return domain-specific errors through `ProviderError`, which the CLI
 automatically maps into `CommandError`. Missing ledgers trigger "ledger not
-loaded" messages; filesystem failures from `LedgerStore` are passed through so
-the user can act on them.
+loaded" messages; filesystem failures from the storage backend are passed
+through so the user can act on them.

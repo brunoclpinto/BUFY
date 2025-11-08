@@ -3,8 +3,8 @@ use crate::cli::core::{CommandError, CommandResult, ShellContext};
 use crate::cli::io;
 use crate::cli::output::section as output_section;
 use crate::ledger::ledger::CURRENT_SCHEMA_VERSION;
+use crate::storage::CONFIG_BACKUP_SCHEMA_VERSION;
 use crate::utils::build_info;
-use crate::utils::persistence::CONFIG_BACKUP_SCHEMA_VERSION;
 
 pub(crate) fn definitions() -> Vec<CommandDefinition> {
     vec![

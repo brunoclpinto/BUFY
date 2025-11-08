@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use chrono::{Duration, Local, NaiveDate, Utc};
+use chrono::{DateTime, Duration, Local, NaiveDate, NaiveDateTime, Utc};
 use dialoguer::{theme::ColorfulTheme, Confirm, Input, Select};
 use rustyline::error::ReadlineError;
 use strsim::levenshtein;
@@ -26,7 +26,7 @@ use crate::{
         SimulationBudgetImpact, SimulationChange, SimulationTransactionPatch, TimeInterval,
         TimeUnit, Transaction, TransactionStatus,
     },
-    utils::persistence::{ConfigData, ConfigSnapshot, LedgerStore},
+    storage::json_backend::{ConfigData, ConfigSnapshot, JsonStorage},
 };
 
 use crate::cli::forms::{
@@ -97,6 +97,7 @@ pub struct ShellContext {
     registry: CommandRegistry,
     state: CliState,
     theme: ColorfulTheme,
+    storage: JsonStorage,
     selection_override: Option<SelectionOverride>,
 }
 
@@ -108,7 +109,7 @@ impl ShellContext {
         if self.state.ledger_ref().is_some() {
             return Ok(());
         }
-        let last = match self.manager().last_opened() {
+        let last = match self.storage.last_ledger() {
             Ok(value) => value,
             Err(err) => {
                 tracing::warn!("last ledger lookup failed: {err}");
@@ -119,6 +120,8 @@ impl ShellContext {
             return Ok(());
         };
         if let Ok(report) = self.manager_mut().load(&name) {
+            let path = self.storage.ledger_path(&name);
+            self.state.set_path(Some(path));
             self.state.set_active_simulation(None);
             self.report_load(&report.warnings, &report.migrations);
             output_success(format!("Automatically loaded last ledger `{}`.", name));
@@ -137,15 +140,16 @@ impl ShellContext {
     pub fn new(mode: CliMode) -> Result<Self, CliError> {
         let registry = CommandRegistry::new(commands::all_definitions());
 
-        let store =
-            LedgerStore::new_default().map_err(|err| CliError::Internal(err.to_string()))?;
-        let manager = LedgerManager::new(Box::new(store));
+        let storage =
+            JsonStorage::new_default().map_err(|err| CliError::Internal(err.to_string()))?;
+        let manager = LedgerManager::new(Box::new(storage.clone()));
 
         let mut app = Self {
             mode,
             registry,
             state: CliState::new(manager),
             theme: ColorfulTheme::default(),
+            storage,
             selection_override: None,
         };
 
@@ -433,7 +437,7 @@ impl ShellContext {
     pub(crate) fn select_ledger_backup(
         &self,
         prompt: &str,
-    ) -> Result<Option<PathBuf>, CommandError> {
+    ) -> Result<Option<String>, CommandError> {
         self.select_with(
             LedgerBackupSelectionProvider::new(&self.state, self.manager()),
             prompt,
@@ -446,7 +450,7 @@ impl ShellContext {
         prompt: &str,
     ) -> Result<Option<PathBuf>, CommandError> {
         self.select_with(
-            ConfigBackupSelectionProvider::new(self.manager()),
+            ConfigBackupSelectionProvider::new(&self.storage),
             prompt,
             "No configuration backups found.",
         )
@@ -1119,17 +1123,21 @@ impl ShellContext {
             .manager_mut()
             .load_from_path(path)
             .map_err(CommandError::from_ledger)?;
+        self.state.set_path(Some(path.to_path_buf()));
         self.state.set_active_simulation(None);
         output_success(format!("Ledger loaded from {}.", path.display()));
         self.report_load(&report.warnings, &report.migrations);
-        let _ = self.manager().record_last_opened(None);
+        let _ = self.storage.record_last_ledger(None);
         Ok(())
     }
 
     pub(crate) fn save_to_path(&mut self, path: &Path) -> CommandResult {
-        self.manager_mut()
-            .save_to_path(path)
+        let ledger = self.current_ledger()?;
+        self.storage
+            .save_to_path(ledger, path)
             .map_err(CommandError::from_ledger)?;
+        self.state.set_path(Some(path.to_path_buf()));
+        self.manager_mut().clear_name();
         output_success(format!("Ledger saved to {}.", path.display()));
         Ok(())
     }
@@ -1139,33 +1147,38 @@ impl ShellContext {
             .manager_mut()
             .load(name)
             .map_err(CommandError::from_ledger)?;
+        let path = self.storage.ledger_path(name);
+        self.state.set_path(Some(path.clone()));
         self.state.set_active_simulation(None);
-        output_success(format!(
-            "Ledger `{}` loaded from {}.",
-            name,
-            report.path.display()
-        ));
+        output_success(format!("Ledger `{}` loaded from {}.", name, path.display()));
         self.report_load(&report.warnings, &report.migrations);
-        let _ = self.manager().record_last_opened(Some(name));
+        let _ = self.storage.record_last_ledger(Some(name));
         Ok(())
     }
 
     pub(crate) fn save_named_ledger(&mut self, name: &str) -> CommandResult {
-        let path = self
-            .manager_mut()
+        self.manager_mut()
             .save_as(name)
             .map_err(CommandError::from_ledger)?;
+        let path = self.storage.ledger_path(name);
+        self.state.set_path(Some(path.clone()));
         output_success(format!("Ledger `{}` saved to {}.", name, path.display()));
-        let _ = self.manager().record_last_opened(Some(name));
+        let _ = self.storage.record_last_ledger(Some(name));
         Ok(())
     }
 
     pub(crate) fn create_backup(&mut self, name: &str) -> CommandResult {
-        let path = self
-            .manager()
-            .backup_named(name, None)
+        let current = self.require_named_ledger()?.to_string();
+        if !current.eq_ignore_ascii_case(name) {
+            return Err(CommandError::InvalidArguments(format!(
+                "`{}` is not the active ledger (current: `{}`).",
+                name, current
+            )));
+        }
+        self.manager()
+            .backup(None)
             .map_err(CommandError::from_ledger)?;
-        output_success(format!("Backup created at {}.", path.display()));
+        output_success("Backup created.");
         Ok(())
     }
 
@@ -1179,21 +1192,9 @@ impl ShellContext {
             return Ok(());
         }
         output_info("Available backups:");
-        for (idx, backup) in backups.iter().enumerate() {
-            let created = backup.timestamp.with_timezone(&Local);
-            let file_name = backup
-                .path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .map(str::to_owned)
-                .unwrap_or_else(|| backup.path.display().to_string());
-            output_info(format!(
-                "  {:>2}. {} (Created: {})",
-                idx + 1,
-                file_name,
-                created.format("%Y-%m-%d %H:%M")
-            ));
-            output_info(format!("      {}", backup.path.display()));
+        for (idx, backup_name) in backups.iter().enumerate() {
+            let description = format_backup_label(backup_name);
+            output_info(format!("  {:>2}. {}", idx + 1, description));
         }
         Ok(())
     }
@@ -1208,46 +1209,46 @@ impl ShellContext {
                 "no backups available to restore".into(),
             ));
         }
-        let target = if let Ok(index) = reference.parse::<usize>() {
+        let target = if let Ok(index_raw) = reference.parse::<usize>() {
+            let index = if index_raw > 0 {
+                index_raw - 1
+            } else {
+                index_raw
+            };
             backups
                 .get(index)
                 .ok_or_else(|| {
-                    CommandError::InvalidArguments(format!("backup index {} out of range", index))
+                    CommandError::InvalidArguments(format!(
+                        "backup index {} out of range",
+                        reference
+                    ))
                 })?
-                .path
                 .clone()
         } else {
-            let matching = backups
+            backups
                 .iter()
-                .find(|info| {
-                    info.path
-                        .file_name()
-                        .and_then(|os| os.to_str())
-                        .map(|name| name.contains(reference))
-                        .unwrap_or(false)
-                })
+                .find(|candidate| candidate.contains(reference))
+                .cloned()
                 .ok_or_else(|| {
                     CommandError::InvalidArguments(format!(
                         "no backup matches reference `{}`",
                         reference
                     ))
-                })?;
-            matching.path.clone()
+                })?
         };
-        self.restore_backup_from_path(name, target)
+        self.restore_backup_from_name(name, target)
     }
 
-    pub(crate) fn restore_backup_from_path(
+    pub(crate) fn restore_backup_from_name(
         &mut self,
         name: &str,
-        target: PathBuf,
+        backup_name: String,
     ) -> CommandResult {
         let confirm = if self.mode == CliMode::Interactive {
             Confirm::with_theme(&self.theme)
                 .with_prompt(format!(
-                    "Restore ledger `{}` from {}?",
-                    name,
-                    target.display()
+                    "Restore ledger `{}` from backup `{}`?",
+                    name, backup_name
                 ))
                 .default(false)
                 .interact()
@@ -1259,10 +1260,20 @@ impl ShellContext {
             output_info("Operation cancelled.");
             return Ok(());
         }
-        self.manager()
-            .restore_backup(name, &target)
+        let report = self
+            .manager_mut()
+            .restore_backup(name, &backup_name)
             .map_err(CommandError::from_ledger)?;
-        self.load_named_ledger(name)
+        let path = self.storage.ledger_path(name);
+        self.state.set_path(Some(path.clone()));
+        self.state.set_active_simulation(None);
+        self.report_load(&report.warnings, &report.migrations);
+        let _ = self.storage.record_last_ledger(Some(name));
+        output_success(format!(
+            "Ledger `{}` loaded from backup `{}`.",
+            name, backup_name
+        ));
+        Ok(())
     }
 
     pub(crate) fn create_config_backup(&mut self, note: Option<String>) -> CommandResult {
@@ -1271,10 +1282,10 @@ impl ShellContext {
         let config = ConfigData::from_ledger(ledger);
         let snapshot = ConfigSnapshot::new(config, note);
         let path = self
-            .manager()
+            .storage
             .create_config_backup(&snapshot)
             .map_err(CommandError::from_ledger)?;
-        self.manager()
+        self.storage
             .save_active_config(&snapshot.config)
             .map_err(CommandError::from_ledger)?;
         let file_name = path
@@ -1293,7 +1304,7 @@ impl ShellContext {
 
     pub(crate) fn list_config_backups(&self) -> CommandResult {
         let backups = self
-            .manager()
+            .storage
             .list_config_backups()
             .map_err(CommandError::from_ledger)?;
         if backups.is_empty() {
@@ -1329,7 +1340,7 @@ impl ShellContext {
 
     pub(crate) fn restore_config_by_reference(&mut self, reference: &str) -> CommandResult {
         let backups = self
-            .manager()
+            .storage
             .list_config_backups()
             .map_err(CommandError::from_ledger)?;
         if backups.is_empty() {
@@ -1377,7 +1388,7 @@ impl ShellContext {
 
     pub(crate) fn restore_config_from_path(&mut self, path: PathBuf) -> CommandResult {
         let snapshot = self
-            .manager()
+            .storage
             .load_config_snapshot(&path)
             .map_err(CommandError::from_ledger)?;
         let file_name = path
@@ -1438,7 +1449,7 @@ impl ShellContext {
             snapshot.config.apply_to_ledger(ledger);
             ledger.touch();
         }
-        self.manager()
+        self.storage
             .save_active_config(&snapshot.config)
             .map_err(CommandError::from_ledger)?;
         output_success(format!(
@@ -2918,6 +2929,36 @@ fn parse_time_interval_str(input: &str) -> Result<TimeInterval, CommandError> {
     Ok(TimeInterval { every, unit })
 }
 
+fn format_backup_label(file_name: &str) -> String {
+    let trimmed = file_name.trim_end_matches(".json");
+    let segments: Vec<&str> = trimmed.split('_').collect();
+    if segments.len() < 3 {
+        return file_name.to_string();
+    }
+    let date_part = segments[segments.len() - 2];
+    let time_part = segments[segments.len() - 1];
+    if !(date_part.len() == 8 && time_part.len() == 4)
+        || !date_part.chars().all(|c| c.is_ascii_digit())
+        || !time_part.chars().all(|c| c.is_ascii_digit())
+    {
+        return file_name.to_string();
+    }
+    let raw = format!("{}{}", date_part, time_part);
+    let timestamp = NaiveDateTime::parse_from_str(&raw, "%Y%m%d%H%M")
+        .ok()
+        .map(|naive| DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc));
+    if let Some(utc) = timestamp {
+        let local = utc.with_timezone(&Local);
+        format!(
+            "{} (Created: {})",
+            file_name,
+            local.format("%Y-%m-%d %H:%M")
+        )
+    } else {
+        file_name.to_string()
+    }
+}
+
 fn parse_account_kind(input: &str) -> Result<AccountKind, CommandError> {
     match input.to_lowercase().as_str() {
         "bank" => Ok(AccountKind::Bank),
@@ -3125,9 +3166,8 @@ mod tests {
     use crate::core::ledger_manager::LedgerManager;
     use crate::currency::{CurrencyDisplay, LocaleConfig, NegativeStyle, ValuationPolicy};
     use crate::ledger::{Simulation, SimulationStatus};
-    use crate::utils::persistence::{ConfigData, ConfigSnapshot, LedgerStore};
+    use crate::storage::json_backend::{ConfigData, ConfigSnapshot, JsonStorage};
     use chrono::{NaiveDate, Utc};
-    use std::fs;
     use tempfile::{tempdir, NamedTempFile};
 
     #[test]
@@ -3230,8 +3270,8 @@ mod tests {
 
     fn state_with_ledger() -> CliState {
         let temp = tempdir().unwrap();
-        let store = LedgerStore::new(Some(temp.path().to_path_buf()), Some(5)).unwrap();
-        let manager = LedgerManager::new(Box::new(store));
+        let storage = JsonStorage::new(Some(temp.path().to_path_buf()), Some(5)).unwrap();
+        let manager = LedgerManager::new(Box::new(storage));
         let mut state = CliState::new(manager);
         let ledger = sample_ledger();
         state.set_ledger(ledger, None, Some("sample".into()));
@@ -3324,23 +3364,25 @@ mod tests {
     #[test]
     fn ledger_backup_selection_paths() {
         let temp = tempdir().unwrap();
-        let store = LedgerStore::new(Some(temp.path().to_path_buf()), Some(5)).unwrap();
-        let base_dir = store.base_dir().to_path_buf();
-        let manager = LedgerManager::new(Box::new(store));
+        let storage = JsonStorage::new(Some(temp.path().to_path_buf()), Some(5)).unwrap();
+        let manager = LedgerManager::new(Box::new(storage));
         let mut state = CliState::new(manager);
         state.set_ledger(sample_ledger(), None, Some("sample".into()));
-
-        let backup_dir = base_dir.join("backups").join("sample");
-        fs::create_dir_all(&backup_dir).unwrap();
-        let backup_path = backup_dir.join("sample_20240101_0000.json");
-        fs::write(&backup_path, "{}").unwrap();
+        state.manager_mut().backup(None).unwrap();
+        let expected = state
+            .manager()
+            .list_backups("sample")
+            .unwrap()
+            .first()
+            .cloned()
+            .expect("backup created");
 
         let outcome =
             SelectionManager::new(LedgerBackupSelectionProvider::new(&state, state.manager()))
                 .choose_with("Select backup", "No backups available.", |_, _| Ok(Some(0)))
                 .unwrap();
         match outcome {
-            SelectionOutcome::Selected(path) => assert_eq!(path, backup_path),
+            SelectionOutcome::Selected(name) => assert_eq!(name, expected),
             _ => panic!("expected backup selection"),
         }
 
@@ -3354,7 +3396,7 @@ mod tests {
     #[test]
     fn config_backup_selection_paths() {
         let temp = tempdir().unwrap();
-        let store = LedgerStore::new(Some(temp.path().to_path_buf()), Some(5)).unwrap();
+        let store = JsonStorage::new(Some(temp.path().to_path_buf()), Some(5)).unwrap();
         let snapshot = ConfigSnapshot::new(
             ConfigData {
                 base_currency: "USD".into(),
@@ -3368,9 +3410,8 @@ mod tests {
             Some("baseline".into()),
         );
         let config_path = store.create_config_backup(&snapshot).unwrap();
-        let manager = LedgerManager::new(Box::new(store));
 
-        let outcome = SelectionManager::new(ConfigBackupSelectionProvider::new(&manager))
+        let outcome = SelectionManager::new(ConfigBackupSelectionProvider::new(&store))
             .choose_with(
                 "Select config",
                 "No configuration backups found.",
@@ -3382,7 +3423,7 @@ mod tests {
             _ => panic!("expected config selection"),
         }
 
-        let outcome = SelectionManager::new(ConfigBackupSelectionProvider::new(&manager))
+        let outcome = SelectionManager::new(ConfigBackupSelectionProvider::new(&store))
             .choose_with(
                 "Select config",
                 "No configuration backups found.",

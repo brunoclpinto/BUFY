@@ -7,6 +7,7 @@ use crate::{core::ledger_manager::LedgerManager, ledger::Ledger};
 /// Holds the active ledger manager reference along with interactive metadata.
 pub struct CliState {
     ledger_manager: LedgerManager,
+    ledger_path: Option<PathBuf>,
     pub active_simulation: Option<String>,
 }
 
@@ -14,6 +15,7 @@ impl CliState {
     pub fn new(ledger_manager: LedgerManager) -> Self {
         Self {
             ledger_manager,
+            ledger_path: None,
             active_simulation: None,
         }
     }
@@ -29,12 +31,18 @@ impl CliState {
     #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.ledger_manager.clear();
+        self.ledger_path = None;
         self.active_simulation = None;
     }
 
     pub fn set_ledger(&mut self, ledger: Ledger, path: Option<PathBuf>, name: Option<String>) {
-        self.ledger_manager.set_current(ledger, path, name);
+        self.ledger_manager.set_current(ledger, path.clone(), name);
+        self.ledger_path = path;
         self.active_simulation = None;
+    }
+
+    pub fn set_path(&mut self, path: Option<PathBuf>) {
+        self.ledger_path = path;
     }
 
     pub fn ledger_name(&self) -> Option<&str> {
@@ -42,9 +50,7 @@ impl CliState {
     }
 
     pub fn ledger_path(&self) -> Option<PathBuf> {
-        self.ledger_manager
-            .current_path()
-            .map(|path| path.to_path_buf())
+        self.ledger_path.clone()
     }
 
     pub fn set_active_simulation(&mut self, name: Option<String>) {

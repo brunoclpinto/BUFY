@@ -3,7 +3,9 @@ use budget_core::ledger::{
     category::{Category, CategoryKind},
     BudgetPeriod, Ledger,
 };
-use budget_core::utils::persistence::{load_ledger_from_file, save_ledger_to_file};
+use budget_core::storage::json_backend::{
+    load_ledger_from_path as load_ledger_from_file, save_ledger_to_path as save_ledger_to_file,
+};
 use chrono::{Duration, NaiveDate};
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use tempfile::tempdir;

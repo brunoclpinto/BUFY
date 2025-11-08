@@ -4,9 +4,9 @@ use crate::{
     cli::selectors::{SelectionItem, SelectionProvider},
     core::ledger_manager::LedgerManager,
     ledger::{Account, Category, Ledger, Simulation, Transaction},
-    utils::persistence::BackupInfo,
+    storage::json_backend::JsonStorage,
 };
-use chrono::Local;
+use chrono::{DateTime, Local, NaiveDateTime, Utc};
 
 use crate::cli::state::CliState;
 
@@ -141,7 +141,7 @@ impl<'a> LedgerBackupSelectionProvider<'a> {
 }
 
 impl<'a> SelectionProvider for LedgerBackupSelectionProvider<'a> {
-    type Id = PathBuf;
+    type Id = String;
     type Error = ProviderError;
 
     fn items(&mut self) -> Result<Vec<SelectionItem<Self::Id>>, Self::Error> {
@@ -153,17 +153,20 @@ impl<'a> SelectionProvider for LedgerBackupSelectionProvider<'a> {
             .manager
             .list_backups(name)
             .map_err(|err| ProviderError::Store(err.to_string()))?;
-        Ok(backups.into_iter().map(backup_item).collect())
+        Ok(backups
+            .into_iter()
+            .map(|item| SelectionItem::new(item.clone(), backup_label(&item)))
+            .collect())
     }
 }
 
 pub struct ConfigBackupSelectionProvider<'a> {
-    manager: &'a LedgerManager,
+    storage: &'a JsonStorage,
 }
 
 impl<'a> ConfigBackupSelectionProvider<'a> {
-    pub fn new(manager: &'a LedgerManager) -> Self {
-        Self { manager }
+    pub fn new(storage: &'a JsonStorage) -> Self {
+        Self { storage }
     }
 }
 
@@ -173,7 +176,7 @@ impl<'a> SelectionProvider for ConfigBackupSelectionProvider<'a> {
 
     fn items(&mut self) -> Result<Vec<SelectionItem<Self::Id>>, Self::Error> {
         let backups = self
-            .manager
+            .storage
             .list_config_backups()
             .map_err(|err| ProviderError::Store(err.to_string()))?;
         Ok(backups
@@ -257,17 +260,26 @@ fn simulation_item(sim: &Simulation) -> SelectionItem<String> {
     SelectionItem::new(sim.name.clone(), label)
 }
 
-fn backup_item(info: BackupInfo) -> SelectionItem<PathBuf> {
-    let created = info.timestamp.with_timezone(&Local);
-    let file_name = info
-        .path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("backup");
-    let label = format!(
-        "{:<30} (Created: {})",
-        file_name,
-        created.format("%Y-%m-%d %H:%M")
-    );
-    SelectionItem::new(info.path.clone(), label)
+fn backup_label(name: &str) -> String {
+    let trimmed = name.trim_end_matches(".json");
+    let segments: Vec<&str> = trimmed.split('_').collect();
+    if segments.len() < 3 {
+        return name.to_string();
+    }
+    let date_part = segments[segments.len() - 2];
+    let time_part = segments[segments.len() - 1];
+    if date_part.len() == 8
+        && time_part.len() == 4
+        && date_part.chars().all(|c| c.is_ascii_digit())
+        && time_part.chars().all(|c| c.is_ascii_digit())
+    {
+        if let Ok(naive) =
+            NaiveDateTime::parse_from_str(&format!("{}{}", date_part, time_part), "%Y%m%d%H%M")
+        {
+            let utc = DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc);
+            let local = utc.with_timezone(&Local);
+            return format!("{:<30} (Created: {})", name, local.format("%Y-%m-%d %H:%M"));
+        }
+    }
+    name.to_string()
 }

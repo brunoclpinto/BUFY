@@ -4,7 +4,7 @@ use budget_core::{
         transaction::{Recurrence, RecurrenceMode},
         Account, AccountKind, BudgetPeriod, Ledger, TimeInterval, TimeUnit, Transaction,
     },
-    utils::persistence::LedgerStore,
+    storage::json_backend::save_ledger_to_path,
 };
 use chrono::NaiveDate;
 use predicates::{prelude::PredicateBooleanExt, str::contains};
@@ -56,9 +56,8 @@ fn forecast_command_outputs_projection() {
         .parent()
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
-    let store = LedgerStore::new(Some(parent), Some(2)).unwrap();
-    let mut snapshot = ledger.clone();
-    store.save_to_path(&mut snapshot, tmp.path()).unwrap();
+    std::fs::create_dir_all(&parent).unwrap();
+    save_ledger_to_path(&ledger, tmp.path()).unwrap();
 
     let script = format!("load {}\nforecast 90 days\nexit\n", tmp.path().display());
 

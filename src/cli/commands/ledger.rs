@@ -175,11 +175,11 @@ fn cmd_restore_ledger(context: &mut ShellContext, args: &[&str]) -> CommandResul
                 named.to_string()
             };
             let selection = context.select_ledger_backup("Select a backup to restore:")?;
-            let Some(path) = selection else {
+            let Some(backup_name) = selection else {
                 io::print_info("Operation cancelled.");
                 return Ok(());
             };
-            context.restore_backup_from_path(&name, path)
+            context.restore_backup_from_name(&name, backup_name)
         }
         1 => {
             let reference = args[0];

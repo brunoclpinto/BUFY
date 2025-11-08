@@ -51,7 +51,7 @@ Phase 3 introduces an interactive `rustyline`-powered shell that wraps the ledge
 - **Configuration backups (Phase 18)** – `config backup [--note <text>]` snapshots the active formatting/locale/valuation settings into `config_backups/config_<timestamp>.json`. Metadata is stored alongside the payload (`schema_version`, `created_at`, optional `note`, and a nested `config` object). `config backups` reuses the selection list format and `config restore <backup?>` previews the snapshot (dates, note, key settings) before confirmation, updating both the in-memory ledger and the persisted `config.json`.
 - **Recurrence tooling** – `recurring list/edit/clear/pause/resume/skip/sync` and `complete <idx>` manage schedules without leaving the shell.
 - **Forecasting & simulations** – `forecast`, `summary <simulation>`, and `simulation add/modify/exclude` expose future-looking views side-by-side with base results.
-- **Persistence integration** – the CLI auto-loads the last ledger, exposes backup/restore commands, and surfaces migration warnings emitted by `LedgerStore`.
+- **Persistence integration** – the CLI auto-loads the last ledger, exposes backup/restore commands, and surfaces migration warnings emitted by the `LedgerManager` + `JsonStorage` persistence layer.
 
 ### Simulations (Phase 5)
 
@@ -90,7 +90,7 @@ Decision rationale:
 Utility helpers house cross-cutting concerns.
 
 - `budget_core::utils::init_tracing` sets up an `EnvFilter`-driven `tracing` subscriber so both CLI and tests get consistent logging.
-- `budget_core::core::ledger_manager::LedgerManager` (Phase 7) is the single entry point for persistence, delegating on-disk work to `utils::persistence::LedgerStore`. Responsibilities:
+- `budget_core::core::ledger_manager::LedgerManager` (Phase 7) is the single entry point for persistence, delegating on-disk work to `storage::json_backend::JsonStorage`. Responsibilities:
   - Resolve the base directory (`~/.budget_core` or `BUDGET_CORE_HOME`).
   - Generate canonical filenames (slugified ledger names), temp-file paths, and backup directories.
   - Perform deterministic, pretty JSON serialization (`serde_json::to_string_pretty`) and atomic writes via `<file>.tmp` + `rename`.
@@ -108,7 +108,7 @@ Error handling:
 
 1. **Save**
    - CLI mutates the in-memory `Ledger`.
-   - `LedgerManager::save` / `save_as` clones the ledger (immutability ensures we don’t partially mutate state if a write fails), serializes to pretty JSON, writes `<file>.tmp`, and atomically renames to the final path via `LedgerStore`.
+  - `LedgerManager::save` / `save_as` serializes to pretty JSON, writes `<file>.tmp`, and atomically renames to the final path via the pluggable storage backend (`JsonStorage` today).
   - If an existing file is being overwritten, a timestamped `.json` snapshot is created first and old backups are pruned to respect retention.
    - `schema_version` is updated and `updated_at` re-stamped.
 2. **Load**
@@ -169,7 +169,7 @@ Unknown keys are preserved during round-trips so future schema versions can add 
 | Authoring | Users create ledgers, accounts, categories, and transactions via CLI. Script mode allows fixtures/tests to do the same. | Keeps all state mutations explicit and traceable; no hidden side effects. |
 | Scheduling | Recurrence definitions live inside transactions, and metadata is auto-refreshed. | Embedding the schedule with its template keeps files self-documenting and avoids separate recurrence tables. |
 | Forecasting | For any window, the ledger merges planned, pending, and projected transactions into a `ForecastReport`. | Budget summaries remain deterministic and inspectable without mutating the ledger. |
-| Persistence | Saves always go through `LedgerManager` (and its `LedgerStore` backend), ensuring atomic writes + backups + schema versioning. | Prevents corruption and provides a single seam for future storage backends (e.g., SQLite/cloud). |
+| Persistence | Saves always go through `LedgerManager` (and its storage backend), ensuring atomic writes + backups + schema versioning. | Prevents corruption and provides a single seam for future storage backends (e.g., SQLite/cloud). |
 | Recovery | Built-in CLI commands discover backups, restore snapshots, and surface warnings/migrations. | Users don’t need to leave the shell or manually manipulate files to recover from mistakes. |
 
 Key decisions:

@@ -1,6 +1,6 @@
 use budget_core::{
     ledger::{Account, AccountKind, BudgetPeriod, Ledger, Transaction},
-    utils::persistence::LedgerStore,
+    storage::{json_backend::JsonStorage, StorageBackend},
 };
 use chrono::NaiveDate;
 use std::fs;
@@ -33,14 +33,15 @@ fn tmp_path_for(path: &Path) -> std::path::PathBuf {
 #[test]
 fn atomic_save_failure_preserves_original_file() {
     let temp = tempdir().unwrap();
-    let store = LedgerStore::new(Some(temp.path().to_path_buf()), Some(2)).unwrap();
+    let store = JsonStorage::new(Some(temp.path().to_path_buf()), Some(2)).unwrap();
 
     let mut ledger = Ledger::new("Reliable", BudgetPeriod::default());
     sample_transaction(&mut ledger, 42.0);
 
-    let path = store
-        .save_named(&mut ledger, "reliable-ledger")
+    store
+        .save(&ledger, "reliable-ledger")
         .expect("initial save");
+    let path = store.ledger_path("reliable-ledger");
     let original = fs::read_to_string(&path).expect("read original file");
 
     // Create directory that collides with the temp file name to force File::create to fail.
@@ -49,7 +50,7 @@ fn atomic_save_failure_preserves_original_file() {
 
     // Mutate ledger to ensure new JSON would differ if the save succeeded.
     sample_transaction(&mut ledger, 99.0);
-    let result = store.save_to_path(&mut ledger, &path);
+    let result = store.save_to_path(&ledger, &path);
     assert!(
         result.is_err(),
         "expected save_to_path to fail when temp path is a directory"
@@ -67,13 +68,9 @@ fn atomic_save_failure_preserves_original_file() {
         "backup should be created before attempting the write"
     );
     assert!(
-        backups.iter().any(|info| {
-            info.path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .map(|name| name.starts_with("reliable_ledger_") && name.ends_with(".json"))
-                .unwrap_or(false)
-        }),
+        backups
+            .iter()
+            .any(|name| { name.starts_with("reliable_ledger_") && name.ends_with(".json") }),
         "backup filename should include the ledger slug and use the .json extension"
     );
 
@@ -86,16 +83,12 @@ fn store_creates_and_restores_backups() {
     let mut ledger = Ledger::new("Household", BudgetPeriod::default());
     sample_transaction(&mut ledger, 50.0);
 
-    let store = LedgerStore::new(Some(temp.path().to_path_buf()), Some(5)).unwrap();
-    store
-        .save_named(&mut ledger, "family-budget")
-        .expect("initial save");
+    let store = JsonStorage::new(Some(temp.path().to_path_buf()), Some(5)).unwrap();
+    store.save(&ledger, "family-budget").expect("initial save");
 
     // Modify ledger and save again to trigger a backup.
     sample_transaction(&mut ledger, 75.0);
-    store
-        .save_named(&mut ledger, "family-budget")
-        .expect("second save");
+    store.save(&ledger, "family-budget").expect("second save");
 
     let backups = store.list_backups("family-budget").unwrap();
     assert!(
@@ -104,20 +97,18 @@ fn store_creates_and_restores_backups() {
     );
 
     // Restore the oldest backup (should represent the first save).
-    let oldest = backups.last().unwrap().path.clone();
-    let snapshot = std::fs::read_to_string(&oldest).unwrap();
+    let oldest_name = backups.last().unwrap().clone();
+    let oldest_path = store.backup_path("family-budget", &oldest_name);
+    let snapshot = std::fs::read_to_string(&oldest_path).unwrap();
     let ledger_snapshot: Ledger = serde_json::from_str(&snapshot).unwrap();
     assert_eq!(ledger_snapshot.transactions.len(), 1);
     store
-        .restore_backup("family-budget", &oldest)
+        .restore("family-budget", &oldest_name)
         .expect("restore");
     let restored_raw = std::fs::read_to_string(store.ledger_path("family-budget")).unwrap();
     let restored_disk: Ledger = serde_json::from_str(&restored_raw).unwrap();
     assert_eq!(restored_disk.transactions.len(), 1);
-    let restored = store
-        .load_named("family-budget")
-        .expect("load restored ledger")
-        .ledger;
+    let restored = store.load("family-budget").expect("load restored ledger");
     assert_eq!(
         restored.transactions.len(),
         1,
