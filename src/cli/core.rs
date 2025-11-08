@@ -6,7 +6,7 @@ use std::{
 };
 
 use chrono::{DateTime, Duration, Local, NaiveDate, NaiveDateTime, Utc};
-use dialoguer::{theme::ColorfulTheme, Confirm, Input, Select};
+use dialoguer::{theme::ColorfulTheme, Input, Select};
 use rustyline::error::ReadlineError;
 use strsim::levenshtein;
 use uuid::Uuid;
@@ -46,6 +46,7 @@ use crate::cli::selectors::{SelectionOutcome, SelectionProvider};
 pub use crate::core::errors::CliError;
 
 use super::commands::{self, CommandDefinition, CommandRegistry};
+use super::io as cli_io;
 use super::output::{
     error as output_error, info as output_info, section as output_section,
     success as output_success, warning as output_warning,
@@ -111,6 +112,7 @@ impl ShellContext {
         let manager = LedgerManager::new(Box::new(storage.clone()));
         let config_manager = ConfigManager::new().map_err(CliError::from)?;
         let config = config_manager.load().map_err(CliError::from)?;
+        cli_io::apply_config(&config);
 
         let mut app = ShellContext {
             mode,
@@ -136,6 +138,7 @@ impl ShellContext {
         self.mode
     }
 
+    #[allow(dead_code)]
     pub(crate) fn theme(&self) -> &ColorfulTheme {
         &self.theme
     }
@@ -267,6 +270,7 @@ impl ShellContext {
             }
         }
         self.persist_config()?;
+        cli_io::apply_config(&self.config);
         output_success("Configuration updated.");
         Ok(())
     }
@@ -367,14 +371,7 @@ impl ShellContext {
         if self.mode == CliMode::Script {
             return Ok(true);
         }
-
-        let confirm = Confirm::with_theme(&self.theme)
-            .with_prompt("Exit shell?")
-            .default(false)
-            .interact()
-            .map_err(CommandError::from)?;
-
-        Ok(confirm)
+        cli_io::confirm_action("Exit shell?")
     }
 
     pub(crate) fn report_error(&self, err: CommandError) -> Result<(), CliError> {
@@ -1287,14 +1284,11 @@ impl ShellContext {
         backup_name: String,
     ) -> CommandResult {
         let confirm = if self.mode == CliMode::Interactive {
-            Confirm::with_theme(&self.theme)
-                .with_prompt(format!(
-                    "Restore ledger `{}` from backup `{}`?",
-                    name, backup_name
-                ))
-                .default(false)
-                .interact()
-                .map_err(CommandError::from)?
+            cli_io::confirm_action(&format!(
+                "Restore ledger `{}` from backup `{}`?",
+                name, backup_name
+            ))
+            .map_err(CommandError::from)?
         } else {
             true
         };
@@ -1389,6 +1383,7 @@ impl ShellContext {
             .restore(&backup_name)
             .map_err(CommandError::from_core)?;
         self.config = restored;
+        cli_io::apply_config(&self.config);
         self.persist_config()?;
         output_success(format!("Configuration restored from {}.", backup_name));
         Ok(())
@@ -3053,6 +3048,17 @@ impl From<ProviderError> for CommandError {
         match err {
             ProviderError::MissingLedger => CommandError::LedgerNotLoaded,
             ProviderError::Store(message) => CommandError::Message(message),
+        }
+    }
+}
+
+impl From<CliError> for CommandError {
+    fn from(err: CliError) -> Self {
+        match err {
+            CliError::Core(inner) => CommandError::Core(inner),
+            CliError::Input(message) | CliError::Command(message) => {
+                CommandError::InvalidArguments(message)
+            }
         }
     }
 }

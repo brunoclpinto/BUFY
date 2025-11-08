@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
 use chrono::Utc;
-use dialoguer::{Input, Select};
 
 use super::CommandDefinition;
 use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
@@ -37,12 +36,8 @@ fn cmd_load(context: &mut ShellContext, args: &[&str]) -> CommandResult {
         let path = PathBuf::from(path);
         context.load_ledger(&path)
     } else if context.mode() == CliMode::Interactive {
-        let path: PathBuf = Input::<String>::with_theme(context.theme())
-            .with_prompt("Path to ledger JSON")
-            .interact_text()
-            .map(PathBuf::from)
-            .map_err(CommandError::from)?;
-        context.load_ledger(&path)
+        let response = io::prompt_text("Path to ledger JSON", None).map_err(CommandError::from)?;
+        context.load_ledger(&PathBuf::from(response.trim()))
     } else {
         Err(CommandError::InvalidArguments("usage: load <path>".into()))
     }
@@ -62,26 +57,16 @@ fn cmd_save(context: &mut ShellContext, args: &[&str]) -> CommandResult {
             .ledger_name()
             .map(|s| s.to_string())
             .unwrap_or_else(|| current.name.clone());
-        let choice = Select::with_theme(context.theme())
-            .with_prompt("Choose save method")
-            .items(&["Name in store", "Custom path"])
-            .default(0)
-            .interact()
-            .map_err(CommandError::from)?;
+        let choice =
+            io::prompt_select_index("Choose save method", &["Name in store", "Custom path"])
+                .map_err(CommandError::from)?;
         if choice == 0 {
-            let name: String = Input::<String>::with_theme(context.theme())
-                .with_prompt("Ledger name")
-                .with_initial_text(suggested)
-                .interact_text()
+            let name = io::prompt_text("Ledger name", Some(suggested.as_str()))
                 .map_err(CommandError::from)?;
             context.save_named_ledger(&name)
         } else {
-            let path: PathBuf = Input::<String>::with_theme(context.theme())
-                .with_prompt("Save ledger to path")
-                .interact_text()
-                .map(PathBuf::from)
-                .map_err(CommandError::from)?;
-            context.save_to_path(&path)
+            let path = io::prompt_text("Save ledger to path", None).map_err(CommandError::from)?;
+            context.save_to_path(&PathBuf::from(path.trim()))
         }
     } else {
         Err(CommandError::InvalidArguments("usage: save <path>".into()))
@@ -94,15 +79,13 @@ fn cmd_save_named(context: &mut ShellContext, args: &[&str]) -> CommandResult {
     } else if let Some(existing) = context.ledger_name().map(|s| s.to_string()) {
         existing
     } else if context.mode() == CliMode::Interactive {
-        Input::<String>::with_theme(context.theme())
-            .with_prompt("Ledger name")
-            .interact_text()
-            .map_err(CommandError::from)?
+        io::prompt_text("Ledger name", None).map_err(CommandError::from)?
     } else {
         return Err(CommandError::InvalidArguments(
             "usage: save-ledger <name>".into(),
         ));
     };
+    let name = name.trim().to_string();
     context.save_named_ledger(&name)
 }
 
@@ -110,15 +93,13 @@ fn cmd_load_named(context: &mut ShellContext, args: &[&str]) -> CommandResult {
     let name = if let Some(name) = args.first() {
         (*name).to_string()
     } else if context.mode() == CliMode::Interactive {
-        Input::<String>::with_theme(context.theme())
-            .with_prompt("Ledger name to load")
-            .interact_text()
-            .map_err(CommandError::from)?
+        io::prompt_text("Ledger name to load", None).map_err(CommandError::from)?
     } else {
         return Err(CommandError::InvalidArguments(
             "usage: load-ledger <name>".into(),
         ));
     };
+    let name = name.trim().to_string();
     context.load_named_ledger(&name)
 }
 
@@ -144,12 +125,7 @@ fn cmd_list(context: &mut ShellContext, args: &[&str]) -> CommandResult {
         }
     } else if context.mode() == CliMode::Interactive {
         let options = ["Accounts", "Categories", "Transactions"];
-        let choice = Select::with_theme(context.theme())
-            .with_prompt("List items")
-            .items(&options)
-            .default(0)
-            .interact()
-            .map_err(CommandError::from)?;
+        let choice = io::prompt_select_index("List items", &options).map_err(CommandError::from)?;
         match choice {
             0 => context.list_accounts(),
             1 => context.list_categories(),
@@ -210,12 +186,8 @@ fn cmd_add(context: &mut ShellContext, args: &[&str]) -> CommandResult {
         }
     } else if context.mode() == CliMode::Interactive {
         let options = ["Account", "Category", "Transaction"];
-        let choice = Select::with_theme(context.theme())
-            .with_prompt("Add which item?")
-            .items(&options)
-            .default(0)
-            .interact()
-            .map_err(CommandError::from)?;
+        let choice =
+            io::prompt_select_index("Add which item?", &options).map_err(CommandError::from)?;
         match choice {
             0 => context.add_account_interactive(),
             1 => context.add_category_interactive(),

@@ -1,8 +1,8 @@
 use chrono::Utc;
-use dialoguer::Input;
 
 use super::CommandDefinition;
 use crate::cli::core::{CliMode, CommandError, CommandResult, RecurrenceListFilter, ShellContext};
+use crate::cli::io;
 pub(crate) fn definitions() -> Vec<CommandDefinition> {
     vec![
         CommandDefinition::new(
@@ -115,9 +115,7 @@ fn cmd_recurring(context: &mut ShellContext, args: &[&str]) -> CommandResult {
             let date = if args.len() > 2 {
                 crate::cli::core::parse_date(args[2])?
             } else if context.mode() == CliMode::Interactive {
-                let input = Input::<String>::with_theme(context.theme())
-                    .with_prompt("Date to skip (YYYY-MM-DD)")
-                    .interact_text()
+                let input = io::prompt_text("Date to skip (YYYY-MM-DD)", None)
                     .map_err(CommandError::from)?;
                 crate::cli::core::parse_date(input.trim())?
             } else {

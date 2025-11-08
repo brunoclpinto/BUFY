@@ -1,47 +1,141 @@
-use std::fmt;
+use std::{
+    fmt::Display,
+    ops::Deref,
+    sync::{OnceLock, RwLock, RwLockReadGuard},
+};
 
-use dialoguer::{theme::ColorfulTheme, Confirm, Input};
+use dialoguer::{
+    theme::{ColorfulTheme, SimpleTheme, Theme},
+    Confirm, Input, Select,
+};
 
-use crate::cli::core::CommandError;
-use crate::cli::output;
+use crate::{
+    cli::core::CliError,
+    cli::output::{self, OutputPreferences},
+    config::Config,
+};
 
-/// Print an informational message via the standard CLI output helpers.
-pub fn print_info(message: impl fmt::Display) {
+static THEME: OnceLock<RwLock<Box<dyn Theme + Send + Sync>>> = OnceLock::new();
+static LOCALE: OnceLock<RwLock<String>> = OnceLock::new();
+
+fn theme_lock() -> &'static RwLock<Box<dyn Theme + Send + Sync>> {
+    THEME.get_or_init(|| RwLock::new(Box::new(ColorfulTheme::default())))
+}
+
+fn locale_lock() -> &'static RwLock<String> {
+    LOCALE.get_or_init(|| RwLock::new(String::from("en-US")))
+}
+
+fn theme_guard() -> RwLockReadGuard<'static, Box<dyn Theme + Send + Sync>> {
+    theme_lock().read().expect("io theme lock poisoned")
+}
+
+/// Configure IO behavior based on the active config (theme + locale).
+pub fn apply_config(config: &Config) {
+    let plain = config
+        .theme
+        .as_ref()
+        .is_some_and(|value| value.eq_ignore_ascii_case("plain"));
+
+    {
+        let mut guard = theme_lock()
+            .write()
+            .expect("io theme lock poisoned for write");
+        if plain {
+            *guard = Box::new(SimpleTheme);
+        } else {
+            *guard = Box::new(ColorfulTheme::default());
+        }
+    }
+
+    {
+        let mut guard = locale_lock()
+            .write()
+            .expect("locale lock poisoned for write");
+        *guard = config.locale.clone();
+    }
+
+    output::set_preferences(OutputPreferences {
+        screen_reader_mode: plain,
+        high_contrast_mode: plain,
+        quiet_mode: false,
+        audio_feedback: false,
+    });
+}
+
+fn guard_to_theme<'a>(
+    guard: &'a RwLockReadGuard<'static, Box<dyn Theme + Send + Sync>>,
+) -> &'a dyn Theme {
+    guard.deref().as_ref()
+}
+
+/// Prompt the user for free-form text input with an optional default.
+pub fn prompt_text(label: &str, default: Option<&str>) -> Result<String, CliError> {
+    let guard = theme_guard();
+    let theme = guard_to_theme(&guard);
+    let mut input = Input::<String>::with_theme(theme).with_prompt(label);
+    if let Some(value) = default {
+        input = input.with_initial_text(value);
+    }
+    input
+        .interact_text()
+        .map_err(|err| CliError::Input(err.to_string()))
+}
+
+/// Prompt the user to choose a value from the provided options, returning the index.
+pub fn prompt_select_index<T>(label: &str, options: &[T]) -> Result<usize, CliError>
+where
+    T: Display,
+{
+    if options.is_empty() {
+        return Err(CliError::Input("no options available".into()));
+    }
+    let guard = theme_guard();
+    let theme = guard_to_theme(&guard);
+    Select::with_theme(theme)
+        .with_prompt(label)
+        .items(options)
+        .default(0)
+        .interact()
+        .map_err(|err| CliError::Input(err.to_string()))
+}
+
+/// Prompt the user to choose a value, cloning the selected entry.
+pub fn prompt_select_value<T>(label: &str, options: &[T]) -> Result<T, CliError>
+where
+    T: Display + Clone,
+{
+    let index = prompt_select_index(label, options)?;
+    Ok(options[index].clone())
+}
+
+/// Prompt the user for confirmation (yes/no).
+pub fn confirm_action(label: &str) -> Result<bool, CliError> {
+    let guard = theme_guard();
+    let theme = guard_to_theme(&guard);
+    Confirm::with_theme(theme)
+        .with_prompt(label)
+        .default(false)
+        .interact()
+        .map_err(|err| CliError::Command(err.to_string()))
+}
+
+pub fn print_info(message: impl Display) {
     output::info(message);
 }
 
-/// Print a warning message via the standard CLI output helpers.
-pub fn print_warning(message: impl fmt::Display) {
+pub fn print_warn(message: impl Display) {
     output::warning(message);
 }
 
-/// Print an error message via the standard CLI output helpers.
-pub fn print_error(message: impl fmt::Display) {
+pub fn print_warning(message: impl Display) {
+    print_warn(message);
+}
+
+pub fn print_error(message: impl Display) {
     output::error(message);
 }
 
-/// Print a success message via the standard CLI output helpers.
-pub fn print_success(message: impl fmt::Display) {
+pub fn print_success(message: impl Display) {
     output::success(message);
-}
-
-/// Prompt the user for confirmation with a yes/no question.
-pub fn confirm_action(
-    theme: &ColorfulTheme,
-    prompt: &str,
-    default: bool,
-) -> Result<bool, CommandError> {
-    Confirm::with_theme(theme)
-        .with_prompt(prompt)
-        .default(default)
-        .interact()
-        .map_err(CommandError::from)
-}
-
-/// Prompt the user for free-form text input.
-pub fn prompt_text(theme: &ColorfulTheme, prompt: &str) -> Result<String, CommandError> {
-    Input::<String>::with_theme(theme)
-        .with_prompt(prompt)
-        .interact_text()
-        .map_err(CommandError::from)
 }

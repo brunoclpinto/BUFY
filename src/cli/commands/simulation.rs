@@ -1,5 +1,4 @@
 use chrono::Local;
-use dialoguer::{Confirm, Input};
 
 use super::CommandDefinition;
 use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
@@ -78,27 +77,23 @@ fn cmd_create_simulation(context: &mut ShellContext, args: &[&str]) -> CommandRe
     let name = if let Some(name) = args.first() {
         (*name).to_string()
     } else {
-        Input::with_theme(context.theme())
-            .with_prompt("Simulation name")
-            .validate_with(|input: &String| -> Result<(), &str> {
-                if input.trim().is_empty() {
-                    Err("Name cannot be empty")
-                } else {
-                    Ok(())
-                }
-            })
-            .interact_text()
-            .map_err(CommandError::from)?
+        loop {
+            let value = io::prompt_text("Simulation name", None).map_err(CommandError::from)?;
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                io::print_error("Name cannot be empty.");
+                continue;
+            }
+            break trimmed.to_string();
+        }
     };
     let notes: Option<String> = if context.mode() == CliMode::Interactive {
-        let text: String = Input::with_theme(context.theme())
-            .with_prompt("Notes (optional)")
-            .interact_text()
-            .map_err(CommandError::from)?;
-        if text.trim().is_empty() {
+        let text = io::prompt_text("Notes (optional)", None).map_err(CommandError::from)?;
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
             None
         } else {
-            Some(text)
+            Some(trimmed.to_string())
         }
     } else {
         None
@@ -227,10 +222,7 @@ fn cmd_discard_simulation(context: &mut ShellContext, args: &[&str]) -> CommandR
         )
     };
     if context.mode() == CliMode::Interactive {
-        let confirm = Confirm::with_theme(context.theme())
-            .with_prompt(format!("Discard simulation `{}`?", name))
-            .default(false)
-            .interact()
+        let confirm = io::confirm_action(&format!("Discard simulation `{}`?", name))
             .map_err(CommandError::from)?;
         if !confirm {
             io::print_info("Operation cancelled.");
