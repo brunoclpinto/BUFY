@@ -8,7 +8,6 @@ pub mod config;
 pub mod core;
 pub mod currency;
 pub mod domain;
-pub mod errors;
 #[cfg(feature = "ffi")]
 pub mod ffi;
 pub mod ledger;

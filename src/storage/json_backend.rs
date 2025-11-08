@@ -8,9 +8,8 @@ use std::{
 };
 
 use crate::{
-    core::utils,
+    core::{errors::BudgetError, utils},
     currency::{CurrencyCode, CurrencyDisplay, LocaleConfig, NegativeStyle, ValuationPolicy},
-    errors::LedgerError,
     ledger::Ledger,
 };
 
@@ -131,7 +130,7 @@ impl JsonStorage {
 
     pub fn load_config_snapshot(&self, path: &Path) -> Result<ConfigSnapshot> {
         if !path.exists() {
-            return Err(LedgerError::Persistence(format!(
+            return Err(BudgetError::StorageError(format!(
                 "configuration backup `{}` not found",
                 path.display()
             )));
@@ -139,7 +138,7 @@ impl JsonStorage {
         let data = fs::read_to_string(path)?;
         let snapshot: ConfigSnapshot = serde_json::from_str(&data)?;
         if snapshot.schema_version > CONFIG_BACKUP_SCHEMA_VERSION {
-            return Err(LedgerError::Persistence(format!(
+            return Err(BudgetError::StorageError(format!(
                 "configuration backup `{}` is from a newer schema version",
                 path.display()
             )));
@@ -276,7 +275,7 @@ impl StorageBackend for JsonStorage {
     fn restore(&self, name: &str, backup_name: &str) -> Result<Ledger> {
         let backup_path = self.backup_path(name, backup_name);
         if !backup_path.exists() {
-            return Err(LedgerError::Persistence(format!(
+            return Err(BudgetError::StorageError(format!(
                 "backup `{}` not found",
                 backup_name
             )));

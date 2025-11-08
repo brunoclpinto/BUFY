@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{core::utils, errors::LedgerError};
+use crate::core::{errors::BudgetError, utils};
 
 const CONFIG_DIR: &str = "config";
 const CONFIG_FILE: &str = "config.json";
@@ -42,16 +42,16 @@ pub struct ConfigManager {
 }
 
 impl ConfigManager {
-    pub fn new() -> Result<Self, LedgerError> {
+    pub fn new() -> Result<Self, BudgetError> {
         Self::from_base(utils::app_data_dir())
     }
 
     #[cfg(test)]
-    pub fn with_base_dir(base: PathBuf) -> Result<Self, LedgerError> {
+    pub fn with_base_dir(base: PathBuf) -> Result<Self, BudgetError> {
         Self::from_base(base)
     }
 
-    fn from_base(base: PathBuf) -> Result<Self, LedgerError> {
+    fn from_base(base: PathBuf) -> Result<Self, BudgetError> {
         let config_root = base.join(CONFIG_DIR);
         fs::create_dir_all(&config_root)?;
         let backups_dir = config_root.join(BACKUP_DIR);
@@ -62,7 +62,7 @@ impl ConfigManager {
         })
     }
 
-    pub fn load(&self) -> Result<Config, LedgerError> {
+    pub fn load(&self) -> Result<Config, BudgetError> {
         if self.path.exists() {
             let data = fs::read_to_string(&self.path)?;
             Ok(serde_json::from_str(&data)?)
@@ -71,7 +71,7 @@ impl ConfigManager {
         }
     }
 
-    pub fn save(&self, config: &Config) -> Result<(), LedgerError> {
+    pub fn save(&self, config: &Config) -> Result<(), BudgetError> {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -82,7 +82,7 @@ impl ConfigManager {
         Ok(())
     }
 
-    pub fn backup(&self, config: &Config, note: Option<&str>) -> Result<String, LedgerError> {
+    pub fn backup(&self, config: &Config, note: Option<&str>) -> Result<String, BudgetError> {
         fs::create_dir_all(&self.backups_dir)?;
         let timestamp = Utc::now().format(BACKUP_TIMESTAMP_FORMAT).to_string();
         let mut name = format!("config_{}", timestamp);
@@ -97,10 +97,10 @@ impl ConfigManager {
         Ok(name)
     }
 
-    pub fn restore(&self, backup_name: &str) -> Result<Config, LedgerError> {
+    pub fn restore(&self, backup_name: &str) -> Result<Config, BudgetError> {
         let path = self.backups_dir.join(backup_name);
         if !path.exists() {
-            return Err(LedgerError::Persistence(format!(
+            return Err(BudgetError::StorageError(format!(
                 "configuration backup `{}` not found",
                 backup_name
             )));
@@ -109,7 +109,7 @@ impl ConfigManager {
         Ok(serde_json::from_str(&data)?)
     }
 
-    pub fn list_backups(&self) -> Result<Vec<String>, LedgerError> {
+    pub fn list_backups(&self) -> Result<Vec<String>, BudgetError> {
         if !self.backups_dir.exists() {
             return Ok(Vec::new());
         }
@@ -186,7 +186,7 @@ fn tmp_path(path: &Path) -> PathBuf {
     tmp
 }
 
-fn write_atomic(path: &Path, data: &str) -> Result<(), LedgerError> {
+fn write_atomic(path: &Path, data: &str) -> Result<(), BudgetError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }

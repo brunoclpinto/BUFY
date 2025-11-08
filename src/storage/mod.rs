@@ -2,9 +2,9 @@ pub mod json_backend;
 
 use std::path::Path;
 
-use crate::{errors::LedgerError, ledger::Ledger};
+use crate::{core::errors::BudgetError, ledger::Ledger};
 
-pub type Result<T> = std::result::Result<T, LedgerError>;
+pub type Result<T> = std::result::Result<T, BudgetError>;
 
 /// Abstraction over persistence backends capable of storing ledgers and snapshots.
 pub trait StorageBackend: Send + Sync {

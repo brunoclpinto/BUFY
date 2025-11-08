@@ -100,7 +100,7 @@ Utility helpers house cross-cutting concerns.
 
 Error handling:
 
-- IO / JSON issues bubble up via `LedgerError::Persistence`.
+- IO / JSON issues bubble up via `BudgetError::StorageError`.
 - Validation helpers warn about orphaned transactions, missing accounts, or inactive recurrences without silently mutating data.
 
 ### Persistence (Phase 7) – Data & Process Lifecycle
@@ -186,7 +186,7 @@ Key decisions:
   - `LocaleConfig` drives number/date formatting plus the first weekday, keeping summaries aligned with local budgeting norms.
   - `ValuationPolicy` (transaction date, report date, or explicit custom date) is evaluated through a `ConversionContext` passed to every aggregate. With FX disabled, the policy only influences disclosure messaging.
 - **Aggregation & disclosure**:
-  - `Ledger::convert_amount` now assumes ledger and transaction currencies match; mismatches raise `LedgerError::InvalidInput` so consumers can handle the failure explicitly.
+- `Ledger::convert_amount` now assumes ledger and transaction currencies match; mismatches raise `BudgetError::InvalidInput` so consumers can handle the failure explicitly.
   - Successful conversions still emit parity disclosures (“base currency parity”) so reports remain auditable.
 - **Localization & accessibility**:
   - `format_currency_value` honors locale separators, currency style, and negative-style preferences while screen-reader mode replaces ambiguous symbols with readable phrases.
@@ -270,13 +270,13 @@ A detailed API blueprint, memory-ownership rules, and serialization expectations
 
 ### `errors`
 
-`LedgerError` is the single error enum exposed by domain/persistence APIs. Major variants:
+`BudgetError` is the single error enum exposed by domain, persistence, and service APIs. Key variants:
 
-- `Io`, `Serde` – low-level issues; surfaced directly in CLI so users know whether it’s a permissions problem or malformed JSON.
-- `InvalidRef`, `InvalidInput` – domain validation failures (unknown IDs, empty names, etc.).
-- `Persistence` – wraps higher-level issues (backup missing, store misconfigured).
+- `LedgerNotLoaded`, `InvalidInput`, `InvalidReference` – domain validation failures (missing IDs, empty names, unsaved ledgers).
+- `AccountNotFound`, `CategoryNotFound`, `TransactionError` – entity-specific failures with contextual messaging.
+- `StorageError`, `ConfigError` – wraps IO/serialization/backup issues so callers can distinguish persistence failures from validation problems.
 
-CLI helpers map these into `CommandError`, allowing interactive sessions to provide guidance (“use `save` first”, “ledger not loaded”) while script mode propagates the failure to stdout/stderr for tests to assert against.
+CLI helpers wrap these into `CommandError` and finally `CliError`, allowing interactive sessions to provide guidance (“use `save` first”, “ledger not loaded”) while script mode propagates structured failures that tests can assert against.
 
 ## Next Steps
 

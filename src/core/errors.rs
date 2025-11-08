@@ -1,0 +1,49 @@
+use std::result::Result as StdResult;
+
+use thiserror::Error;
+
+/// Unified error type for core/domain/storage layers.
+#[derive(Error, Debug)]
+pub enum BudgetError {
+    #[error("Ledger not loaded")]
+    LedgerNotLoaded,
+    #[error("Account not found: {0}")]
+    AccountNotFound(String),
+    #[error("Category not found: {0}")]
+    CategoryNotFound(String),
+    #[error("Transaction failed: {0}")]
+    TransactionError(String),
+    #[error("Persistence error: {0}")]
+    StorageError(String),
+    #[error("Configuration error: {0}")]
+    ConfigError(String),
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
+    #[error("Invalid reference: {0}")]
+    InvalidReference(String),
+}
+
+pub type Result<T> = StdResult<T, BudgetError>;
+
+/// User-facing CLI error wrapper.
+#[derive(Error, Debug)]
+pub enum CliError {
+    #[error(transparent)]
+    Core(#[from] BudgetError),
+    #[error("Invalid input: {0}")]
+    Input(String),
+    #[error("Command failed: {0}")]
+    Command(String),
+}
+
+impl From<std::io::Error> for BudgetError {
+    fn from(err: std::io::Error) -> Self {
+        BudgetError::StorageError(err.to_string())
+    }
+}
+
+impl From<serde_json::Error> for BudgetError {
+    fn from(err: serde_json::Error) -> Self {
+        BudgetError::StorageError(err.to_string())
+    }
+}

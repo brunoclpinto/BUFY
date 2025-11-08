@@ -16,7 +16,7 @@ use std::ptr;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::{
-    errors::LedgerError,
+    core::errors::BudgetError,
     ledger::{BudgetPeriod, Ledger},
     storage::json_backend::{
         load_ledger_from_path as load_ledger_from_file, save_ledger_to_path as save_ledger_to_file,
@@ -146,12 +146,15 @@ pub struct ResultHandle {
     _private: [u8; 0],
 }
 
-fn classify_error(err: &LedgerError) -> FfiErrorCategory {
+fn classify_error(err: &BudgetError) -> FfiErrorCategory {
     match err {
-        LedgerError::InvalidInput(_) | LedgerError::InvalidRef(_) => FfiErrorCategory::Validation,
-        LedgerError::Io(_) | LedgerError::Serde(_) | LedgerError::Persistence(_) => {
-            FfiErrorCategory::Persistence
-        }
+        BudgetError::InvalidInput(_)
+        | BudgetError::InvalidReference(_)
+        | BudgetError::LedgerNotLoaded
+        | BudgetError::AccountNotFound(_)
+        | BudgetError::CategoryNotFound(_) => FfiErrorCategory::Validation,
+        BudgetError::TransactionError(_) => FfiErrorCategory::Simulation,
+        BudgetError::StorageError(_) | BudgetError::ConfigError(_) => FfiErrorCategory::Persistence,
     }
 }
 
@@ -174,7 +177,7 @@ fn c_str_to_string(ptr: *const c_char, field: &str) -> Result<String, i32> {
 
 fn with_session<T, F>(handle: *mut LedgerHandle, f: F) -> Result<T, i32>
 where
-    F: FnOnce(&mut LedgerSession) -> Result<T, LedgerError>,
+    F: FnOnce(&mut LedgerSession) -> Result<T, BudgetError>,
 {
     if handle.is_null() {
         return Err(set_error(

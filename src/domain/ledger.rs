@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
+    core::errors::BudgetError,
     currency::{policy_date, ValuationPolicy},
     domain::transaction::{TimeInterval, Transaction},
-    errors::LedgerError,
 };
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -17,9 +17,9 @@ pub struct DateWindow {
 }
 
 impl DateWindow {
-    pub fn new(start: NaiveDate, end: NaiveDate) -> Result<Self, LedgerError> {
+    pub fn new(start: NaiveDate, end: NaiveDate) -> Result<Self, BudgetError> {
         if end <= start {
-            return Err(LedgerError::InvalidInput(
+            return Err(BudgetError::InvalidInput(
                 "window end must be after start".into(),
             ));
         }

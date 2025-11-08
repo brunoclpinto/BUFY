@@ -13,12 +13,12 @@ use uuid::Uuid;
 
 use crate::{
     config::ConfigManager,
+    core::errors::BudgetError,
     core::ledger_manager::LedgerManager,
     core::services::{
         AccountService, CategoryService, ServiceError, SummaryService, TransactionService,
     },
     currency::{format_currency_value, format_date},
-    errors::LedgerError,
     ledger::{
         account::AccountKind, category::CategoryKind, Account, BudgetPeriod, BudgetScope,
         BudgetSummary, Category, DateWindow, ForecastReport, Ledger, Recurrence, RecurrenceEnd,
@@ -43,6 +43,7 @@ use crate::cli::selection::{
     SelectionError, SelectionManager,
 };
 use crate::cli::selectors::{SelectionOutcome, SelectionProvider};
+pub use crate::core::errors::CliError;
 
 use super::commands::{self, CommandDefinition, CommandRegistry};
 use super::output::{
@@ -95,7 +96,7 @@ impl ShellContext {
     fn persist_config(&self) -> Result<(), CommandError> {
         self.config_manager
             .save(&self.config)
-            .map_err(CommandError::from_ledger)
+            .map_err(CommandError::from_core)
     }
 
     fn update_last_opened(&mut self, name: Option<&str>) -> CommandResult {
@@ -106,14 +107,10 @@ impl ShellContext {
     pub fn new(mode: CliMode) -> Result<Self, CliError> {
         let registry = CommandRegistry::new(commands::all_definitions());
 
-        let storage =
-            JsonStorage::new_default().map_err(|err| CliError::Internal(err.to_string()))?;
+        let storage = JsonStorage::new_default().map_err(CliError::from)?;
         let manager = LedgerManager::new(Box::new(storage.clone()));
-        let config_manager =
-            ConfigManager::new().map_err(|err| CliError::Internal(err.to_string()))?;
-        let config = config_manager
-            .load()
-            .map_err(|err| CliError::Internal(err.to_string()))?;
+        let config_manager = ConfigManager::new().map_err(CliError::from)?;
+        let config = config_manager.load().map_err(CliError::from)?;
 
         let mut app = ShellContext {
             mode,
@@ -701,7 +698,7 @@ impl ShellContext {
                 let ledger = self.current_ledger_mut()?;
                 ledger
                     .add_simulation_transaction(name, transaction)
-                    .map_err(CommandError::from_ledger)?;
+                    .map_err(CommandError::from_core)?;
             }
             output_success(format!(
                 "Transaction saved to simulation `{}`: {}",
@@ -1166,7 +1163,7 @@ impl ShellContext {
         let report = self
             .manager_mut()
             .load_from_path(path)
-            .map_err(CommandError::from_ledger)?;
+            .map_err(CommandError::from_core)?;
         self.ledger_path = Some(path.to_path_buf());
         self.clear_active_simulation();
         output_success(format!("Ledger loaded from {}.", path.display()));
@@ -1179,7 +1176,7 @@ impl ShellContext {
         let ledger = self.current_ledger()?;
         self.storage
             .save_to_path(ledger, path)
-            .map_err(CommandError::from_ledger)?;
+            .map_err(CommandError::from_core)?;
         self.ledger_path = Some(path.to_path_buf());
         self.manager_mut().clear_name();
         output_success(format!("Ledger saved to {}.", path.display()));
@@ -1191,7 +1188,7 @@ impl ShellContext {
         let report = self
             .manager_mut()
             .load(name)
-            .map_err(CommandError::from_ledger)?;
+            .map_err(CommandError::from_core)?;
         let path = self.storage.ledger_path(name);
         self.ledger_path = Some(path.clone());
         self.clear_active_simulation();
@@ -1204,7 +1201,7 @@ impl ShellContext {
     pub(crate) fn save_named_ledger(&mut self, name: &str) -> CommandResult {
         self.manager_mut()
             .save_as(name)
-            .map_err(CommandError::from_ledger)?;
+            .map_err(CommandError::from_core)?;
         let path = self.storage.ledger_path(name);
         self.ledger_path = Some(path.clone());
         output_success(format!("Ledger `{}` saved to {}.", name, path.display()));
@@ -1222,7 +1219,7 @@ impl ShellContext {
         }
         self.manager()
             .backup(None)
-            .map_err(CommandError::from_ledger)?;
+            .map_err(CommandError::from_core)?;
         output_success("Backup created.");
         Ok(())
     }
@@ -1231,7 +1228,7 @@ impl ShellContext {
         let backups = self
             .manager()
             .list_backups(name)
-            .map_err(CommandError::from_ledger)?;
+            .map_err(CommandError::from_core)?;
         if backups.is_empty() {
             output_warning("No backups available.");
             return Ok(());
@@ -1248,7 +1245,7 @@ impl ShellContext {
         let backups = self
             .manager()
             .list_backups(name)
-            .map_err(CommandError::from_ledger)?;
+            .map_err(CommandError::from_core)?;
         if backups.is_empty() {
             return Err(CommandError::InvalidArguments(
                 "no backups available to restore".into(),
@@ -1308,7 +1305,7 @@ impl ShellContext {
         let report = self
             .manager_mut()
             .restore_backup(name, &backup_name)
-            .map_err(CommandError::from_ledger)?;
+            .map_err(CommandError::from_core)?;
         let path = self.storage.ledger_path(name);
         self.ledger_path = Some(path.clone());
         self.clear_active_simulation();
@@ -1325,7 +1322,7 @@ impl ShellContext {
         let file_name = self
             .config_manager
             .backup(&self.config, note.as_deref())
-            .map_err(CommandError::from_ledger)?;
+            .map_err(CommandError::from_core)?;
         output_success(format!("Configuration backup saved: {}", file_name));
         Ok(())
     }
@@ -1334,7 +1331,7 @@ impl ShellContext {
         let backups = self
             .config_manager
             .list_backups()
-            .map_err(CommandError::from_ledger)?;
+            .map_err(CommandError::from_core)?;
         if backups.is_empty() {
             output_warning("No configuration backups found.");
             return Ok(());
@@ -1350,7 +1347,7 @@ impl ShellContext {
         let backups = self
             .config_manager
             .list_backups()
-            .map_err(CommandError::from_ledger)?;
+            .map_err(CommandError::from_core)?;
         if backups.is_empty() {
             return Err(CommandError::InvalidArguments(
                 "no configuration backups available".into(),
@@ -1390,7 +1387,7 @@ impl ShellContext {
         let restored = self
             .config_manager
             .restore(&backup_name)
-            .map_err(CommandError::from_ledger)?;
+            .map_err(CommandError::from_core)?;
         self.config = restored;
         self.persist_config()?;
         output_success(format!("Configuration restored from {}.", backup_name));
@@ -1506,7 +1503,7 @@ impl ShellContext {
                 let ledger = self.current_ledger_mut()?;
                 ledger
                     .add_simulation_transaction(&sim_name, transaction)
-                    .map_err(CommandError::from_ledger)?;
+                    .map_err(CommandError::from_core)?;
             }
             output_success(format!(
                 "Transaction saved to simulation `{}`: {}",
@@ -2034,7 +2031,7 @@ impl ShellContext {
                 }
                 let start = parse_date(args[1])?;
                 let end = parse_date(args[2])?;
-                let window = DateWindow::new(start, end).map_err(CommandError::from_ledger)?;
+                let window = DateWindow::new(start, end).map_err(CommandError::from_core)?;
                 Ok((window, BudgetScope::Custom))
             }
             other => Err(CommandError::InvalidArguments(format!(
@@ -2051,7 +2048,7 @@ impl ShellContext {
     ) -> Result<DateWindow, CommandError> {
         if args.is_empty() {
             let end = today + Duration::days(90);
-            return DateWindow::new(today, end).map_err(CommandError::from_ledger);
+            return DateWindow::new(today, end).map_err(CommandError::from_core);
         }
         if matches!(args[0].to_lowercase().as_str(), "custom" | "range") {
             if args.len() < 3 {
@@ -2061,7 +2058,7 @@ impl ShellContext {
             }
             let start = parse_date(args[1])?;
             let end = parse_date(args[2])?;
-            return DateWindow::new(start, end).map_err(CommandError::from_ledger);
+            return DateWindow::new(start, end).map_err(CommandError::from_core);
         }
         let mut tokens = args;
         if !tokens.is_empty() && tokens[0].eq_ignore_ascii_case("next") {
@@ -2075,7 +2072,7 @@ impl ShellContext {
         let interval_expr = tokens.join(" ");
         let interval = parse_time_interval_str(&interval_expr)?;
         let end = interval.add_to(today, 1);
-        DateWindow::new(today, end).map_err(CommandError::from_ledger)
+        DateWindow::new(today, end).map_err(CommandError::from_core)
     }
 
     fn print_budget_summary(&self, ledger: &Ledger, summary: &BudgetSummary) {
@@ -2653,7 +2650,7 @@ impl ShellContext {
         let txn_id = self.select_transaction_id("Exclude which transaction?")?;
         self.current_ledger_mut()?
             .exclude_transaction_in_simulation(sim_name, txn_id)
-            .map_err(CommandError::from_ledger)?;
+            .map_err(CommandError::from_core)?;
         output_success(format!("Transaction {} excluded in `{}`", txn_id, sim_name));
         Ok(())
     }
@@ -2690,7 +2687,7 @@ impl ShellContext {
 
         self.current_ledger_mut()?
             .modify_transaction_in_simulation(sim_name, patch)
-            .map_err(CommandError::from_ledger)?;
+            .map_err(CommandError::from_core)?;
         output_success(format!("Transaction {} modified in `{}`", txn_id, sim_name));
         Ok(())
     }
@@ -3017,18 +3014,6 @@ fn short_id(id: Uuid) -> String {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum CliError {
-    #[error("{0}")]
-    Internal(String),
-    #[error(transparent)]
-    Readline(#[from] ReadlineError),
-    #[error(transparent)]
-    Command(#[from] CommandError),
-    #[error(transparent)]
-    Io(#[from] io::Error),
-}
-
-#[derive(Debug, thiserror::Error)]
 pub enum CommandError {
     #[error("Ledger not loaded. Use `new-ledger` or `load` first.")]
     LedgerNotLoaded,
@@ -3041,7 +3026,7 @@ pub enum CommandError {
     #[error(transparent)]
     Serde(#[from] serde_json::Error),
     #[error(transparent)]
-    Ledger(#[from] LedgerError),
+    Core(#[from] BudgetError),
     #[error(transparent)]
     Dialoguer(#[from] dialoguer::Error),
     #[error("exit requested")]
@@ -3051,15 +3036,15 @@ pub enum CommandError {
 impl From<ServiceError> for CommandError {
     fn from(err: ServiceError) -> Self {
         match err {
-            ServiceError::Ledger(err) => CommandError::Ledger(err),
+            ServiceError::Core(err) => CommandError::Core(err),
             ServiceError::Invalid(message) => CommandError::InvalidArguments(message),
         }
     }
 }
 
 impl CommandError {
-    pub(crate) fn from_ledger(error: LedgerError) -> Self {
-        CommandError::Ledger(error)
+    pub(crate) fn from_core(error: BudgetError) -> Self {
+        CommandError::Core(error)
     }
 }
 
@@ -3069,6 +3054,24 @@ impl From<ProviderError> for CommandError {
             ProviderError::MissingLedger => CommandError::LedgerNotLoaded,
             ProviderError::Store(message) => CommandError::Message(message),
         }
+    }
+}
+
+impl From<CommandError> for CliError {
+    fn from(err: CommandError) -> Self {
+        CliError::Command(err.to_string())
+    }
+}
+
+impl From<ReadlineError> for CliError {
+    fn from(err: ReadlineError) -> Self {
+        CliError::Command(err.to_string())
+    }
+}
+
+impl From<io::Error> for CliError {
+    fn from(err: io::Error) -> Self {
+        CliError::Command(err.to_string())
     }
 }
 

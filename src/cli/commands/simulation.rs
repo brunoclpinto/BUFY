@@ -106,7 +106,7 @@ fn cmd_create_simulation(context: &mut ShellContext, args: &[&str]) -> CommandRe
     let ledger = context.current_ledger_mut()?;
     ledger
         .create_simulation(name.clone(), notes)
-        .map_err(CommandError::from_ledger)?;
+        .map_err(CommandError::from_core)?;
     io::print_success(format!("Simulation `{}` created.", name));
     Ok(())
 }
@@ -183,7 +183,7 @@ fn cmd_apply_simulation(context: &mut ShellContext, args: &[&str]) -> CommandRes
     context
         .current_ledger_mut()?
         .apply_simulation(&name)
-        .map_err(CommandError::from_ledger)?;
+        .map_err(CommandError::from_core)?;
     if context
         .active_simulation_name()
         .map(|active| active.eq_ignore_ascii_case(&name))
@@ -240,7 +240,7 @@ fn cmd_discard_simulation(context: &mut ShellContext, args: &[&str]) -> CommandR
     context
         .current_ledger_mut()?
         .discard_simulation(&name)
-        .map_err(CommandError::from_ledger)?;
+        .map_err(CommandError::from_core)?;
     if was_active {
         context.clear_active_simulation();
     }

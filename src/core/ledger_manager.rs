@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::errors::LedgerError;
+use crate::core::errors::BudgetError;
 use crate::ledger::ledger::CURRENT_SCHEMA_VERSION;
 use crate::ledger::Ledger;
 use crate::storage::json_backend::ledger_warnings;
@@ -36,7 +36,7 @@ impl LedgerManager {
         self.storage.as_ref()
     }
 
-    pub fn load(&mut self, name: &str) -> Result<LoadMetadata, LedgerError> {
+    pub fn load(&mut self, name: &str) -> Result<LoadMetadata, BudgetError> {
         let mut ledger = self.storage.load(name)?;
         let meta = self.process_loaded_ledger(&mut ledger)?;
         self.current = Some(ledger);
@@ -50,7 +50,7 @@ impl LedgerManager {
         })
     }
 
-    pub fn load_from_path(&mut self, path: &Path) -> Result<LoadMetadata, LedgerError> {
+    pub fn load_from_path(&mut self, path: &Path) -> Result<LoadMetadata, BudgetError> {
         let mut ledger = self.storage.load_from_path(path)?;
         let meta = self.process_loaded_ledger(&mut ledger)?;
         self.current = Some(ledger);
@@ -64,41 +64,41 @@ impl LedgerManager {
         })
     }
 
-    pub fn save(&mut self) -> Result<(), LedgerError> {
+    pub fn save(&mut self) -> Result<(), BudgetError> {
         let ledger = self
             .current
             .as_ref()
-            .ok_or_else(|| LedgerError::Persistence("no ledger loaded".into()))?;
+            .ok_or_else(|| BudgetError::StorageError("no ledger loaded".into()))?;
         let name = self
             .current_name
             .as_deref()
-            .ok_or_else(|| LedgerError::Persistence("unnamed ledger cannot be saved".into()))?;
+            .ok_or_else(|| BudgetError::StorageError("unnamed ledger cannot be saved".into()))?;
         self.storage.save(ledger, name)
     }
 
-    pub fn save_as(&mut self, name: &str) -> Result<(), LedgerError> {
+    pub fn save_as(&mut self, name: &str) -> Result<(), BudgetError> {
         let ledger = self
             .current
             .as_ref()
-            .ok_or_else(|| LedgerError::Persistence("no ledger loaded".into()))?;
+            .ok_or_else(|| BudgetError::StorageError("no ledger loaded".into()))?;
         self.storage.save(ledger, name)?;
         self.current_name = Some(name.to_string());
         Ok(())
     }
 
-    pub fn backup(&self, note: Option<&str>) -> Result<(), LedgerError> {
+    pub fn backup(&self, note: Option<&str>) -> Result<(), BudgetError> {
         let ledger = self
             .current
             .as_ref()
-            .ok_or_else(|| LedgerError::Persistence("no ledger loaded".into()))?;
+            .ok_or_else(|| BudgetError::StorageError("no ledger loaded".into()))?;
         let name = self
             .current_name
             .as_deref()
-            .ok_or_else(|| LedgerError::Persistence("current ledger is unnamed".into()))?;
+            .ok_or_else(|| BudgetError::StorageError("current ledger is unnamed".into()))?;
         self.storage.backup(ledger, name, note)
     }
 
-    pub fn list_backups(&self, name: &str) -> Result<Vec<String>, LedgerError> {
+    pub fn list_backups(&self, name: &str) -> Result<Vec<String>, BudgetError> {
         self.storage.list_backups(name)
     }
 
@@ -106,7 +106,7 @@ impl LedgerManager {
         &mut self,
         name: &str,
         backup_name: &str,
-    ) -> Result<LoadMetadata, LedgerError> {
+    ) -> Result<LoadMetadata, BudgetError> {
         let mut ledger = self.storage.restore(name, backup_name)?;
         let meta = self.process_loaded_ledger(&mut ledger)?;
         self.current = Some(ledger);
@@ -139,7 +139,7 @@ impl LedgerManager {
         self.current_name = None;
     }
 
-    fn process_loaded_ledger(&self, ledger: &mut Ledger) -> Result<LoadEffects, LedgerError> {
+    fn process_loaded_ledger(&self, ledger: &mut Ledger) -> Result<LoadEffects, BudgetError> {
         let original_version = ledger.schema_version;
         self.ensure_schema_support(original_version)?;
         let migrations = ledger.migrate_from_schema(original_version);
@@ -152,9 +152,9 @@ impl LedgerManager {
         })
     }
 
-    fn ensure_schema_support(&self, schema_version: u8) -> Result<(), LedgerError> {
+    fn ensure_schema_support(&self, schema_version: u8) -> Result<(), BudgetError> {
         if schema_version > CURRENT_SCHEMA_VERSION {
-            return Err(LedgerError::Persistence(format!(
+            return Err(BudgetError::StorageError(format!(
                 "ledger schema v{} is newer than supported v{}",
                 schema_version, CURRENT_SCHEMA_VERSION
             )));
@@ -236,7 +236,7 @@ mod tests {
             .load_from_path(&path)
             .expect_err("load future schema should fail");
         match err {
-            LedgerError::Persistence(message) => {
+            BudgetError::StorageError(message) => {
                 assert!(message.contains("newer"), "unexpected error: {message}");
             }
             other => panic!("expected persistence error, got {other:?}"),

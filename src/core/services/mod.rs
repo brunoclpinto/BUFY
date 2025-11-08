@@ -8,14 +8,14 @@ pub use category_service::CategoryService;
 pub use summary_service::SummaryService;
 pub use transaction_service::TransactionService;
 
-use crate::errors::LedgerError;
+use crate::core::errors::BudgetError;
 
 pub type ServiceResult<T> = Result<T, ServiceError>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ServiceError {
     #[error(transparent)]
-    Ledger(#[from] LedgerError),
+    Core(#[from] BudgetError),
     #[error("{0}")]
     Invalid(String),
 }
