@@ -1,10 +1,8 @@
-use std::path::PathBuf;
-
 use crate::{
     cli::selectors::{SelectionItem, SelectionProvider},
+    config::ConfigManager,
     core::ledger_manager::LedgerManager,
     ledger::{Account, Category, Ledger, Simulation, Transaction},
-    storage::json_backend::JsonStorage,
 };
 use chrono::{DateTime, Local, NaiveDateTime, Utc};
 
@@ -161,48 +159,27 @@ impl<'a> SelectionProvider for LedgerBackupSelectionProvider<'a> {
 }
 
 pub struct ConfigBackupSelectionProvider<'a> {
-    storage: &'a JsonStorage,
+    manager: &'a ConfigManager,
 }
 
 impl<'a> ConfigBackupSelectionProvider<'a> {
-    pub fn new(storage: &'a JsonStorage) -> Self {
-        Self { storage }
+    pub fn new(manager: &'a ConfigManager) -> Self {
+        Self { manager }
     }
 }
 
 impl<'a> SelectionProvider for ConfigBackupSelectionProvider<'a> {
-    type Id = PathBuf;
+    type Id = String;
     type Error = ProviderError;
 
     fn items(&mut self) -> Result<Vec<SelectionItem<Self::Id>>, Self::Error> {
         let backups = self
-            .storage
-            .list_config_backups()
+            .manager
+            .list_backups()
             .map_err(|err| ProviderError::Store(err.to_string()))?;
         Ok(backups
             .into_iter()
-            .map(|info| {
-                let file_name = info
-                    .path
-                    .file_name()
-                    .and_then(|stem| stem.to_str())
-                    .unwrap_or("config-backup");
-                let created = info.created_at.with_timezone(&Local);
-                let mut label = format!(
-                    "{:<30} (Created: {})",
-                    file_name,
-                    created.format("%Y-%m-%d %H:%M")
-                );
-                if let Some(note) = info
-                    .note
-                    .as_ref()
-                    .map(|n| n.trim())
-                    .filter(|n| !n.is_empty())
-                {
-                    label.push_str(&format!("  [note: {}]", note));
-                }
-                SelectionItem::new(info.path, label)
-            })
+            .map(|name| SelectionItem::new(name.clone(), backup_label(&name)))
             .collect())
     }
 }

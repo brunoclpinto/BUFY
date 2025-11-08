@@ -48,7 +48,7 @@ Phase 3 introduces an interactive `rustyline`-powered shell that wraps the ledge
 - **Ledger workflows** – `new-ledger`, `save`, `load`, and their named counterparts (`save-ledger`, `load-ledger`) keep the working set obvious. The prompt reflects the active ledger, and auto-complete/history improve ergonomics.
 - **Data entry** – guided prompts for accounts, categories, and transactions with validation, plus script-mode (`BUDGET_CORE_CLI_SCRIPT=1`) automation for tests and CI. Transaction listings annotate recurrence hints (`[recurring]`, `[instance]`). The `transaction` command family (`transaction add/edit/remove/show/complete`) now fronts the ledger workflow: add/edit launch the Phase 14 form engine, while remove/show/complete fall back to the shared selection manager when the user omits an index.
 - **Simulation & backup selectors** – `simulation apply/discard/enter/show`, `restore-ledger`, `config restore`, and their list counterparts render the same two-space numbered menu. When identifiers are missing, the selector prints “Type cancel or press Esc to abort.”, accepts arrow keys or number shortcuts, and returns the exact item name on success. Empty domains (no simulations/backups) surface domain-specific warnings instead of generic “No items available.” alerts.
-- **Configuration backups (Phase 18)** – `config backup [--note <text>]` snapshots the active formatting/locale/valuation settings into `config_backups/config_<timestamp>.json`. Metadata is stored alongside the payload (`schema_version`, `created_at`, optional `note`, and a nested `config` object). `config backups` reuses the selection list format and `config restore <backup?>` previews the snapshot (dates, note, key settings) before confirmation, updating both the in-memory ledger and the persisted `config.json`.
+- **Config system (Phase 18)** – `config show/set/backup/restore` manages the global preferences file (`config/config.json`) independently of any ledger. Snapshots land in `config/backups/config_<timestamp>.json`, and restores immediately update the live config so future sessions inherit locale/currency/theme defaults and the last-opened ledger name.
 - **Recurrence tooling** – `recurring list/edit/clear/pause/resume/skip/sync` and `complete <idx>` manage schedules without leaving the shell.
 - **Forecasting & simulations** – `forecast`, `summary <simulation>`, and `simulation add/modify/exclude` expose future-looking views side-by-side with base results.
 - **Persistence integration** – the CLI auto-loads the last ledger, exposes backup/restore commands, and surfaces migration warnings emitted by the `LedgerManager` + `JsonStorage` persistence layer.
@@ -95,9 +95,8 @@ Utility helpers house cross-cutting concerns.
   - Generate canonical filenames (slugified ledger names), temp-file paths, and backup directories.
   - Perform deterministic, pretty JSON serialization (`serde_json::to_string_pretty`) and atomic writes via `<file>.tmp` + `rename`.
   - Run schema migrations by calling `Ledger::migrate_from_schema` and `refresh_recurrence_metadata` on load, recording any warnings.
-  - Maintain `state.json` so the CLI can auto-load the previous ledger.
   - Manage retention-limited backups (`<slug>_YYYYMMDD_HHMM[_note].json`) and expose `backup`, `backup_named`, `list_backups`, and `restore_backup` APIs.
-  - Manage configuration snapshots (`config_backups/config_<timestamp>.json`) via `create_config_backup`, `list_config_backups`, `load_config_snapshot`, and `save_active_config`. Snapshots always include `schema_version`, `created_at`, `note`, and a strongly typed `config` payload so restores can validate structure before touching the active ledger.
+- `budget_core::config::ConfigManager` (Phase 18) manages the CLI preference file (`config/config.json`). It loads defaults on startup, persists edits from `config set`, tracks `last_opened_ledger`, and stores timestamped backups under `config/backups/` so users can roll back global settings independently of any ledger.
 
 Error handling:
 
@@ -113,7 +112,7 @@ Error handling:
    - `schema_version` is updated and `updated_at` re-stamped.
 2. **Load**
    - `LedgerManager::load` (or `load_from_path`) reads JSON, deserializes into a `Ledger`, runs migrations, refreshes recurrence metadata, validates references (issues are surfaced as CLI warnings), and stores the current ledger in memory.
-   - The CLI records the ledger name/path, resets active simulations, and updates `state.json`.
+   - The CLI records the ledger name/path, resets active simulations, and updates the global config’s `last_opened_ledger`.
 3. **Backup / Restore**
    - `backup-ledger` is an alias for `LedgerManager::backup`, giving the user an explicit restore point with slugged filenames.
    - `restore-ledger` copies the selected snapshot into place (also backing up the current file for safety) and immediately reloads it so the user sees the resulting warnings/migrations.

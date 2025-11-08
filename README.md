@@ -57,9 +57,9 @@ For architectural background see `docs/design_overview.md`.
 | --- | --- | --- |
 | Ledger lifecycle | `new-ledger`, `load [path]`, `save [path]`, `load-ledger <name>`, `save-ledger [name]` | Named saves use the managed store; path-based commands operate on arbitrary JSON files. |
 | Persistence tooling | `backup-ledger [name]`, `list-backups [name]`, `restore-ledger <idx|pattern> [name]` | Snapshots live under `~/.budget_core/backups/<slug>/<slug>_YYYYMMDD_HHMM[_note].json`. |
-| Currency & locale | `config [show|base-currency|locale|negative-style|screen-reader|high-contrast|valuation]` | Persisted per-ledger settings for currency display, locale defaults, valuation policies, and accessibility. |
+| Config management | `config show`, `config set <locale|currency|theme|last_opened_ledger> <value>`, `config backup [note]`, `config backups`, `config restore [name]` | Preferences live in `~/.budget_core/config/config.json` with backups under `config/backups/`. |
 | Data entry | `transaction add/edit/remove/show/complete`, `add account`, `add category`, `add transaction`, `list [accounts|categories|transactions]` | Transaction list output shows recurrence hints (`[recurring]`, `[instance]`). |
-| Backups & selection | `config backup [--note <text>]`, `config backups`, `config restore <backup?>`, `restore-ledger <backup?>`, `simulation apply/discard/enter <name?>` | Omit the identifier to open an interactive list (two-space numbered rows, `Type cancel` prompt); success messages echo the chosen item and timestamp. |
+| Backups & selection | `config backup [note]`, `config backups`, `config restore <name?>`, `restore-ledger <backup?>`, `simulation apply/discard/enter <name?>` | Omit the identifier to open an interactive list (two-space numbered rows, `Type cancel` prompt); success messages echo the chosen item and timestamp. |
 | Recurrence | `recurring list/edit/clear/pause/resume/skip/sync`, `complete <idx>` | Schedules track start/end dates, exceptions, and automatically materialize overdue instances. |
 | Forecasting | `forecast [simulation] [<n> <unit> | custom <start> <end>]` | Produces future inflow/outflow projections plus window-specific budget summaries. |
 | Simulations | `create-simulation`, `enter-simulation`, `simulation add/modify/exclude`, `list-simulations`, `summary <simulation>`, `apply-simulation`, `discard-simulation` | Enables “what-if” comparisons against the base ledger. |
@@ -82,9 +82,9 @@ Budget Core now understands recurring obligations and can materialize missed occ
 - `recurring list [overdue|pending|all]` surfaces every recurrence with next-due dates, overdue counts, and status (Active/Paused/Completed). Use `recurring edit <transaction_index>` to attach or update a schedule for any transaction, `recurring clear` to remove it, `recurring pause`/`recurring resume` to toggle activity, `recurring skip <index> <YYYY-MM-DD>` to add exceptions, and `recurring sync [YYYY-MM-DD]` to backfill overdue ledger entries.
 - `forecast [simulation_name] [<number> <unit> | custom <start> <end>]` produces a deterministic projection for the requested window and reports inflow/outflow totals, overdue vs. pending counts, and the top upcoming instances. Prefix the command with a simulation name to preview "what-if" schedules.
 - `transaction complete <transaction_index> <YYYY-MM-DD> <amount>` (alias: `complete`) marks a scheduled transaction as finished and updates recurrence metadata automatically.
-- `config backup [--note <text>]` writes a timestamped snapshot to `~/.budget_core/config_backups/` (metadata includes `schema_version`, `created_at`, `note`, and a `config` payload).
-- `config restore <backup_reference?>` mirrors `restore-ledger`: pick a saved configuration snapshot interactively or pass the filename to restore directly.
-- `config backups` prints numbered configuration snapshots sorted by newest first; each entry shows the creation timestamp and optional note. Use `config restore` to select one from the list.
+- `config backup [note]` writes a timestamped snapshot of `config/config.json` to `~/.budget_core/config/backups/`.
+- `config restore <name?>` mirrors `restore-ledger`: pick a saved configuration snapshot interactively or pass the filename to restore directly.
+- `config backups` prints numbered configuration snapshots sorted by newest first; each entry shows the creation timestamp (parsed from the filename). Use `config restore` to select one from the list.
 
 Recurrence state is persisted with the ledger JSON so restarting the CLI preserves start dates, next occurrences, and skipped dates. Use `recurring sync` after structural changes (new accounts/categories) to ensure schedules stay aligned.
 
@@ -97,7 +97,7 @@ Phase 7 introduces a fully managed JSON store rooted at `~/.budget_core` (overri
 - `backup-ledger [name]` snapshots the current file, `list-backups [name]` enumerates available restore points, and `restore-ledger <index|pattern> [name]` reverts to the desired snapshot (with interactive confirmation).
 - The classic `save [path]` / `load [path]` commands remain for ad-hoc JSON paths.
 
-All saves are deterministic (bar timestamps), schema versioned, and guard against corruption via temp files plus optional rolling backups. A small state file remembers the last open ledger; interactive sessions auto-load it on startup for continuity.
+All saves are deterministic (bar timestamps), schema versioned, and guard against corruption via temp files plus optional rolling backups. The shared config file tracks the last opened ledger so interactive sessions auto-load it on startup for continuity.
 
 Additional architectural notes are captured in `docs/design_overview.md`.
 
@@ -105,12 +105,16 @@ Additional architectural notes are captured in `docs/design_overview.md`.
 
 ```
 ~/.budget_core/
-├── demo.json                 # canonical ledger save
+├── ledgers/
+│   └── demo.json                 # canonical ledger save
 ├── backups/
 │   └── demo/
 │       ├── home_20251026_0820.json
 │       └── …
-└── state.json                # remembers the last opened ledger
+└── config/
+    ├── config.json               # persisted CLI preferences
+    └── backups/
+        └── config_20251107_2057.json
 ```
 
 Every save produces pretty JSON for human inspection, and backups are pruned according to the store’s retention setting (default 5). Loads validate schema versions (`schema_version`), rebuild recurrence metadata, and surface migration notes in the CLI.
@@ -139,9 +143,8 @@ Every save produces pretty JSON for human inspection, and backups are pruned acc
 - Example workflow:
 
   ```text
-  config backup --note "before sync"
-  ✔ Configuration backup saved: config_2025-11-02T14-30-00.json (Created: 2025-11-02 14:30)
-  ℹ Stored in the `config_backups` directory.
+  config backup "before sync"
+  ✔ Configuration backup saved: config_2025-11-02T14-30-00.json
 
   config backups
   Available configuration backups:
@@ -199,7 +202,6 @@ Every save produces pretty JSON for human inspection, and backups are pruned acc
 - **Currency mismatches** – When summaries warn about incomplete conversions, align the ledger/accounts on a single currency or adjust transaction amounts manually; automatic FX is not supported.
 - **Atomic save failures** – Errors mentioning temp files indicate filesystem permissions or disk space issues. Verify write access to `~/.budget_core` (or set `BUDGET_CORE_HOME`) and rerun `save-ledger`.
 - **Recurrence drift** – Run `recurring sync <YYYY-MM-DD>` to backfill overdue instances before generating forecasts. The command emits a summary of newly materialized transactions.
-- **Accessibility output** – If screen readers skip totals, ensure `config screen-reader on` is set; the CLI will re-render with explicit wording.
 - Additional developer-focused notes, schema references, and integration steps for Swift/Kotlin/C# live in `docs/design_overview.md` and `docs/integration_guides.md`.
 
 ## License
@@ -212,4 +214,3 @@ Licensed under either of
 at your option.
 
 Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in this project is licensed under the same dual license terms.
-- `config backups` prints numbered configuration snapshots sorted by newest first; each entry shows the creation timestamp and optional note. Use `config restore` to select one from the list.

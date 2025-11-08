@@ -56,8 +56,9 @@ experience accessible on any terminal.
 
 - **Ledger backups**: created automatically before every save at
   `~/.budget_core/backups/<slug>/<slug>_YYYYMMDD_HHMM[_note].json`.
-- **Config backups**: create snapshots with `config backup [--note <text>]` and
-  list them via `config backups`.
+- **Config backups**: snapshot CLI preferences with `config backup [note]`
+  and enumerate them via `config backups` (files live under
+  `~/.budget_core/config/backups/`).
 - **Restore workflows**:
   - `restore-ledger` and `config restore` accept either a reference (index or
     substring) or launch a selection list when no argument is provided.

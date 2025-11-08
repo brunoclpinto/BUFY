@@ -4,6 +4,7 @@
 //! that power higher level budgeting workflows and CLIs.
 
 pub mod cli;
+pub mod config;
 pub mod core;
 pub mod currency;
 pub mod domain;

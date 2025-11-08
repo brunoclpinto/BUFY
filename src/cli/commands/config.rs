@@ -10,8 +10,8 @@ use crate::currency::{
 pub(crate) fn definitions() -> Vec<CommandDefinition> {
     vec![CommandDefinition::new(
         "config",
-        "Configure currencies, locale, and valuation",
-        "config [show|base-currency|locale|negative-style|screen-reader|high-contrast|valuation|backup|backups|restore]",
+        "View and manage global CLI preferences",
+        "config [show|set <key> <value>|backup [note]|backups|restore [name]]",
         cmd_config,
     )]
 }
@@ -38,11 +38,47 @@ fn locale_template(tag: &str) -> LocaleConfig {
 
 fn cmd_config(context: &mut ShellContext, args: &[&str]) -> CommandResult {
     if args.is_empty() || args[0].eq_ignore_ascii_case("show") {
-        context.show_config()?;
-        return Ok(());
+        return context.show_config();
     }
 
     match args[0].to_lowercase().as_str() {
+        "set" => {
+            if args.len() < 3 {
+                return Err(CommandError::InvalidArguments(
+                    "usage: config set <locale|currency|theme|last_opened_ledger> <value>".into(),
+                ));
+            }
+            let key = args[1];
+            let value = args[2..].join(" ");
+            context.set_config_value(key, value.trim())
+        }
+        "backup" => {
+            let note = if args.len() > 1 {
+                Some(args[1..].join(" "))
+            } else {
+                None
+            };
+            context.backup_app_config(note)
+        }
+        "backups" => context.list_config_backups(),
+        "restore" => {
+            if args.len() > 1 {
+                context.restore_config_by_reference(args[1])
+            } else {
+                if !context.can_prompt() {
+                    return Err(CommandError::InvalidArguments(
+                        "usage: config restore <name>".into(),
+                    ));
+                }
+                match context.select_config_backup("Select configuration backup:")? {
+                    Some(name) => context.restore_config_from_name(name),
+                    None => {
+                        io::print_info("Operation cancelled.");
+                        Ok(())
+                    }
+                }
+            }
+        }
         "base-currency" => {
             let code = args.get(1).ok_or_else(|| {
                 CommandError::InvalidArguments("usage: config base-currency <ISO>".into())
@@ -137,58 +173,8 @@ fn cmd_config(context: &mut ShellContext, args: &[&str]) -> CommandResult {
             io::print_success("Valuation policy updated.");
             Ok(())
         }
-        "backup" => {
-            let mut note: Option<String> = None;
-            let mut iter = args.iter().skip(1);
-            while let Some(arg) = iter.next() {
-                if arg.eq_ignore_ascii_case("--note") {
-                    let value = iter.next().ok_or_else(|| {
-                        CommandError::InvalidArguments(
-                            "usage: config backup [--note <text>]".into(),
-                        )
-                    })?;
-                    note = Some((*value).to_string());
-                } else {
-                    return Err(CommandError::InvalidArguments(format!(
-                        "unknown option `{}`",
-                        arg
-                    )));
-                }
-            }
-            context.create_config_backup(note)
-        }
-        "backups" => {
-            if args.len() > 1 {
-                return Err(CommandError::InvalidArguments(
-                    "usage: config backups".into(),
-                ));
-            }
-            context.list_config_backups()
-        }
-        "restore" => match args.len() {
-            1 => {
-                if !context.can_prompt() {
-                    return Err(CommandError::InvalidArguments(
-                        "usage: config restore <backup_reference>".into(),
-                    ));
-                }
-                match context
-                    .select_config_backup("Select a configuration backup to restore:")?
-                {
-                    Some(path) => context.restore_config_from_path(path),
-                    None => {
-                        io::print_info("Operation cancelled.");
-                        Ok(())
-                    }
-                }
-            }
-            2 => context.restore_config_by_reference(args[1]),
-            _ => Err(CommandError::InvalidArguments(
-                "usage: config restore [backup_reference]".into(),
-            )),
-        },
         _ => Err(CommandError::InvalidArguments(
-            "usage: config [show|base-currency|locale|negative-style|screen-reader|high-contrast|valuation|backup|backups|restore]".into(),
+            "usage: config [show|set <key> <value>|backup [note]|backups|restore [name]|base-currency <ISO>|locale <tag>|negative-style <sign|parentheses>|screen-reader <on|off>|high-contrast <on|off>|valuation <transaction|report|custom> [date]]".into(),
         )),
     }
 }

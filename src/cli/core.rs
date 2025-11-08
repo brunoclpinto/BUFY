@@ -13,6 +13,7 @@ use strsim::levenshtein;
 use uuid::Uuid;
 
 use crate::{
+    config::{Config, ConfigManager},
     core::ledger_manager::LedgerManager,
     core::services::{
         AccountService, CategoryService, ServiceError, SummaryService, TransactionService,
@@ -26,7 +27,7 @@ use crate::{
         SimulationBudgetImpact, SimulationChange, SimulationTransactionPatch, TimeInterval,
         TimeUnit, Transaction, TransactionStatus,
     },
-    storage::json_backend::{ConfigData, ConfigSnapshot, JsonStorage},
+    storage::json_backend::JsonStorage,
 };
 
 use crate::cli::forms::{
@@ -98,6 +99,8 @@ pub struct ShellContext {
     state: CliState,
     theme: ColorfulTheme,
     storage: JsonStorage,
+    config_manager: ConfigManager,
+    config: Config,
     selection_override: Option<SelectionOverride>,
 }
 
@@ -109,14 +112,7 @@ impl ShellContext {
         if self.state.ledger_ref().is_some() {
             return Ok(());
         }
-        let last = match self.storage.last_ledger() {
-            Ok(value) => value,
-            Err(err) => {
-                tracing::warn!("last ledger lookup failed: {err}");
-                return Ok(());
-            }
-        };
-        let Some(name) = last else {
+        let Some(name) = self.config.last_opened_ledger.clone() else {
             return Ok(());
         };
         if let Ok(report) = self.manager_mut().load(&name) {
@@ -137,12 +133,28 @@ impl ShellContext {
         self.state.manager_mut()
     }
 
+    fn persist_config(&self) -> Result<(), CommandError> {
+        self.config_manager
+            .save(&self.config)
+            .map_err(CommandError::from_ledger)
+    }
+
+    fn update_last_opened(&mut self, name: Option<&str>) -> CommandResult {
+        self.config.last_opened_ledger = name.map(|value| value.to_string());
+        self.persist_config()
+    }
+
     pub fn new(mode: CliMode) -> Result<Self, CliError> {
         let registry = CommandRegistry::new(commands::all_definitions());
 
         let storage =
             JsonStorage::new_default().map_err(|err| CliError::Internal(err.to_string()))?;
         let manager = LedgerManager::new(Box::new(storage.clone()));
+        let config_manager =
+            ConfigManager::new().map_err(|err| CliError::Internal(err.to_string()))?;
+        let config = config_manager
+            .load()
+            .map_err(|err| CliError::Internal(err.to_string()))?;
 
         let mut app = Self {
             mode,
@@ -150,6 +162,8 @@ impl ShellContext {
             state: CliState::new(manager),
             theme: ColorfulTheme::default(),
             storage,
+            config_manager,
+            config,
             selection_override: None,
         };
 
@@ -206,34 +220,79 @@ impl ShellContext {
     }
 
     pub(crate) fn show_config(&self) -> CommandResult {
-        let ledger = self.current_ledger()?;
         output_section("Configuration");
+        output_info(format!("  Locale: {}", self.config.locale));
+        output_info(format!("  Currency: {}", self.config.currency));
         output_info(format!(
-            "  Base currency: {}",
-            ledger.base_currency.as_str()
-        ));
-        output_info(format!("  Locale: {}", ledger.locale.language_tag));
-        output_info(format!(
-            "  Negative style: {:?}",
-            ledger.format.negative_style
+            "  Theme: {}",
+            self.config.theme.as_deref().unwrap_or("default")
         ));
         output_info(format!(
-            "  Screen reader mode: {}",
-            if ledger.format.screen_reader_mode {
-                "on"
-            } else {
-                "off"
+            "  Last opened ledger: {}",
+            self.config
+                .last_opened_ledger
+                .as_deref()
+                .unwrap_or("(none)")
+        ));
+        if let Ok(ledger) = self.current_ledger() {
+            output_section("Ledger Format");
+            output_info(format!(
+                "  Base currency: {}",
+                ledger.base_currency.as_str()
+            ));
+            output_info(format!("  Locale: {}", ledger.locale.language_tag));
+            output_info(format!(
+                "  Negative style: {:?}",
+                ledger.format.negative_style
+            ));
+            output_info(format!(
+                "  Screen reader mode: {}",
+                if ledger.format.screen_reader_mode {
+                    "on"
+                } else {
+                    "off"
+                }
+            ));
+            output_info(format!(
+                "  High contrast mode: {}",
+                if ledger.format.high_contrast_mode {
+                    "on"
+                } else {
+                    "off"
+                }
+            ));
+            output_info(format!("  Valuation policy: {:?}", ledger.valuation_policy));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn set_config_value(&mut self, key: &str, value: &str) -> CommandResult {
+        match key.to_lowercase().as_str() {
+            "locale" => self.config.locale = value.to_string(),
+            "currency" => self.config.currency = value.to_string(),
+            "theme" => {
+                if value.eq_ignore_ascii_case("none") || value.is_empty() {
+                    self.config.theme = None;
+                } else {
+                    self.config.theme = Some(value.to_string());
+                }
             }
-        ));
-        output_info(format!(
-            "  High contrast mode: {}",
-            if ledger.format.high_contrast_mode {
-                "on"
-            } else {
-                "off"
+            "last_opened_ledger" => {
+                if value.eq_ignore_ascii_case("none") || value.is_empty() {
+                    self.config.last_opened_ledger = None;
+                } else {
+                    self.config.last_opened_ledger = Some(value.to_string());
+                }
             }
-        ));
-        output_info(format!("  Valuation policy: {:?}", ledger.valuation_policy));
+            other => {
+                return Err(CommandError::InvalidArguments(format!(
+                    "unknown config key `{}`",
+                    other
+                )))
+            }
+        }
+        self.persist_config()?;
+        output_success("Configuration updated.");
         Ok(())
     }
 
@@ -448,9 +507,9 @@ impl ShellContext {
     pub(crate) fn select_config_backup(
         &self,
         prompt: &str,
-    ) -> Result<Option<PathBuf>, CommandError> {
+    ) -> Result<Option<String>, CommandError> {
         self.select_with(
-            ConfigBackupSelectionProvider::new(&self.storage),
+            ConfigBackupSelectionProvider::new(&self.config_manager),
             prompt,
             "No configuration backups found.",
         )
@@ -1127,7 +1186,7 @@ impl ShellContext {
         self.state.set_active_simulation(None);
         output_success(format!("Ledger loaded from {}.", path.display()));
         self.report_load(&report.warnings, &report.migrations);
-        let _ = self.storage.record_last_ledger(None);
+        self.update_last_opened(None)?;
         Ok(())
     }
 
@@ -1139,6 +1198,7 @@ impl ShellContext {
         self.state.set_path(Some(path.to_path_buf()));
         self.manager_mut().clear_name();
         output_success(format!("Ledger saved to {}.", path.display()));
+        self.update_last_opened(None)?;
         Ok(())
     }
 
@@ -1152,7 +1212,7 @@ impl ShellContext {
         self.state.set_active_simulation(None);
         output_success(format!("Ledger `{}` loaded from {}.", name, path.display()));
         self.report_load(&report.warnings, &report.migrations);
-        let _ = self.storage.record_last_ledger(Some(name));
+        self.update_last_opened(Some(name))?;
         Ok(())
     }
 
@@ -1163,7 +1223,7 @@ impl ShellContext {
         let path = self.storage.ledger_path(name);
         self.state.set_path(Some(path.clone()));
         output_success(format!("Ledger `{}` saved to {}.", name, path.display()));
-        let _ = self.storage.record_last_ledger(Some(name));
+        self.update_last_opened(Some(name))?;
         Ok(())
     }
 
@@ -1268,195 +1328,87 @@ impl ShellContext {
         self.state.set_path(Some(path.clone()));
         self.state.set_active_simulation(None);
         self.report_load(&report.warnings, &report.migrations);
-        let _ = self.storage.record_last_ledger(Some(name));
         output_success(format!(
             "Ledger `{}` loaded from backup `{}`.",
             name, backup_name
         ));
+        self.update_last_opened(Some(name))?;
         Ok(())
     }
 
-    pub(crate) fn create_config_backup(&mut self, note: Option<String>) -> CommandResult {
-        let ledger = self.current_ledger()?;
-        let note = note.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
-        let config = ConfigData::from_ledger(ledger);
-        let snapshot = ConfigSnapshot::new(config, note);
-        let path = self
-            .storage
-            .create_config_backup(&snapshot)
+    pub(crate) fn backup_app_config(&mut self, note: Option<String>) -> CommandResult {
+        let file_name = self
+            .config_manager
+            .backup(&self.config, note.as_deref())
             .map_err(CommandError::from_ledger)?;
-        self.storage
-            .save_active_config(&snapshot.config)
-            .map_err(CommandError::from_ledger)?;
-        let file_name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("configuration backup");
-        let created = snapshot.created_at.with_timezone(&Local);
-        output_success(format!(
-            "Configuration backup saved: {} (Created: {})",
-            file_name,
-            created.format("%Y-%m-%d %H:%M")
-        ));
-        output_info("Stored in the `config_backups` directory.");
+        output_success(format!("Configuration backup saved: {}", file_name));
         Ok(())
     }
 
     pub(crate) fn list_config_backups(&self) -> CommandResult {
         let backups = self
-            .storage
-            .list_config_backups()
+            .config_manager
+            .list_backups()
             .map_err(CommandError::from_ledger)?;
         if backups.is_empty() {
             output_warning("No configuration backups found.");
             return Ok(());
         }
         output_info("Available configuration backups:");
-        for (idx, backup) in backups.iter().enumerate() {
-            let file_name = backup
-                .path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("config-backup");
-            let created = backup.created_at.with_timezone(&Local);
-            let mut line = format!(
-                "  {:>2}. {} (Created: {})",
-                idx + 1,
-                file_name,
-                created.format("%Y-%m-%d %H:%M")
-            );
-            if let Some(note) = backup
-                .note
-                .as_ref()
-                .map(|n| n.trim())
-                .filter(|n| !n.is_empty())
-            {
-                line.push_str(&format!(" (note: {})", note));
-            }
-            output_info(line);
+        for (idx, name) in backups.iter().enumerate() {
+            output_info(format!("  {:>2}. {}", idx + 1, format_backup_label(name)));
         }
         Ok(())
     }
 
     pub(crate) fn restore_config_by_reference(&mut self, reference: &str) -> CommandResult {
         let backups = self
-            .storage
-            .list_config_backups()
+            .config_manager
+            .list_backups()
             .map_err(CommandError::from_ledger)?;
         if backups.is_empty() {
             return Err(CommandError::InvalidArguments(
                 "no configuration backups available".into(),
             ));
         }
-        let target_path = if let Ok(index_raw) = reference.parse::<usize>() {
-            let zero_index = if index_raw > 0 && index_raw <= backups.len() {
+        let target = if let Ok(index_raw) = reference.parse::<usize>() {
+            let index = if index_raw > 0 {
                 index_raw - 1
             } else {
                 index_raw
             };
             backups
-                .get(zero_index)
+                .get(index)
                 .ok_or_else(|| {
                     CommandError::InvalidArguments(format!(
                         "configuration backup index {} out of range",
                         reference
                     ))
                 })?
-                .path
                 .clone()
         } else {
             backups
                 .iter()
-                .find(|info| {
-                    info.path
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .map(|name| name.contains(reference))
-                        .unwrap_or(false)
-                })
+                .find(|candidate| candidate.contains(reference))
+                .cloned()
                 .ok_or_else(|| {
                     CommandError::InvalidArguments(format!(
                         "no configuration backup matches reference `{}`",
                         reference
                     ))
                 })?
-                .path
-                .clone()
         };
-        self.restore_config_from_path(target_path)
+        self.restore_config_from_name(target)
     }
 
-    pub(crate) fn restore_config_from_path(&mut self, path: PathBuf) -> CommandResult {
-        let snapshot = self
-            .storage
-            .load_config_snapshot(&path)
+    pub(crate) fn restore_config_from_name(&mut self, backup_name: String) -> CommandResult {
+        let restored = self
+            .config_manager
+            .restore(&backup_name)
             .map_err(CommandError::from_ledger)?;
-        let file_name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("configuration backup");
-        let created = snapshot.created_at.with_timezone(&Local);
-        output_info(format!("Selected backup: {}", file_name));
-        output_info(format!("Created: {}", created.format("%Y-%m-%d %H:%M")));
-        if let Some(note) = snapshot
-            .note
-            .as_ref()
-            .map(|n| n.trim())
-            .filter(|n| !n.is_empty())
-        {
-            output_info(format!("Note: {}", note));
-        }
-        output_info(format!("Base currency: {}", snapshot.config.base_currency));
-        output_info(format!("Locale: {}", snapshot.config.locale.language_tag));
-        output_info(format!(
-            "Currency display: {:?} | Negative style: {:?}",
-            snapshot.config.currency_display, snapshot.config.negative_style
-        ));
-        output_info(format!(
-            "Screen reader: {} | High contrast: {}",
-            if snapshot.config.screen_reader_mode {
-                "on"
-            } else {
-                "off"
-            },
-            if snapshot.config.high_contrast_mode {
-                "on"
-            } else {
-                "off"
-            }
-        ));
-        output_info(format!(
-            "Valuation policy: {:?}",
-            snapshot.config.valuation_policy
-        ));
-
-        let confirm = if self.mode == CliMode::Interactive {
-            Confirm::with_theme(&self.theme)
-                .with_prompt("Restore configuration from this backup?")
-                .default(false)
-                .interact()
-                .map_err(CommandError::from)?
-        } else {
-            true
-        };
-        if !confirm {
-            output_warning("Operation cancelled.");
-            return Ok(());
-        }
-
-        {
-            let ledger = self.current_ledger_mut()?;
-            snapshot.config.apply_to_ledger(ledger);
-            ledger.touch();
-        }
-        self.storage
-            .save_active_config(&snapshot.config)
-            .map_err(CommandError::from_ledger)?;
-        output_success(format!(
-            "Configuration restored from {} (Created: {})",
-            file_name,
-            created.format("%Y-%m-%d %H:%M")
-        ));
+        self.config = restored;
+        self.persist_config()?;
+        output_success(format!("Configuration restored from {}.", backup_name));
         Ok(())
     }
 
@@ -3163,10 +3115,11 @@ mod tests {
     };
     use crate::cli::selection::SelectionManager;
     use crate::cli::selectors::SelectionOutcome;
+    use crate::config::{Config, ConfigManager};
     use crate::core::ledger_manager::LedgerManager;
-    use crate::currency::{CurrencyDisplay, LocaleConfig, NegativeStyle, ValuationPolicy};
+    use crate::ledger::{AccountKind, CategoryKind, TimeInterval, TimeUnit};
     use crate::ledger::{Simulation, SimulationStatus};
-    use crate::storage::json_backend::{ConfigData, ConfigSnapshot, JsonStorage};
+    use crate::storage::json_backend::JsonStorage;
     use chrono::{NaiveDate, Utc};
     use tempfile::{tempdir, NamedTempFile};
 
@@ -3396,22 +3349,15 @@ mod tests {
     #[test]
     fn config_backup_selection_paths() {
         let temp = tempdir().unwrap();
-        let store = JsonStorage::new(Some(temp.path().to_path_buf()), Some(5)).unwrap();
-        let snapshot = ConfigSnapshot::new(
-            ConfigData {
-                base_currency: "USD".into(),
-                locale: LocaleConfig::default(),
-                currency_display: CurrencyDisplay::Symbol,
-                negative_style: NegativeStyle::Sign,
-                screen_reader_mode: false,
-                high_contrast_mode: false,
-                valuation_policy: ValuationPolicy::TransactionDate,
-            },
-            Some("baseline".into()),
-        );
-        let config_path = store.create_config_backup(&snapshot).unwrap();
+        let manager = ConfigManager::with_base_dir(temp.path().to_path_buf()).unwrap();
+        let mut config = Config::default();
+        config.locale = "en-GB".into();
+        manager.save(&config).unwrap();
+        let backup_name = manager
+            .backup(&config, Some("baseline"))
+            .expect("backup config");
 
-        let outcome = SelectionManager::new(ConfigBackupSelectionProvider::new(&store))
+        let outcome = SelectionManager::new(ConfigBackupSelectionProvider::new(&manager))
             .choose_with(
                 "Select config",
                 "No configuration backups found.",
@@ -3419,11 +3365,11 @@ mod tests {
             )
             .unwrap();
         match outcome {
-            SelectionOutcome::Selected(path) => assert_eq!(path, config_path),
+            SelectionOutcome::Selected(name) => assert_eq!(name, backup_name),
             _ => panic!("expected config selection"),
         }
 
-        let outcome = SelectionManager::new(ConfigBackupSelectionProvider::new(&store))
+        let outcome = SelectionManager::new(ConfigBackupSelectionProvider::new(&manager))
             .choose_with(
                 "Select config",
                 "No configuration backups found.",
