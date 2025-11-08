@@ -1,24 +1,51 @@
-pub use chrono::NaiveDate;
-pub use serde::{Deserialize, Serialize};
+use chrono::NaiveDate;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
-pub use uuid::Uuid;
+use uuid::Uuid;
 
-/// Identifies entities that expose a stable unique identifier.
 pub trait Identifiable {
     fn id(&self) -> Uuid;
 }
 
-/// Provides access to a human-friendly entity name.
 pub trait NamedEntity {
     fn name(&self) -> &str;
 }
 
-/// Supplies a presentation-ready label for UI or logs.
-pub trait Displayable {
-    fn display_label(&self) -> String;
+pub trait BelongsToCategory {
+    fn category_id(&self) -> Option<Uuid>;
 }
 
-// Placeholder error type hook for future validation rules.
+pub trait Amounted {
+    fn amount(&self) -> f64;
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum BudgetPeriod {
+    Daily,
+    Weekly,
+    Monthly,
+    Yearly,
+    Custom(u32),
+}
+
+impl BudgetPeriod {
+    pub fn days(self) -> Option<u32> {
+        match self {
+            BudgetPeriod::Daily => Some(1),
+            BudgetPeriod::Weekly => Some(7),
+            BudgetPeriod::Monthly => Some(30),
+            BudgetPeriod::Yearly => Some(365),
+            BudgetPeriod::Custom(value) => Some(value.max(1)),
+        }
+    }
+}
+
+impl Default for BudgetPeriod {
+    fn default() -> Self {
+        BudgetPeriod::Monthly
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum DomainError {
     #[error("invalid input: {0}")]
@@ -27,7 +54,6 @@ pub enum DomainError {
 
 pub type DomainResult<T> = Result<T, DomainError>;
 
-// Re-export chrono/serde so downstream modules can import from a single place.
 pub use chrono;
 pub use serde;
 pub use uuid;
