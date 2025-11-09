@@ -1,1 +1,1 @@
-pub use crate::domain::transaction::{TimeInterval, TimeUnit};
+pub use crate::domain::common::{TimeInterval, TimeUnit};

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::domain::common::{Displayable, Identifiable, NamedEntity};
+use crate::domain::common::*;
 
 /// Categorises ledger activity for budgeting and reporting.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

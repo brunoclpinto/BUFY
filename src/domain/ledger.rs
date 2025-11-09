@@ -4,10 +4,10 @@ use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::domain::common::*;
 use crate::{
     core::errors::BudgetError,
     currency::{policy_date, ValuationPolicy},
-    domain::transaction::TimeInterval,
 };
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

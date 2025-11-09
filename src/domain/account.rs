@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::domain::common::{Displayable, Identifiable, NamedEntity};
+use crate::domain::common::*;
 
 /// Represents a financial account tracked within the ledger.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
