@@ -9,7 +9,7 @@ use crate::{
     storage::json_backend::JsonStorage,
 };
 
-use super::commands::CommandRegistry;
+use super::registry::CommandRegistry;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CliMode {

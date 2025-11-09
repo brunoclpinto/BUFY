@@ -1,14 +1,14 @@
 use chrono::{NaiveDate, Weekday};
 
-use super::CommandDefinition;
 use crate::cli::core::{CommandError, CommandResult, ShellContext};
 use crate::cli::io;
+use crate::cli::registry::CommandEntry;
 use crate::currency::{
     CurrencyCode, DateFormatStyle, LocaleConfig, NegativeStyle, ValuationPolicy,
 };
 
-pub(crate) fn definitions() -> Vec<CommandDefinition> {
-    vec![CommandDefinition::new(
+pub(crate) fn definitions() -> Vec<CommandEntry> {
+    vec![CommandEntry::new(
         "config",
         "View and manage global CLI preferences",
         "config [show|set <key> <value>|backup [note]|backups|restore [name]]",

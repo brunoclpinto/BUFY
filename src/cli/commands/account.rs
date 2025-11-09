@@ -1,8 +1,8 @@
-use super::CommandDefinition;
 use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
+use crate::cli::registry::CommandEntry;
 
-pub(crate) fn definitions() -> Vec<CommandDefinition> {
-    vec![CommandDefinition::new(
+pub(crate) fn definitions() -> Vec<CommandEntry> {
+    vec![CommandEntry::new(
         "account",
         "Manage accounts via wizard flows",
         "account <add|edit|list>",

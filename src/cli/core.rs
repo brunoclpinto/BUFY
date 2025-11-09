@@ -45,12 +45,13 @@ use crate::cli::selection::{
 use crate::cli::selectors::{SelectionOutcome, SelectionProvider};
 pub use crate::core::errors::CliError;
 
-use super::commands::{self, CommandDefinition, CommandRegistry};
+use super::commands;
 use super::io as cli_io;
 use super::output::{
     error as output_error, info as output_info, section as output_section,
     success as output_success, warning as output_warning,
 };
+use super::registry::{CommandEntry, CommandRegistry};
 #[cfg(test)]
 use crate::cli::shell_context::SelectionOverride;
 pub use crate::cli::shell_context::{CliMode, ShellContext};
@@ -106,7 +107,8 @@ impl ShellContext {
     }
 
     pub fn new(mode: CliMode) -> Result<Self, CliError> {
-        let registry = CommandRegistry::new(commands::all_definitions());
+        let mut registry = CommandRegistry::new();
+        commands::register_all(&mut registry);
 
         let storage = JsonStorage::new_default().map_err(CliError::from)?;
         let manager = LedgerManager::new(Box::new(storage.clone()));
@@ -316,8 +318,8 @@ impl ShellContext {
         raw: &str,
         args: &[&str],
     ) -> Result<LoopControl, CommandError> {
-        if let Some(definition) = self.registry.get(command) {
-            match (definition.handler)(self, args) {
+        if let Some(handler) = self.registry.handler(command) {
+            match handler(self, args) {
                 Ok(()) => Ok(LoopControl::Continue),
                 Err(CommandError::ExitRequested) => Ok(LoopControl::Exit),
                 Err(err) => Err(err),
@@ -1007,7 +1009,7 @@ impl ShellContext {
         self.current_simulation = None;
     }
 
-    pub(crate) fn command(&self, name: &str) -> Option<&CommandDefinition> {
+    pub(crate) fn command(&self, name: &str) -> Option<&CommandEntry> {
         self.registry.get(name)
     }
 

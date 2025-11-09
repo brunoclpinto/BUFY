@@ -53,9 +53,10 @@ isolated in `utils::persistence`, ensuring atomic save/restore semantics.
 | `summary`, `forecast` | Reporting | Ledger summaries | Accept optional simulation names and custom windows. |
 | `simulation` family, `create-simulation`, `enter-simulation`, `leave-simulation`, `apply-simulation`, `discard-simulation` | Simulation lifecycle | Simulations | Selection prompts appear whenever the identifier is omitted. |
 
-Adding a new command requires registering a `CommandDefinition` in
-`build_commands()`; the handler receives `&mut ShellContext` and `&[&str]`, enabling
-access to shared state plus the output utilities.
+Adding a new command requires registering a `CommandEntry` via
+`commands::register_all` (or calling `CommandRegistry::register` directly); the
+handler receives `&mut ShellContext` and `&[&str]`, enabling access to shared
+state plus the output utilities.
 
 ## Wizard & Selection APIs
 

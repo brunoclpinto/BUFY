@@ -2,25 +2,25 @@ use std::path::PathBuf;
 
 use chrono::Utc;
 
-use super::CommandDefinition;
 use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
 use crate::cli::io;
+use crate::cli::registry::CommandEntry;
 use crate::core::services::SummaryService;
 
-pub(crate) fn definitions() -> Vec<CommandDefinition> {
+pub(crate) fn definitions() -> Vec<CommandEntry> {
     vec![
-        CommandDefinition::new("new-ledger", "Create a new ledger", "new-ledger [name] [period]", cmd_new_ledger),
-        CommandDefinition::new("load", "Load a ledger from JSON", "load [path]", cmd_load),
-        CommandDefinition::new("load-ledger", "Load a ledger by name from the persistence store", "load-ledger <name>", cmd_load_named),
-        CommandDefinition::new("save", "Save current ledger", "save [path]", cmd_save),
-        CommandDefinition::new("save-ledger", "Save current ledger by name in the persistence store", "save-ledger [name]", cmd_save_named),
-        CommandDefinition::new("backup-ledger", "Create a snapshot of the current ledger", "backup-ledger [name]", cmd_backup_ledger),
-        CommandDefinition::new("list-backups", "List available snapshots for the current ledger", "list-backups [name]", cmd_list_backups),
-        CommandDefinition::new("restore-ledger", "Restore a ledger from a snapshot", "restore-ledger <backup_index|pattern> [name]", cmd_restore_ledger),
-        CommandDefinition::new("add", "Add an account, category, or transaction", "add [account|category|transaction]", cmd_add),
-        CommandDefinition::new("list", "List accounts, categories, or transactions", "list [accounts|categories|transactions]", cmd_list),
-        CommandDefinition::new("summary", "Show ledger summary", "summary [simulation_name] [past|future <n>] | summary custom <start YYYY-MM-DD> <end YYYY-MM-DD>", cmd_summary),
-        CommandDefinition::new("forecast", "Forecast recurring activity", "forecast [simulation_name] [<number> <unit> | custom <start YYYY-MM-DD> <end YYYY-MM-DD>]", cmd_forecast),
+        CommandEntry::new("new-ledger", "Create a new ledger", "new-ledger [name] [period]", cmd_new_ledger),
+        CommandEntry::new("load", "Load a ledger from JSON", "load [path]", cmd_load),
+        CommandEntry::new("load-ledger", "Load a ledger by name from the persistence store", "load-ledger <name>", cmd_load_named),
+        CommandEntry::new("save", "Save current ledger", "save [path]", cmd_save),
+        CommandEntry::new("save-ledger", "Save current ledger by name in the persistence store", "save-ledger [name]", cmd_save_named),
+        CommandEntry::new("backup-ledger", "Create a snapshot of the current ledger", "backup-ledger [name]", cmd_backup_ledger),
+        CommandEntry::new("list-backups", "List available snapshots for the current ledger", "list-backups [name]", cmd_list_backups),
+        CommandEntry::new("restore-ledger", "Restore a ledger from a snapshot", "restore-ledger <backup_index|pattern> [name]", cmd_restore_ledger),
+        CommandEntry::new("add", "Add an account, category, or transaction", "add [account|category|transaction]", cmd_add),
+        CommandEntry::new("list", "List accounts, categories, or transactions", "list [accounts|categories|transactions]", cmd_list),
+        CommandEntry::new("summary", "Show ledger summary", "summary [simulation_name] [past|future <n>] | summary custom <start YYYY-MM-DD> <end YYYY-MM-DD>", cmd_summary),
+        CommandEntry::new("forecast", "Forecast recurring activity", "forecast [simulation_name] [<number> <unit> | custom <start YYYY-MM-DD> <end YYYY-MM-DD>]", cmd_forecast),
     ]
 }
 

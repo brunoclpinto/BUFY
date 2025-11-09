@@ -1,23 +1,23 @@
 use chrono::Utc;
 
-use super::CommandDefinition;
 use crate::cli::core::{CliMode, CommandError, CommandResult, RecurrenceListFilter, ShellContext};
 use crate::cli::io;
-pub(crate) fn definitions() -> Vec<CommandDefinition> {
+use crate::cli::registry::CommandEntry;
+pub(crate) fn definitions() -> Vec<CommandEntry> {
     vec![
-        CommandDefinition::new(
+        CommandEntry::new(
             "transaction",
             "Manage transactions via wizard flows",
             "transaction <add|edit|remove|show|complete>",
             cmd_transaction,
         ),
-        CommandDefinition::new(
+        CommandEntry::new(
             "complete",
             "Mark a transaction as completed",
             "complete <transaction_index> <YYYY-MM-DD> <amount>",
             cmd_complete,
         ),
-        CommandDefinition::new(
+        CommandEntry::new(
             "recurring",
             "Manage recurring schedules",
             "recurring [list|edit|clear|pause|resume|skip|sync] ...",

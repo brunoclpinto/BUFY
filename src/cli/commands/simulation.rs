@@ -1,50 +1,50 @@
 use chrono::Local;
 
-use super::CommandDefinition;
 use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
 use crate::cli::io;
 use crate::cli::output::section as output_section;
+use crate::cli::registry::CommandEntry;
 use crate::ledger::SimulationStatus;
 
-pub(crate) fn definitions() -> Vec<CommandDefinition> {
+pub(crate) fn definitions() -> Vec<CommandEntry> {
     vec![
-        CommandDefinition::new(
+        CommandEntry::new(
             "list-simulations",
             "List saved simulations",
             "list-simulations",
             cmd_list_simulations,
         ),
-        CommandDefinition::new(
+        CommandEntry::new(
             "create-simulation",
             "Create a new named simulation",
             "create-simulation [name]",
             cmd_create_simulation,
         ),
-        CommandDefinition::new(
+        CommandEntry::new(
             "enter-simulation",
             "Activate a simulation for editing",
             "enter-simulation <name>",
             cmd_enter_simulation,
         ),
-        CommandDefinition::new(
+        CommandEntry::new(
             "leave-simulation",
             "Leave the active simulation",
             "leave-simulation",
             cmd_leave_simulation,
         ),
-        CommandDefinition::new(
+        CommandEntry::new(
             "apply-simulation",
             "Apply a simulation to the ledger",
             "apply-simulation <name>",
             cmd_apply_simulation,
         ),
-        CommandDefinition::new(
+        CommandEntry::new(
             "discard-simulation",
             "Discard a simulation permanently",
             "discard-simulation <name>",
             cmd_discard_simulation,
         ),
-        CommandDefinition::new(
+        CommandEntry::new(
             "simulation",
             "Manage pending simulation changes",
             "simulation <changes|add|modify|exclude> [simulation_name]",

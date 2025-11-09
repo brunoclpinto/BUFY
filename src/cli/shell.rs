@@ -1,9 +1,18 @@
 use std::{
+    borrow::Cow,
     fmt,
     io::{self, BufRead},
 };
 
-use rustyline::{error::ReadlineError, DefaultEditor};
+use rustyline::{
+    completion::{Completer, Pair},
+    error::ReadlineError,
+    highlight::Highlighter,
+    hint::Hinter,
+    history::DefaultHistory,
+    validate::{ValidationContext, ValidationResult, Validator},
+    Cmd, Context as ReadlineContext, Editor, Helper, KeyEvent,
+};
 use shell_words::split;
 
 use crate::cli::core::{CliError, CliMode, CommandError, LoopControl, ShellContext};
@@ -25,7 +34,10 @@ pub fn run_cli() -> Result<(), CliError> {
 }
 
 fn run_interactive(context: &mut ShellContext) -> Result<(), CliError> {
-    let mut editor = DefaultEditor::new()?;
+    let mut editor = Editor::<CommandHelper, DefaultHistory>::new()?;
+    let helper = CommandHelper::new(context.command_names());
+    editor.set_helper(Some(helper));
+    editor.bind_sequence(KeyEvent::from('?'), Cmd::Complete);
 
     loop {
         if !context.running {
@@ -106,6 +118,78 @@ fn handle_line(context: &mut ShellContext, line: &str) -> Result<LoopControl, Co
             Ok(LoopControl::Exit)
         }
         other => other,
+    }
+}
+
+struct CommandHelper {
+    commands: Vec<String>,
+}
+
+impl CommandHelper {
+    fn new(names: Vec<&'static str>) -> Self {
+        let mut commands: Vec<String> = names
+            .into_iter()
+            .map(|name| name.to_ascii_lowercase())
+            .collect();
+        commands.sort();
+        commands.dedup();
+        Self { commands }
+    }
+}
+
+impl Helper for CommandHelper {}
+
+impl Completer for CommandHelper {
+    type Candidate = Pair;
+
+    fn complete(
+        &self,
+        line: &str,
+        pos: usize,
+        _ctx: &ReadlineContext<'_>,
+    ) -> rustyline::Result<(usize, Vec<Pair>)> {
+        let prefix = &line[..pos];
+        let start = prefix
+            .rfind(char::is_whitespace)
+            .map(|idx| idx + 1)
+            .unwrap_or(0);
+
+        let trimmed = prefix.trim_start();
+        if let Some(space_idx) = trimmed.find(char::is_whitespace) {
+            let leading = prefix.len().saturating_sub(trimmed.len());
+            if pos > leading + space_idx {
+                return Ok((start, Vec::new()));
+            }
+        }
+
+        let needle = prefix[start..].to_ascii_lowercase();
+        let candidates = self
+            .commands
+            .iter()
+            .filter(|name| name.starts_with(&needle))
+            .map(|name| Pair {
+                display: name.clone(),
+                replacement: name.clone(),
+            })
+            .collect();
+        Ok((start, candidates))
+    }
+}
+
+impl Hinter for CommandHelper {
+    type Hint = String;
+}
+
+impl Highlighter for CommandHelper {
+    fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
+        Cow::Borrowed(line)
+    }
+}
+
+impl Validator for CommandHelper {
+    fn validate(&self, ctx: &mut ValidationContext) -> rustyline::Result<ValidationResult> {
+        let _ = ctx;
+        Ok(ValidationResult::Valid(None))
     }
 }
 

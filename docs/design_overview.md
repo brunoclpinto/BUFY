@@ -209,7 +209,7 @@ Key decisions:
 The CLI is now split into focused modules so future interactive features can plug in cleanly:
 
 - `cli::shell` – owns the REPL loop, command parsing, history management, and shared state wiring. It delegates work via a command registry.
-- `cli::commands` – declares `CommandDefinition` metadata (name, description, usage) and the registry that maps identifiers to handler functions.
+- `cli::commands` – registers `CommandEntry` metadata (name, description, usage, handler) with the centralized registry that powers dispatch, help, and completion.
 - `cli::shell_context` – central `ShellContext` that tracks the loaded ledger, persistence metadata, configuration, and active simulation context.
 - `cli::output` – unified helpers for info/warning/error/success messaging so future selectors/forms can render consistently.
 - `cli::selectors` – shared data contracts (`SelectionItem`, `SelectionOutcome`, `SelectionProvider`).
