@@ -1,43 +1,89 @@
-use dirs::home_dir;
-use std::{env, path::PathBuf};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+};
 
-const DEFAULT_DIR_NAME: &str = ".budget_core";
-const LEDGER_DIR: &str = "ledgers";
-const BACKUP_DIR: &str = "backups";
-const CONFIG_BACKUP_DIR: &str = "config_backups";
-const STATE_FILE: &str = "state.json";
+use crate::core::errors::BudgetError;
 
-/// Returns the application-specific data directory, defaulting to `~/.budget_core`.
-pub fn app_data_dir() -> PathBuf {
-    if let Some(custom) = env::var_os("BUDGET_CORE_HOME") {
-        return PathBuf::from(custom);
+pub struct PathResolver;
+
+impl PathResolver {
+    pub fn base_dir() -> PathBuf {
+        if let Some(custom) = env::var_os("BUDGET_CORE_HOME") {
+            return PathBuf::from(custom);
+        }
+        dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".budget_core")
     }
-    home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(DEFAULT_DIR_NAME)
+
+    pub fn resolve_base(root: Option<PathBuf>) -> PathBuf {
+        root.unwrap_or_else(Self::base_dir)
+    }
+
+    pub fn ledger_dir() -> PathBuf {
+        Self::ledger_dir_in(&Self::base_dir())
+    }
+
+    pub fn ledger_dir_in(base: &Path) -> PathBuf {
+        base.join("ledgers")
+    }
+
+    pub fn backup_dir() -> PathBuf {
+        Self::backup_dir_in(&Self::base_dir())
+    }
+
+    pub fn backup_dir_in(base: &Path) -> PathBuf {
+        base.join("backups")
+    }
+
+    pub fn config_dir() -> PathBuf {
+        Self::config_dir_in(&Self::base_dir())
+    }
+
+    pub fn config_dir_in(base: &Path) -> PathBuf {
+        base.join("config")
+    }
+
+    pub fn config_backup_dir() -> PathBuf {
+        Self::config_backup_dir_in(&Self::base_dir())
+    }
+
+    pub fn config_backup_dir_in(base: &Path) -> PathBuf {
+        Self::config_dir_in(base).join("backups")
+    }
+
+    pub fn simulation_dir() -> PathBuf {
+        Self::simulation_dir_in(&Self::base_dir())
+    }
+
+    pub fn simulation_dir_in(base: &Path) -> PathBuf {
+        base.join("simulations")
+    }
+
+    pub fn config_file() -> PathBuf {
+        Self::config_file_in(&Self::base_dir())
+    }
+
+    pub fn config_file_in(base: &Path) -> PathBuf {
+        Self::config_dir_in(base).join("config.json")
+    }
+
+    pub fn state_file() -> PathBuf {
+        Self::state_file_in(&Self::base_dir())
+    }
+
+    pub fn state_file_in(base: &Path) -> PathBuf {
+        base.join("state.json")
+    }
 }
 
-/// Absolute path to the managed ledgers directory.
-pub fn ledgers_dir() -> PathBuf {
-    app_data_dir().join(LEDGER_DIR)
-}
-
-/// Resolves the canonical file path for a ledger name (slug applied upstream).
-pub fn ledger_file(name: &str) -> PathBuf {
-    ledgers_dir().join(format!("{}.json", name))
-}
-
-/// Base directory for backup snapshots.
-pub fn backups_root() -> PathBuf {
-    app_data_dir().join(BACKUP_DIR)
-}
-
-/// Returns the directory containing configuration backups.
-pub fn config_backups_dir() -> PathBuf {
-    app_data_dir().join(CONFIG_BACKUP_DIR)
-}
-
-/// Path to the shared state file (tracking last opened ledger, etc.).
-pub fn state_file() -> PathBuf {
-    app_data_dir().join(STATE_FILE)
+pub fn ensure_dir(path: &Path) -> Result<(), BudgetError> {
+    fs::create_dir_all(path).map_err(|err| {
+        BudgetError::StorageError(format!(
+            "failed to create directory `{}`: {}",
+            path.display(),
+            err
+        ))
+    })
 }

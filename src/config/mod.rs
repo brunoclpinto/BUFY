@@ -6,11 +6,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::core::{errors::BudgetError, utils};
+use crate::core::{
+    errors::BudgetError,
+    utils::{ensure_dir, PathResolver},
+};
 
-const CONFIG_DIR: &str = "config";
-const CONFIG_FILE: &str = "config.json";
-const BACKUP_DIR: &str = "backups";
 const BACKUP_EXTENSION: &str = "json";
 const BACKUP_TIMESTAMP_FORMAT: &str = "%Y%m%d_%H%M";
 const TMP_SUFFIX: &str = "tmp";
@@ -43,7 +43,7 @@ pub struct ConfigManager {
 
 impl ConfigManager {
     pub fn new() -> Result<Self, BudgetError> {
-        Self::from_base(utils::app_data_dir())
+        Self::from_base(PathResolver::base_dir())
     }
 
     #[cfg(test)]
@@ -52,12 +52,13 @@ impl ConfigManager {
     }
 
     fn from_base(base: PathBuf) -> Result<Self, BudgetError> {
-        let config_root = base.join(CONFIG_DIR);
-        fs::create_dir_all(&config_root)?;
-        let backups_dir = config_root.join(BACKUP_DIR);
-        fs::create_dir_all(&backups_dir)?;
+        ensure_dir(&base)?;
+        let config_root = PathResolver::config_dir_in(&base);
+        ensure_dir(&config_root)?;
+        let backups_dir = PathResolver::config_backup_dir_in(&base);
+        ensure_dir(&backups_dir)?;
         Ok(Self {
-            path: config_root.join(CONFIG_FILE),
+            path: PathResolver::config_file_in(&base),
             backups_dir,
         })
     }
@@ -73,7 +74,7 @@ impl ConfigManager {
 
     pub fn save(&self, config: &Config) -> Result<(), BudgetError> {
         if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent)?;
+            ensure_dir(parent)?;
         }
         let json = serde_json::to_string_pretty(config)?;
         let tmp = tmp_path(&self.path);
@@ -83,7 +84,7 @@ impl ConfigManager {
     }
 
     pub fn backup(&self, config: &Config, note: Option<&str>) -> Result<String, BudgetError> {
-        fs::create_dir_all(&self.backups_dir)?;
+        ensure_dir(&self.backups_dir)?;
         let timestamp = Utc::now().format(BACKUP_TIMESTAMP_FORMAT).to_string();
         let mut name = format!("config_{}", timestamp);
         if let Some(label) = sanitize_note(note) {
@@ -188,7 +189,7 @@ fn tmp_path(path: &Path) -> PathBuf {
 
 fn write_atomic(path: &Path, data: &str) -> Result<(), BudgetError> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+        ensure_dir(parent)?;
     }
     let mut file = File::create(path)?;
     file.write_all(data.as_bytes())?;

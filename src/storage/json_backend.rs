@@ -8,7 +8,10 @@ use std::{
 };
 
 use crate::{
-    core::{errors::BudgetError, utils},
+    core::{
+        errors::BudgetError,
+        utils::{ensure_dir, PathResolver},
+    },
     currency::{CurrencyCode, CurrencyDisplay, LocaleConfig, NegativeStyle, ValuationPolicy},
     ledger::Ledger,
 };
@@ -34,14 +37,15 @@ pub struct JsonStorage {
 
 impl JsonStorage {
     pub fn new(root: Option<PathBuf>, retention: Option<usize>) -> Result<Self> {
-        let app_root = root.unwrap_or_else(utils::app_data_dir);
-        let ledgers_dir = app_root.join("ledgers");
-        let backups_dir = app_root.join("backups");
-        let config_dir = app_root.join("config_backups");
-        fs::create_dir_all(&ledgers_dir)?;
-        fs::create_dir_all(&backups_dir)?;
-        fs::create_dir_all(&config_dir)?;
-        let state_file = app_root.join("state.json");
+        let app_root = PathResolver::resolve_base(root);
+        ensure_dir(&app_root)?;
+        let ledgers_dir = PathResolver::ledger_dir_in(&app_root);
+        let backups_dir = PathResolver::backup_dir_in(&app_root);
+        let config_dir = PathResolver::config_backup_dir_in(&app_root);
+        ensure_dir(&ledgers_dir)?;
+        ensure_dir(&backups_dir)?;
+        ensure_dir(&config_dir)?;
+        let state_file = PathResolver::state_file_in(&app_root);
         Ok(Self {
             root: app_root,
             ledgers_dir,
@@ -88,7 +92,7 @@ impl JsonStorage {
     }
 
     pub fn create_config_backup(&self, snapshot: &ConfigSnapshot) -> Result<PathBuf> {
-        fs::create_dir_all(&self.config_dir)?;
+        ensure_dir(&self.config_dir)?;
         let file_name = format!(
             "config_{}.json",
             snapshot.created_at.format("%Y-%m-%dT%H-%M-%S")
@@ -147,10 +151,10 @@ impl JsonStorage {
     }
 
     pub fn save_active_config(&self, config: &ConfigData) -> Result<()> {
-        let path = self.root.join("config.json");
+        let path = PathResolver::config_file_in(&self.root);
         let json = serde_json::to_string_pretty(config)?;
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+            ensure_dir(parent)?;
         }
         write_atomic(&path, &json)?;
         Ok(())
@@ -175,7 +179,7 @@ impl JsonStorage {
 
     fn write_backup_file(&self, ledger: &Ledger, name: &str, note: Option<&str>) -> Result<()> {
         let dir = self.backup_dir(name);
-        fs::create_dir_all(&dir)?;
+        ensure_dir(&dir)?;
         let timestamp = Utc::now().format(BACKUP_TIMESTAMP_FORMAT).to_string();
         let mut file_stem = format!("{}_{}", canonical_name(name), timestamp);
         if let Some(label) = sanitize_backup_note(note) {
@@ -194,7 +198,7 @@ impl JsonStorage {
             return Ok(());
         }
         let dir = self.backup_dir(name);
-        fs::create_dir_all(&dir)?;
+        ensure_dir(&dir)?;
         let timestamp = Utc::now().format(BACKUP_TIMESTAMP_FORMAT).to_string();
         let backup_name = format!(
             "{}_{}.{}",
@@ -229,7 +233,7 @@ impl StorageBackend for JsonStorage {
     fn save(&self, ledger: &Ledger, name: &str) -> Result<()> {
         let path = self.ledger_path(name);
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+            ensure_dir(parent)?;
         }
         if path.exists() {
             self.backup_existing_file(name, &path)?;
@@ -288,7 +292,7 @@ impl StorageBackend for JsonStorage {
 
 pub fn save_ledger_to_path(ledger: &Ledger, path: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+        ensure_dir(parent)?;
     }
     let json = serde_json::to_string_pretty(ledger)?;
     let tmp = tmp_path(path);
@@ -449,7 +453,7 @@ fn tmp_path(path: &Path) -> PathBuf {
 
 fn write_atomic(path: &Path, data: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+        ensure_dir(parent)?;
     }
     let mut file = File::create(path)?;
     file.write_all(data.as_bytes())?;
