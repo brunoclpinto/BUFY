@@ -98,3 +98,44 @@ impl CategoryService {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::category::{Category, CategoryKind};
+    use crate::ledger::{BudgetPeriod, Ledger};
+
+    fn sample_ledger() -> Ledger {
+        Ledger::new("Categories", BudgetPeriod::monthly())
+    }
+
+    #[test]
+    fn add_rejects_duplicates() {
+        let mut ledger = sample_ledger();
+        let category = Category::new("Groceries", CategoryKind::Expense);
+        CategoryService::add(&mut ledger, category.clone()).expect("first add succeeds");
+
+        let err = CategoryService::add(&mut ledger, category).expect_err("duplicate fails");
+        assert!(
+            matches!(err, ServiceError::Invalid(ref message) if message.contains("already exists")),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn remove_blocks_parent_with_children() {
+        let mut ledger = sample_ledger();
+        let parent = Category::new("Parent", CategoryKind::Expense);
+        let parent_id = parent.id;
+        CategoryService::add(&mut ledger, parent).unwrap();
+        let mut child = Category::new("Child", CategoryKind::Expense);
+        child.parent_id = Some(parent_id);
+        CategoryService::add(&mut ledger, child).unwrap();
+
+        let err = CategoryService::remove(&mut ledger, parent_id).expect_err("has child");
+        assert!(
+            matches!(err, ServiceError::Invalid(ref message) if message.contains("child")),
+            "unexpected error: {err:?}"
+        );
+    }
+}

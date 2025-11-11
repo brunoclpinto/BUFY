@@ -46,7 +46,6 @@ impl ConfigManager {
         Self::from_base(PathResolver::base_dir())
     }
 
-    #[cfg(test)]
     pub fn with_base_dir(base: PathBuf) -> Result<Self, BudgetError> {
         Self::from_base(base)
     }
@@ -195,4 +194,46 @@ fn write_atomic(path: &Path, data: &str) -> Result<(), BudgetError> {
     file.write_all(data.as_bytes())?;
     file.flush()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn manager() -> (ConfigManager, TempDir) {
+        let temp = TempDir::new().expect("temp dir");
+        let manager =
+            ConfigManager::with_base_dir(temp.path().to_path_buf()).expect("config manager");
+        (manager, temp)
+    }
+
+    #[test]
+    fn save_and_load_roundtrip() {
+        let (manager, _guard) = manager();
+        let mut config = Config::default();
+        config.locale = "en-GB".into();
+        config.currency = "EUR".into();
+        manager.save(&config).expect("save config");
+        let loaded = manager.load().expect("load config");
+        assert_eq!(loaded.locale, "en-GB");
+        assert_eq!(loaded.currency, "EUR");
+    }
+
+    #[test]
+    fn backup_and_restore_cycle() {
+        let (manager, _guard) = manager();
+        let mut config = Config::default();
+        config.theme = Some("dark".into());
+        manager.save(&config).expect("save config");
+        let backup_name = manager
+            .backup(&config, Some("smoke"))
+            .expect("create backup");
+
+        config.theme = Some("light".into());
+        manager.save(&config).expect("save modified config");
+
+        let restored = manager.restore(&backup_name).expect("restore backup");
+        assert_eq!(restored.theme.as_deref(), Some("dark"));
+    }
 }

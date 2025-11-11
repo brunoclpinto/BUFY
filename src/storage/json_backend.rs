@@ -369,6 +369,48 @@ impl ConfigData {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ledger::BudgetPeriod;
+    use tempfile::TempDir;
+
+    fn storage_with_temp_dir() -> (JsonStorage, TempDir) {
+        let temp = TempDir::new().expect("temp dir");
+        let storage =
+            JsonStorage::new(Some(temp.path().to_path_buf()), Some(3)).expect("json storage");
+        (storage, temp)
+    }
+
+    fn sample_ledger() -> Ledger {
+        Ledger::new("Sample", BudgetPeriod::monthly())
+    }
+
+    #[test]
+    fn save_and_load_roundtrip() {
+        let (storage, _guard) = storage_with_temp_dir();
+        let ledger = sample_ledger();
+        storage.save(&ledger, "household").expect("save ledger");
+        let loaded = storage.load("household").expect("load ledger");
+        assert_eq!(loaded.name, "Sample");
+    }
+
+    #[test]
+    fn backup_writes_timestamped_files() {
+        let (storage, _guard) = storage_with_temp_dir();
+        let ledger = sample_ledger();
+        storage.save(&ledger, "family").expect("save ledger");
+        storage
+            .backup(&ledger, "family", Some("monthly"))
+            .expect("create backup");
+        let backups = storage.list_backups("family").expect("list backups");
+        assert!(
+            !backups.is_empty(),
+            "expected at least one backup file to be created"
+        );
+    }
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct StoreState {
     last_ledger: Option<String>,

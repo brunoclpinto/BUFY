@@ -84,3 +84,55 @@ impl AccountService {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{
+        account::{Account, AccountKind},
+        category::{Category, CategoryKind},
+    };
+    use crate::ledger::{BudgetPeriod, Ledger};
+
+    fn ledger_with_category() -> (Ledger, Uuid) {
+        let mut ledger = Ledger::new("Test", BudgetPeriod::monthly());
+        let category = Category::new("Utilities", CategoryKind::Expense);
+        let category_id = category.id;
+        ledger.add_category(category);
+        (ledger, category_id)
+    }
+
+    #[test]
+    fn add_rejects_duplicate_names() {
+        let (mut ledger, _) = ledger_with_category();
+        let primary = Account::new("Checking", AccountKind::Bank);
+        AccountService::add(&mut ledger, primary.clone()).expect("first add succeeds");
+
+        let err = AccountService::add(&mut ledger, primary).expect_err("duplicate must fail");
+        assert!(
+            matches!(err, ServiceError::Invalid(ref message) if message.contains("already exists")),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn edit_overwrites_account_fields() {
+        let (mut ledger, category_id) = ledger_with_category();
+        let mut account = Account::new("Checking", AccountKind::Bank);
+        account.category_id = Some(category_id);
+        AccountService::add(&mut ledger, account.clone()).expect("add succeeds");
+
+        let mut changes = Account::new("Updated", AccountKind::Savings);
+        changes.category_id = None;
+        changes.opening_balance = Some(25.0);
+        changes.notes = Some("Notes".into());
+        AccountService::edit(&mut ledger, account.id, changes).expect("edit succeeds");
+
+        let stored = ledger.account(account.id).expect("account exists");
+        assert_eq!(stored.name, "Updated");
+        assert_eq!(stored.kind, AccountKind::Savings);
+        assert_eq!(stored.opening_balance, Some(25.0));
+        assert!(stored.category_id.is_none());
+        assert_eq!(stored.notes.as_deref(), Some("Notes"));
+    }
+}
