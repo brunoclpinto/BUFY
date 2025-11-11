@@ -1,3 +1,7 @@
+//! Domain models for ledger transactions and recurrence rules.
+
+use std::fmt;
+
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -88,11 +92,12 @@ impl Identifiable for Transaction {
 
 impl Displayable for Transaction {
     fn display_label(&self) -> String {
-        format!("txn:{} [{:?}]", self.id, self.status)
+        format!("txn:{} [{}]", self.id, self.status)
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// Enumerates the lifecycle state of a transaction.
 pub enum TransactionStatus {
     Planned,
     Completed,
@@ -100,7 +105,20 @@ pub enum TransactionStatus {
     Simulated,
 }
 
+impl fmt::Display for TransactionStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let label = match self {
+            TransactionStatus::Planned => "Planned",
+            TransactionStatus::Completed => "Completed",
+            TransactionStatus::Missed => "Missed",
+            TransactionStatus::Simulated => "Simulated",
+        };
+        f.write_str(label)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// Represents a recurrence rule attached to a transaction.
 pub struct Recurrence {
     #[serde(default = "Recurrence::default_series_id")]
     pub series_id: Uuid,
@@ -125,12 +143,23 @@ pub struct Recurrence {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+/// Controls how recurrence cadence relates to realized activity.
 pub enum RecurrenceMode {
     /// Follows fixed planned schedule regardless of actual timing.
     #[default]
     FixedSchedule,
     /// Starts next period after the actual performed date.
     AfterLastPerformed,
+}
+
+impl fmt::Display for RecurrenceMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let label = match self {
+            RecurrenceMode::FixedSchedule => "Fixed Schedule",
+            RecurrenceMode::AfterLastPerformed => "After Last Performed",
+        };
+        f.write_str(label)
+    }
 }
 
 impl Recurrence {
@@ -220,27 +249,48 @@ impl Recurrence {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// Determines when a recurrence sequence stops generating entries.
+#[derive(Default)]
 pub enum RecurrenceEnd {
+    #[default]
     Never,
     OnDate(NaiveDate),
     AfterOccurrences(u32),
 }
 
-impl Default for RecurrenceEnd {
-    fn default() -> Self {
-        RecurrenceEnd::Never
+impl fmt::Display for RecurrenceEnd {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RecurrenceEnd::Never => f.write_str("Never"),
+            RecurrenceEnd::OnDate(date) => write!(f, "On {}", date),
+            RecurrenceEnd::AfterOccurrences(limit) => {
+                write!(
+                    f,
+                    "After {limit} occurrence{}",
+                    if *limit == 1 { "" } else { "s" }
+                )
+            }
+        }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// Indicates whether a recurrence is actively generating entries.
+#[derive(Default)]
 pub enum RecurrenceStatus {
+    #[default]
     Active,
     Paused,
     Completed,
 }
 
-impl Default for RecurrenceStatus {
-    fn default() -> Self {
-        RecurrenceStatus::Active
+impl fmt::Display for RecurrenceStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let label = match self {
+            RecurrenceStatus::Active => "Active",
+            RecurrenceStatus::Paused => "Paused",
+            RecurrenceStatus::Completed => "Completed",
+        };
+        f.write_str(label)
     }
 }

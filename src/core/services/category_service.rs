@@ -1,13 +1,16 @@
+//! Business logic helpers for category management.
+
 use uuid::Uuid;
 
+use crate::core::services::{ServiceError, ServiceResult};
 use crate::domain::category::Category;
 use crate::ledger::Ledger;
 
-use super::{ServiceError, ServiceResult};
-
+/// Provides validated operations for budget categories.
 pub struct CategoryService;
 
 impl CategoryService {
+    /// Adds a new category and ensures its name and parent are valid.
     pub fn add(ledger: &mut Ledger, category: Category) -> ServiceResult<()> {
         Self::validate_name(ledger, None, &category.name)?;
         if let Some(parent_id) = category.parent_id {
@@ -17,6 +20,7 @@ impl CategoryService {
         Ok(())
     }
 
+    /// Applies updates to a category, respecting parentage rules.
     pub fn edit(ledger: &mut Ledger, id: Uuid, changes: Category) -> ServiceResult<()> {
         Self::validate_name(ledger, Some(id), &changes.name)?;
         if let Some(parent_id) = changes.parent_id {
@@ -34,6 +38,7 @@ impl CategoryService {
         Ok(())
     }
 
+    /// Removes a category after verifying it has no children or transactions.
     pub fn remove(ledger: &mut Ledger, id: Uuid) -> ServiceResult<()> {
         if ledger
             .categories
@@ -62,7 +67,8 @@ impl CategoryService {
         Ok(())
     }
 
-    pub fn list<'a>(ledger: &'a Ledger) -> Vec<&'a Category> {
+    /// Returns a snapshot of all categories.
+    pub fn list(ledger: &Ledger) -> Vec<&Category> {
         ledger.categories.iter().collect()
     }
 
@@ -70,7 +76,7 @@ impl CategoryService {
         let normalized = candidate.trim().to_ascii_lowercase();
         let duplicate = ledger.categories.iter().any(|category| {
             let name = category.name.trim().to_ascii_lowercase();
-            name == normalized && exclude.map_or(true, |id| category.id != id)
+            name == normalized && (exclude != Some(category.id))
         });
         if duplicate {
             Err(ServiceError::Invalid(format!(

@@ -1,3 +1,7 @@
+//! Simulation domain types used by CLI and services.
+
+use std::fmt;
+
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -9,6 +13,7 @@ fn default_simulation_id() -> Uuid {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Captures the before/after comparison for a simulation run.
 pub struct SimulationBudgetImpact {
     pub simulation_name: String,
     pub base: BudgetSummary,
@@ -17,6 +22,7 @@ pub struct SimulationBudgetImpact {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Represents a named what-if scenario comprised of change sets.
 pub struct Simulation {
     #[serde(default = "default_simulation_id")]
     pub id: Uuid,
@@ -35,6 +41,7 @@ pub struct Simulation {
 }
 
 impl Simulation {
+    /// Creates a new simulation with the provided display name.
     pub fn new(name: impl Into<String>) -> Self {
         let now = Utc::now();
         Self {
@@ -51,20 +58,29 @@ impl Simulation {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// Enumerates the lifecycle state of a simulation.
+#[derive(Default)]
 pub enum SimulationStatus {
+    #[default]
     Pending,
     Applied,
     Discarded,
 }
 
-impl Default for SimulationStatus {
-    fn default() -> Self {
-        SimulationStatus::Pending
+impl fmt::Display for SimulationStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let label = match self {
+            SimulationStatus::Pending => "Pending",
+            SimulationStatus::Applied => "Applied",
+            SimulationStatus::Discarded => "Discarded",
+        };
+        f.write_str(label)
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+/// Tracks an individual change within a simulation.
 pub enum SimulationChange {
     AddTransaction { transaction: Transaction },
     ModifyTransaction(SimulationTransactionPatch),
@@ -88,6 +104,7 @@ impl SimulationChange {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Represents a mutation to an existing or simulated transaction.
 pub struct SimulationTransactionPatch {
     pub transaction_id: Uuid,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -107,6 +124,7 @@ pub struct SimulationTransactionPatch {
 }
 
 impl SimulationTransactionPatch {
+    /// Determines whether the patch mutates at least one attribute.
     pub fn has_effect(&self) -> bool {
         self.from_account.is_some()
             || self.to_account.is_some()
@@ -119,6 +137,7 @@ impl SimulationTransactionPatch {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Simplified change log entry used after simulation evaluation.
 pub struct SimulatedChange {
     pub target_id: Uuid,
     pub change_type: ChangeKind,
@@ -126,10 +145,22 @@ pub struct SimulatedChange {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Describes the type of simulated mutation.
 pub enum ChangeKind {
     Add,
     Modify,
     Remove,
+}
+
+impl fmt::Display for ChangeKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let label = match self {
+            ChangeKind::Add => "Add",
+            ChangeKind::Modify => "Modify",
+            ChangeKind::Remove => "Remove",
+        };
+        f.write_str(label)
+    }
 }
 
 impl From<&SimulationChange> for SimulatedChange {

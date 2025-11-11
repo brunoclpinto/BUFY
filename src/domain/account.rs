@@ -1,3 +1,7 @@
+//! Domain types and helpers for ledger accounts.
+
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -53,7 +57,7 @@ impl NamedEntity for Account {
 
 impl Displayable for Account {
     fn display_label(&self) -> String {
-        format!("{} ({:?})", self.name, self.kind)
+        format!("{} ({})", self.name, self.kind)
     }
 }
 
@@ -66,4 +70,18 @@ pub enum AccountKind {
     ExpenseDestination,
     IncomeSource,
     Unknown,
+}
+
+impl fmt::Display for AccountKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let label = match self {
+            AccountKind::Bank => "Bank",
+            AccountKind::Cash => "Cash",
+            AccountKind::Savings => "Savings",
+            AccountKind::ExpenseDestination => "Expense Destination",
+            AccountKind::IncomeSource => "Income Source",
+            AccountKind::Unknown => "Unknown",
+        };
+        f.write_str(label)
+    }
 }

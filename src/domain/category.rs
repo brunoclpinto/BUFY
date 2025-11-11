@@ -1,3 +1,7 @@
+//! Domain types representing budget categories.
+
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -42,7 +46,7 @@ impl NamedEntity for Category {
 
 impl Displayable for Category {
     fn display_label(&self) -> String {
-        format!("{} ({:?})", self.name, self.kind)
+        format!("{} ({})", self.name, self.kind)
     }
 }
 
@@ -52,4 +56,15 @@ pub enum CategoryKind {
     Expense,
     Income,
     Transfer,
+}
+
+impl fmt::Display for CategoryKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let label = match self {
+            CategoryKind::Expense => "Expense",
+            CategoryKind::Income => "Income",
+            CategoryKind::Transfer => "Transfer",
+        };
+        f.write_str(label)
+    }
 }

@@ -1,4 +1,6 @@
-use std::cmp::Ordering;
+//! Ledger-level budgeting structures and reporting helpers.
+
+use std::{cmp::Ordering, fmt};
 
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
@@ -11,6 +13,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+/// Defines a reporting window for budget summaries.
 pub struct DateWindow {
     pub start: NaiveDate,
     pub end: NaiveDate,
@@ -53,6 +56,7 @@ impl DateWindow {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+/// Identifies how a date window maps to the active budgeting period.
 pub enum BudgetScope {
     Past,
     Current,
@@ -60,7 +64,20 @@ pub enum BudgetScope {
     Custom,
 }
 
+impl fmt::Display for BudgetScope {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let label = match self {
+            BudgetScope::Past => "Past",
+            BudgetScope::Current => "Current",
+            BudgetScope::Future => "Future",
+            BudgetScope::Custom => "Custom",
+        };
+        f.write_str(label)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// Aggregated totals for a single budgeting bucket.
 pub struct BudgetTotals {
     pub budgeted: f64,
     pub real: f64,
@@ -106,6 +123,7 @@ impl BudgetTotals {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// Describes whether the budget is aligned with the plan.
 pub enum BudgetStatus {
     OnTrack,
     OverBudget,
@@ -114,7 +132,21 @@ pub enum BudgetStatus {
     Incomplete,
 }
 
+impl fmt::Display for BudgetStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let label = match self {
+            BudgetStatus::OnTrack => "On Track",
+            BudgetStatus::OverBudget => "Over Budget",
+            BudgetStatus::UnderBudget => "Under Budget",
+            BudgetStatus::Empty => "Empty",
+            BudgetStatus::Incomplete => "Incomplete",
+        };
+        f.write_str(label)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Aggregated totals for a single category.
 pub struct CategoryBudget {
     pub category_id: Option<Uuid>,
     pub name: String,
@@ -122,6 +154,7 @@ pub struct CategoryBudget {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Aggregated totals tied to an account.
 pub struct AccountBudget {
     pub account_id: Uuid,
     pub name: String,
@@ -129,6 +162,7 @@ pub struct AccountBudget {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Complete summary for a selected window, including per-category/account totals.
 pub struct BudgetSummary {
     pub scope: BudgetScope,
     pub window: DateWindow,
@@ -142,6 +176,7 @@ pub struct BudgetSummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Differences between baseline and simulated totals.
 pub struct BudgetTotalsDelta {
     pub budgeted: f64,
     pub real: f64,
@@ -150,6 +185,7 @@ pub struct BudgetTotalsDelta {
 }
 
 #[derive(Debug, Clone)]
+/// Supplies valuation context for currency conversions.
 pub struct ConversionContext {
     pub policy: ValuationPolicy,
     pub report_date: NaiveDate,

@@ -1,3 +1,5 @@
+//! Ledger-related CLI commands and helpers.
+
 use std::path::PathBuf;
 
 use chrono::Utc;

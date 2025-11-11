@@ -1,3 +1,5 @@
+//! Core CLI loop, dispatch, and shell context helpers.
+
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
@@ -439,10 +441,10 @@ impl ShellContext {
         f: impl FnOnce(&Ledger) -> Result<T, CommandError>,
     ) -> Result<T, CommandError> {
         let manager = self.manager();
-        let result = manager
+
+        manager
             .with_current(|ledger| f(ledger))
-            .map_err(CommandError::from_core)?;
-        result
+            .map_err(CommandError::from_core)?
     }
 
     pub(crate) fn with_ledger_mut<T>(
@@ -450,17 +452,17 @@ impl ShellContext {
         f: impl FnOnce(&mut Ledger) -> Result<T, CommandError>,
     ) -> Result<T, CommandError> {
         let manager = self.manager();
-        let result = manager
+
+        manager
             .with_current_mut(|ledger| f(ledger))
-            .map_err(CommandError::from_core)?;
-        result
+            .map_err(CommandError::from_core)?
     }
 
     pub(crate) fn active_simulation_name(&self) -> Option<&str> {
         self.current_simulation
             .as_ref()
             .map(|sim| sim.name.as_str())
-            .or_else(|| self.active_simulation_name.as_deref())
+            .or(self.active_simulation_name.as_deref())
     }
 
     pub(crate) fn can_prompt(&self) -> bool {
@@ -2133,8 +2135,8 @@ impl ShellContext {
         output_section(format!(
             "{:?} {} → {}",
             summary.scope,
-            self.format_date(&ledger, summary.window.start),
-            self.format_date(&ledger, end_display)
+            self.format_date(ledger, summary.window.start),
+            self.format_date(ledger, end_display)
         ));
 
         output_info(format!(
@@ -2257,8 +2259,8 @@ impl ShellContext {
             .unwrap_or(window.end);
         output_section(format!(
             "{header} {} → {}",
-            self.format_date(&ledger, window.start),
-            self.format_date(&ledger, end_display)
+            self.format_date(ledger, window.start),
+            self.format_date(ledger, end_display)
         ));
 
         let totals = &report.forecast.totals;
@@ -2317,11 +2319,11 @@ impl ShellContext {
         output_info("Upcoming projections:");
         for item in report.forecast.transactions.iter().take(8) {
             let status = self.scheduled_status_label(item.status);
-            let route = self.describe_transaction_route(&ledger, &item.transaction);
+            let route = self.describe_transaction_route(ledger, &item.transaction);
             let category = item
                 .transaction
                 .category_id
-                .and_then(|id| self.lookup_category_name(&ledger, id))
+                .and_then(|id| self.lookup_category_name(ledger, id))
                 .unwrap_or_else(|| "Uncategorized".into());
             let txn_currency = ledger.transaction_currency(&item.transaction);
             let amount = format_currency_value(
@@ -2332,7 +2334,7 @@ impl ShellContext {
             );
             output_info(format!(
                 "  {date} | {amount} | {status:<8} | {route} ({category})",
-                date = self.format_date(&ledger, item.transaction.scheduled_date),
+                date = self.format_date(ledger, item.transaction.scheduled_date),
                 amount = amount,
                 status = status,
                 route = route,
@@ -2370,7 +2372,7 @@ impl ShellContext {
     fn transaction_summary_line(&self, ledger: &Ledger, txn: &Transaction) -> String {
         let category = txn
             .category_id
-            .and_then(|id| self.lookup_category_name(&ledger, id))
+            .and_then(|id| self.lookup_category_name(ledger, id))
             .unwrap_or_else(|| "Uncategorized".into());
         let amount = format_currency_value(
             txn.budgeted_amount,
@@ -2378,8 +2380,8 @@ impl ShellContext {
             &ledger.locale,
             &ledger.format,
         );
-        let route = self.describe_transaction_route(&ledger, txn);
-        let date = self.format_date(&ledger, txn.scheduled_date);
+        let route = self.describe_transaction_route(ledger, txn);
+        let date = self.format_date(ledger, txn.scheduled_date);
         format!("{} {} ({} ) on {}", category, amount, route, date)
     }
 
@@ -2465,10 +2467,10 @@ impl ShellContext {
         txn: &Transaction,
         snapshot: &RecurrenceSnapshot,
     ) {
-        let route = self.describe_transaction_route(&ledger, txn);
+        let route = self.describe_transaction_route(ledger, txn);
         let category = txn
             .category_id
-            .and_then(|id| self.lookup_category_name(&ledger, id))
+            .and_then(|id| self.lookup_category_name(ledger, id))
             .unwrap_or_else(|| "Uncategorized".into());
         let next_due = snapshot
             .next_due
@@ -2959,10 +2961,11 @@ fn format_backup_label(file_name: &str) -> String {
     }
     let date_part = segments[segments.len() - 2];
     let time_part = segments[segments.len() - 1];
-    if !(date_part.len() == 8 && time_part.len() == 4)
-        || !date_part.chars().all(|c| c.is_ascii_digit())
-        || !time_part.chars().all(|c| c.is_ascii_digit())
-    {
+    let is_well_formed = date_part.len() == 8
+        && time_part.len() == 4
+        && date_part.chars().all(|c| c.is_ascii_digit())
+        && time_part.chars().all(|c| c.is_ascii_digit());
+    if !is_well_formed {
         return file_name.to_string();
     }
     let raw = format!("{}{}", date_part, time_part);

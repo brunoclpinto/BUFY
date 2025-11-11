@@ -1,37 +1,50 @@
+//! Shared traits, time utilities, and enums for budgeting primitives.
+
+use std::fmt;
+
 use chrono::{Datelike, Duration, NaiveDate};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Exposes a stable identifier for entities stored in the ledger.
 pub trait Identifiable {
     fn id(&self) -> Uuid;
 }
 
+/// Provides read-only access to an entity's display name.
 pub trait NamedEntity {
     fn name(&self) -> &str;
 }
 
+/// Associates entities with optional category ownership.
 pub trait BelongsToCategory {
     fn category_id(&self) -> Option<Uuid>;
 }
 
+/// Supplies a common contract for retrieving numeric amounts.
 pub trait Amounted {
     fn amount(&self) -> f64;
 }
 
+/// Converts an entity into a user-facing display label.
 pub trait Displayable {
     fn display_label(&self) -> String;
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+/// Enumerates canonical budgeting cadences.
+#[derive(Default)]
 pub enum BudgetPeriod {
     Daily,
     Weekly,
+    #[default]
     Monthly,
     Yearly,
     Custom(u32),
 }
 
 impl BudgetPeriod {
+    /// Returns the nominal day-count representation for the period.
     pub fn days(self) -> Option<u32> {
         match self {
             BudgetPeriod::Daily => Some(1),
@@ -43,13 +56,8 @@ impl BudgetPeriod {
     }
 }
 
-impl Default for BudgetPeriod {
-    fn default() -> Self {
-        BudgetPeriod::Monthly
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// Enumerates time units used by `TimeInterval`.
 pub enum TimeUnit {
     Day,
     Week,
@@ -57,13 +65,27 @@ pub enum TimeUnit {
     Year,
 }
 
+impl fmt::Display for TimeUnit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let label = match self {
+            TimeUnit::Day => "Day",
+            TimeUnit::Week => "Week",
+            TimeUnit::Month => "Month",
+            TimeUnit::Year => "Year",
+        };
+        f.write_str(label)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// Represents a time unit and multiplier for recurrence calculations.
 pub struct TimeInterval {
     pub every: u32,
     pub unit: TimeUnit,
 }
 
 impl TimeInterval {
+    /// Calculates the next date after `from` according to the interval.
     pub fn next_date(&self, from: NaiveDate) -> NaiveDate {
         match self.unit {
             TimeUnit::Day => from + Duration::days(self.every as i64),
@@ -134,8 +156,21 @@ impl TimeInterval {
             (1, TimeUnit::Week) => "Weekly".into(),
             (1, TimeUnit::Month) => "Monthly".into(),
             (1, TimeUnit::Year) => "Yearly".into(),
-            (n, unit) => format!("Every {} {:?}{}", n, unit, if n > 1 { "s" } else { "" }),
+            (n, unit) => format!("Every {} {}{}", n, unit, if n > 1 { "s" } else { "" }),
         }
+    }
+}
+
+impl fmt::Display for BudgetPeriod {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let label = match self {
+            BudgetPeriod::Daily => "Daily",
+            BudgetPeriod::Weekly => "Weekly",
+            BudgetPeriod::Monthly => "Monthly",
+            BudgetPeriod::Yearly => "Yearly",
+            BudgetPeriod::Custom(value) => return write!(f, "Custom({value})"),
+        };
+        f.write_str(label)
     }
 }
 

@@ -1,3 +1,5 @@
+//! CLI command handlers for budgeting simulations.
+
 use chrono::Local;
 
 use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};

@@ -1,3 +1,5 @@
+//! Shared runtime state for CLI interactions and command execution.
+
 use std::{
     cell::RefCell,
     collections::VecDeque,

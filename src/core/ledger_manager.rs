@@ -1,3 +1,5 @@
+//! Manages ledger persistence, backups, and in-memory state.
+
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 

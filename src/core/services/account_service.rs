@@ -1,13 +1,16 @@
+//! Business logic helpers for validated account mutations.
+
 use uuid::Uuid;
 
+use crate::core::services::{ServiceError, ServiceResult};
 use crate::domain::account::Account;
 use crate::ledger::Ledger;
 
-use super::{ServiceError, ServiceResult};
-
+/// Provides validated mutations for `Account` entities.
 pub struct AccountService;
 
 impl AccountService {
+    /// Adds a new account after validating uniqueness and linked category.
     pub fn add(ledger: &mut Ledger, account: Account) -> ServiceResult<()> {
         Self::validate_name(ledger, None, &account.name)?;
         if let Some(category_id) = account.category_id {
@@ -17,6 +20,7 @@ impl AccountService {
         Ok(())
     }
 
+    /// Updates an existing account by applying the provided changeset.
     pub fn edit(ledger: &mut Ledger, id: Uuid, changes: Account) -> ServiceResult<()> {
         Self::validate_name(ledger, Some(id), &changes.name)?;
         if let Some(category_id) = changes.category_id {
@@ -35,6 +39,7 @@ impl AccountService {
         Ok(())
     }
 
+    /// Removes an account when no linked transactions exist.
     pub fn remove(ledger: &mut Ledger, id: Uuid) -> ServiceResult<()> {
         if ledger
             .transactions
@@ -54,7 +59,8 @@ impl AccountService {
         Ok(())
     }
 
-    pub fn list<'a>(ledger: &'a Ledger) -> Vec<&'a Account> {
+    /// Returns a snapshot of the accounts currently tracked in the ledger.
+    pub fn list(ledger: &Ledger) -> Vec<&Account> {
         ledger.accounts.iter().collect()
     }
 
@@ -62,7 +68,7 @@ impl AccountService {
         let normalized = candidate.trim().to_ascii_lowercase();
         let duplicate = ledger.accounts.iter().any(|account| {
             let name = account.name.trim().to_ascii_lowercase();
-            name == normalized && exclude.map_or(true, |id| account.id != id)
+            name == normalized && (exclude != Some(account.id))
         });
         if duplicate {
             Err(ServiceError::Invalid(format!(

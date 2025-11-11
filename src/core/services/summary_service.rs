@@ -1,17 +1,21 @@
+//! Aggregation helpers for budgeting summaries and forecasts.
+
 use chrono::NaiveDate;
 
+use crate::core::services::{ServiceError, ServiceResult};
 use crate::domain::ledger::{BudgetScope, BudgetSummary, DateWindow};
 use crate::ledger::{ForecastReport, Ledger, SimulationBudgetImpact};
 
-use super::{ServiceError, ServiceResult};
-
+/// Aggregates ledger data for summary and forecasting scenarios.
 pub struct SummaryService;
 
 impl SummaryService {
+    /// Summarizes the ledger's current budget window.
     pub fn current_totals(ledger: &Ledger) -> BudgetSummary {
         ledger.summarize_current_period()
     }
 
+    /// Summarizes the supplied window and scope against the ledger.
     pub fn summarize_window(
         ledger: &Ledger,
         window: DateWindow,
@@ -20,6 +24,7 @@ impl SummaryService {
         ledger.summarize_window_scope(window, scope)
     }
 
+    /// Summarizes the impact of a simulation in a specific window and scope.
     pub fn summarize_simulation(
         ledger: &Ledger,
         simulation_name: &str,
@@ -31,6 +36,7 @@ impl SummaryService {
             .map_err(ServiceError::from)
     }
 
+    /// Produces a forecast report for the given window and optional simulation.
     pub fn forecast_window(
         ledger: &Ledger,
         window: DateWindow,

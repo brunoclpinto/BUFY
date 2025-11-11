@@ -1,3 +1,5 @@
+//! CLI command handlers for runtime configuration management.
+
 use chrono::{NaiveDate, Weekday};
 
 use crate::cli::core::{CommandError, CommandResult, ShellContext};

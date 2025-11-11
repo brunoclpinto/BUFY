@@ -1,6 +1,9 @@
+//! JSON-backed storage backend plus configuration snapshot helpers.
+
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::{
+    cmp::Reverse,
     collections::HashSet,
     fs::{self, File},
     io::Write,
@@ -26,6 +29,7 @@ const DEFAULT_RETENTION: usize = 5;
 pub const CONFIG_BACKUP_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Clone)]
+/// Filesystem-backed persistence implementation used by the CLI.
 pub struct JsonStorage {
     root: PathBuf,
     ledgers_dir: PathBuf,
@@ -268,7 +272,7 @@ impl StorageBackend for JsonStorage {
             };
             entries.push(file_name);
         }
-        entries.sort_by(|a, b| parse_backup_timestamp(b).cmp(&parse_backup_timestamp(a)));
+        entries.sort_by_key(|name| Reverse(parse_backup_timestamp(name)));
         Ok(entries)
     }
 
@@ -315,6 +319,7 @@ pub struct ConfigBackupInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Metadata captured whenever configuration is archived.
 pub struct ConfigSnapshot {
     pub schema_version: u32,
     pub created_at: DateTime<Utc>,
@@ -335,6 +340,7 @@ impl ConfigSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Serializable representation of configuration values.
 pub struct ConfigData {
     pub base_currency: String,
     pub locale: LocaleConfig,
@@ -444,11 +450,12 @@ fn sanitize_backup_note(note: Option<&str>) -> Option<String> {
         if ch.is_ascii_alphanumeric() {
             sanitized.push(ch.to_ascii_lowercase());
             last_dash = false;
-        } else if ch.is_whitespace() || matches!(ch, '-' | '.') {
-            if !sanitized.is_empty() && !last_dash {
-                sanitized.push('-');
-                last_dash = true;
-            }
+        } else if (ch.is_whitespace() || matches!(ch, '-' | '.'))
+            && !sanitized.is_empty()
+            && !last_dash
+        {
+            sanitized.push('-');
+            last_dash = true;
         }
     }
     let trimmed = sanitized.trim_matches('-').to_string();
@@ -470,7 +477,7 @@ fn parse_backup_timestamp(name: &str) -> Option<DateTime<Utc>> {
         return None;
     }
     let time_digits = &time_part[..time_part.len() - 5];
-    if !is_digits(&time_digits, 4) {
+    if !is_digits(time_digits, 4) {
         return None;
     }
     let raw = format!("{}{}", date_part, time_digits);

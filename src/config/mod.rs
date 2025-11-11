@@ -1,6 +1,9 @@
+//! Manages CLI configuration persistence, backups, and restores.
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::{
+    cmp::Reverse,
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
@@ -16,6 +19,7 @@ const BACKUP_TIMESTAMP_FORMAT: &str = "%Y%m%d_%H%M";
 const TMP_SUFFIX: &str = "tmp";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Stores user-configurable CLI preferences and metadata.
 pub struct Config {
     pub locale: String,
     pub currency: String,
@@ -36,6 +40,7 @@ impl Default for Config {
     }
 }
 
+/// Handles persistence and backup management for [`Config`].
 pub struct ConfigManager {
     path: PathBuf,
     backups_dir: PathBuf,
@@ -124,7 +129,7 @@ impl ConfigManager {
                 entries.push(name.to_string());
             }
         }
-        entries.sort_by(|a, b| parse_timestamp(b).cmp(&parse_timestamp(a)));
+        entries.sort_by_key(|name| Reverse(parse_timestamp(name)));
         Ok(entries)
     }
 
@@ -144,11 +149,12 @@ fn sanitize_note(note: Option<&str>) -> Option<String> {
         if ch.is_ascii_alphanumeric() {
             sanitized.push(ch.to_ascii_lowercase());
             last_dash = false;
-        } else if ch.is_whitespace() || matches!(ch, '-' | '.') {
-            if !sanitized.is_empty() && !last_dash {
-                sanitized.push('-');
-                last_dash = true;
-            }
+        } else if (ch.is_whitespace() || matches!(ch, '-' | '.'))
+            && !sanitized.is_empty()
+            && !last_dash
+        {
+            sanitized.push('-');
+            last_dash = true;
         }
     }
     let trimmed = sanitized.trim_matches('-').to_string();

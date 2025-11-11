@@ -1,18 +1,22 @@
+//! Business logic helpers for managing transactions.
+
 use uuid::Uuid;
 
+use crate::core::services::{ServiceError, ServiceResult};
 use crate::domain::transaction::Transaction;
 use crate::ledger::Ledger;
 
-use super::{ServiceError, ServiceResult};
-
+/// Provides validated CRUD helpers for ledger transactions.
 pub struct TransactionService;
 
 impl TransactionService {
+    /// Adds a new transaction and returns its identifier.
     pub fn add(ledger: &mut Ledger, transaction: Transaction) -> ServiceResult<Uuid> {
         let id = ledger.add_transaction(transaction);
         Ok(id)
     }
 
+    /// Updates the transaction identified by `id` via the provided mutator.
     pub fn update<F>(ledger: &mut Ledger, id: Uuid, mutator: F) -> ServiceResult<()>
     where
         F: FnOnce(&mut Transaction),
@@ -26,13 +30,15 @@ impl TransactionService {
         Ok(())
     }
 
+    /// Removes the transaction identified by `id`, returning the removed instance.
     pub fn remove(ledger: &mut Ledger, id: Uuid) -> ServiceResult<Transaction> {
         ledger
             .remove_transaction(id)
             .ok_or_else(|| ServiceError::Invalid("Transaction not found".into()))
     }
 
-    pub fn list<'a>(ledger: &'a Ledger) -> Vec<&'a Transaction> {
+    /// Returns a snapshot of the ledger's transactions.
+    pub fn list(ledger: &Ledger) -> Vec<&Transaction> {
         ledger.transactions.iter().collect()
     }
 }
