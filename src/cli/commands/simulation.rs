@@ -54,23 +54,24 @@ pub(crate) fn definitions() -> Vec<CommandEntry> {
 }
 
 fn cmd_list_simulations(context: &mut ShellContext, _args: &[&str]) -> CommandResult {
-    let ledger = context.current_ledger()?;
-    let sims = ledger.simulations();
-    if sims.is_empty() {
-        io::print_warning("No simulations defined.");
-        return Ok(());
-    }
-    output_section("Simulations");
-    for sim in sims {
-        io::print_info(format!(
-            "  {:<20} {:<10} changes:{:>2} updated:{}",
-            sim.name,
-            format!("{:?}", sim.status),
-            sim.changes.len(),
-            sim.updated_at
-        ));
-    }
-    Ok(())
+    context.with_ledger(|ledger| {
+        let sims = ledger.simulations();
+        if sims.is_empty() {
+            io::print_warning("No simulations defined.");
+            return Ok(());
+        }
+        output_section("Simulations");
+        for sim in sims {
+            io::print_info(format!(
+                "  {:<20} {:<10} changes:{:>2} updated:{}",
+                sim.name,
+                format!("{:?}", sim.status),
+                sim.changes.len(),
+                sim.updated_at
+            ));
+        }
+        Ok(())
+    })
 }
 
 fn cmd_create_simulation(context: &mut ShellContext, args: &[&str]) -> CommandResult {
@@ -98,10 +99,12 @@ fn cmd_create_simulation(context: &mut ShellContext, args: &[&str]) -> CommandRe
     } else {
         None
     };
-    let ledger = context.current_ledger_mut()?;
-    ledger
-        .create_simulation(name.clone(), notes)
-        .map_err(CommandError::from_core)?;
+    context.with_ledger_mut(|ledger| {
+        ledger
+            .create_simulation(name.clone(), notes.clone())
+            .map(|_| ())
+            .map_err(CommandError::from_core)
+    })?;
     io::print_success(format!("Simulation `{}` created.", name));
     Ok(())
 }
@@ -119,8 +122,7 @@ fn cmd_enter_simulation(context: &mut ShellContext, args: &[&str]) -> CommandRes
             return Ok(());
         }
     };
-    let (canonical, created) = {
-        let ledger = context.current_ledger()?;
+    let (canonical, created) = context.with_ledger(|ledger| {
         let sim = ledger.simulation(&name).ok_or_else(|| {
             CommandError::InvalidArguments(format!("simulation `{}` not found", name))
         })?;
@@ -130,8 +132,8 @@ fn cmd_enter_simulation(context: &mut ShellContext, args: &[&str]) -> CommandRes
                 name
             )));
         }
-        (sim.name.clone(), sim.created_at)
-    };
+        Ok((sim.name.clone(), sim.created_at))
+    })?;
     context.set_active_simulation(Some(canonical.clone()));
     let created = created.with_timezone(&Local);
     io::print_success(format!(
@@ -166,19 +168,19 @@ fn cmd_apply_simulation(context: &mut ShellContext, args: &[&str]) -> CommandRes
             return Ok(());
         }
     };
-    let created = {
-        let ledger = context.current_ledger()?;
+    let created = context.with_ledger(|ledger| {
         ledger
             .simulation(&name)
             .map(|sim| sim.created_at)
             .ok_or_else(|| {
                 CommandError::InvalidArguments(format!("simulation `{}` not found", name))
-            })?
-    };
-    context
-        .current_ledger_mut()?
-        .apply_simulation(&name)
-        .map_err(CommandError::from_core)?;
+            })
+    })?;
+    context.with_ledger_mut(|ledger| {
+        ledger
+            .apply_simulation(&name)
+            .map_err(CommandError::from_core)
+    })?;
     if context
         .active_simulation_name()
         .map(|active| active.eq_ignore_ascii_case(&name))
@@ -208,19 +210,18 @@ fn cmd_discard_simulation(context: &mut ShellContext, args: &[&str]) -> CommandR
             return Ok(());
         }
     };
-    let (created, was_active) = {
-        let ledger = context.current_ledger()?;
+    let (created, was_active) = context.with_ledger(|ledger| {
         let sim = ledger.simulation(&name).ok_or_else(|| {
             CommandError::InvalidArguments(format!("simulation `{}` not found", name))
         })?;
-        (
+        Ok((
             Some(sim.created_at),
             context
                 .active_simulation_name()
                 .map(|active| active.eq_ignore_ascii_case(&name))
                 .unwrap_or(false),
-        )
-    };
+        ))
+    })?;
     if context.mode() == CliMode::Interactive {
         let confirm = io::confirm_action(&format!("Discard simulation `{}`?", name))
             .map_err(CommandError::from)?;
@@ -229,10 +230,11 @@ fn cmd_discard_simulation(context: &mut ShellContext, args: &[&str]) -> CommandR
             return Ok(());
         }
     }
-    context
-        .current_ledger_mut()?
-        .discard_simulation(&name)
-        .map_err(CommandError::from_core)?;
+    context.with_ledger_mut(|ledger| {
+        ledger
+            .discard_simulation(&name)
+            .map_err(CommandError::from_core)
+    })?;
     if was_active {
         context.clear_active_simulation();
     }
