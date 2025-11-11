@@ -44,6 +44,8 @@ impl Default for Config {
 }
 
 /// Handles persistence and backup management for [`Config`].
+///
+/// See also: [`crate::storage::json_backend::JsonStorage`] for ledger persistence.
 pub struct ConfigManager {
     path: PathBuf,
     backups_dir: PathBuf,

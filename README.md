@@ -1,23 +1,48 @@
-# Budget Core
+# Budget Core · v2.0 “Modular Refactor”
 
-Budget Core provides a reusable Rust toolkit for building budgeting workflows, simulations, and command-line experiences. Phase 0 establishes a reproducible development environment, initial domain models, and CI automation that future phases will build upon.
+Budget Core is a reusable Rust toolkit for building budgeting workflows, simulations, and accessible command-line experiences.
+Version 2.0 completes the modular refactor, cleanly separating the CLI, service layer, domain models, and persistence components.
+
+```
+┌──────────────────────────────────────────────────────┐
+│ CLI Layer (cli/)                                     │
+│   • CommandRegistry and commands/* handlers          │
+│   • ShellContext, selection providers, IO utilities  │
+└──────────────────────────────┬───────────────────────┘
+                               ↓
+┌──────────────────────────────────────────────────────┐
+│ Core Services (core/services/, cli/core.rs)          │
+│   • Account/Category/Transaction/Summary logic       │
+│   • LedgerManager orchestration                      │
+└──────────────────────────────┬───────────────────────┘
+                               ↓
+┌──────────────────────────────────────────────────────┐
+│ Domain Models (domain/, ledger/)                     │
+│   • Account/Category/Ledger/Simulation types         │
+│   • Recurrence + time utilities                      │
+└──────────────────────────────┬───────────────────────┘
+                               ↓
+┌──────────────────────────────────────────────────────┐
+│ Storage & Config (storage/, config/)                 │
+│   • JsonStorage, ConfigManager, backup helpers       │
+└──────────────────────────────────────────────────────┘
+```
 
 ## Feature Highlights
 
-- **Ledger fundamentals** – accounts, categories, transactions, and budget periods form the core domain (`src/ledger`).
-- **Interactive CLI** – a `rustyline` REPL (`budget_core_cli`) with contextual prompts, script mode (`BUDGET_CORE_CLI_SCRIPT=1`), and rich command set for day‑to‑day operations.
-- **Simulations** – name-addressable overlays that stage hypothetical changes without mutating the authoritative ledger.
+- **Ledger fundamentals** – accounts, categories, transactions, and budget periods form the core domain.
+- **Interactive CLI** – `budget_core_cli` provides a `rustyline` REPL with contextual prompts, script mode (`BUDGET_CORE_CLI_SCRIPT=1`), and a centralized command registry.
+- **Simulations** – name-addressable overlays stage hypothetical changes without touching the authoritative ledger.
 - **Recurrence & forecasting** – recurring transactions, automatic schedule regeneration, and future projections with variance-aware summaries.
-- **Currency-aware localization (Phase 8)** – base/reporting currency per ledger with locale-sensitive formatting and accessibility-aware output.
-- **Managed persistence (Phase 7)** – deterministic JSON serialization under `~/.budget_core`, schema migrations, rotating backups, and recovery tooling.
-
-For architectural background see `docs/design_overview.md`.
+- **Localization & accessibility** – locale-sensitive formatting, plain mode, screen-reader/high-contrast switches, and optional audio feedback cues.
+- **Managed persistence** – deterministic JSON serialization under `~/.budget_core`, schema migrations, rotating backups, and recovery tooling.
 
 ### Documentation
 
-- Developer reference: `docs/cli_developer_reference.md`
-- User guide: `docs/cli_user_guide.md`
-- Accessibility and localization details: `docs/localization_and_accessibility.md`
+- Architecture design notes: `docs/design_overview.md`
+- Developer guide: `docs/development.md`
+- User guide: `docs/user_guide.md`
+- Localization & accessibility: `docs/localization_and_accessibility.md`
 - Testing plan: `docs/testing_strategy.md`
 
 ## Getting Started
@@ -48,169 +73,67 @@ For architectural background see `docs/design_overview.md`.
    ```
 
    - The prompt indicates the active ledger (`ledger(demo) ⮞`). Use `help` or `help <command>` for inline docs.
-   - Script mode (`BUDGET_CORE_CLI_SCRIPT=1`) accepts newline-delimited commands for tests/automation.
+   - Script mode (`BUDGET_CORE_CLI_SCRIPT=1`) accepts newline-delimited commands for automation.
    - The CLI auto-loads the last opened ledger (tracked in `~/.budget_core/state.json`) when running interactively.
 
 ### CLI Quick Reference
+
+```
+ledger new Household
+account add
+transaction edit
+```
 
 | Area | Commands | Notes |
 | --- | --- | --- |
 | Ledger lifecycle | `new-ledger`, `load [path]`, `save [path]`, `load-ledger <name>`, `save-ledger [name]` | Named saves use the managed store; path-based commands operate on arbitrary JSON files. |
 | Persistence tooling | `backup-ledger [name]`, `list-backups [name]`, `restore-ledger <idx|pattern> [name]` | Snapshots live under `~/.budget_core/backups/<slug>/<slug>_YYYYMMDD_HHMM[_note].json`. |
-| Config management | `config show`, `config set <locale|currency|theme|last_opened_ledger> <value>`, `config backup [note]`, `config backups`, `config restore [name]` | Preferences live in `~/.budget_core/config/config.json` with backups under `config/backups/`. |
-| Data entry | `transaction add/edit/remove/show/complete`, `add account`, `add category`, `add transaction`, `list [accounts|categories|transactions]` | Transaction list output shows recurrence hints (`[recurring]`, `[instance]`). |
-| Backups & selection | `config backup [note]`, `config backups`, `config restore <name?>`, `restore-ledger <backup?>`, `simulation apply/discard/enter <name?>` | Omit the identifier to open an interactive list (two-space numbered rows, `Type cancel` prompt); success messages echo the chosen item and timestamp. |
+| Config management | `config show`, `config set <locale|currency|theme|last_opened_ledger> <value>`, `config audio-feedback <on|off>`, `config backup [note]`, `config backups`, `config restore [name]` | Preferences live in `~/.budget_core/config/config.json` with backups under `config/backups/`. |
+| Data entry | `transaction add/edit/remove/show/complete`, `account add/edit/list`, `category add/edit/list`, `list [accounts|categories|transactions]` | List commands now render consistent tables respecting locale/currency. |
 | Recurrence | `recurring list/edit/clear/pause/resume/skip/sync`, `complete <idx>` | Schedules track start/end dates, exceptions, and automatically materialize overdue instances. |
 | Forecasting | `forecast [simulation] [<n> <unit> | custom <start> <end>]` | Produces future inflow/outflow projections plus window-specific budget summaries. |
-| Simulations | `create-simulation`, `enter-simulation`, `simulation add/modify/exclude`, `list-simulations`, `summary <simulation>`, `apply-simulation`, `discard-simulation` | Enables “what-if” comparisons against the base ledger. |
+| Simulations | `create-simulation`, `enter-simulation`, `simulation add/modify/exclude`, `list-simulations`, `summary <simulation>`, `apply-simulation`, `discard-simulation` | Enables what-if comparisons against the base ledger. |
 | Summaries | `summary [past|future <n> | custom <start> <end>]` | Default view shows the active budget period; optional simulation overlay highlights deltas. |
-| Meta | `version` | Print build metadata (crate version, git hash, target, rustc, FFI version when available). |
+| Meta | `version` | Prints build metadata (crate version, git hash, target, rustc, FFI version when available). |
 
 #### CLI Output & Accessibility
 
-- Every message passes through the shared formatter (`cli::output`), which prefixes content with explicit labels (`INFO:`, `SUCCESS:`, `WARNING:`, `ERROR:`, `PROMPT:`) and ASCII-friendly icons. Lists indent by two spaces and section headers render as `=== Title ===`, keeping transcripts screen-reader friendly and colour independent.
-- `config screen-reader on` swaps compact tables for sentence-form rows (“Account: Checking · Kind: Bank”), while `config high-contrast on` disables ANSI styling entirely. Combine them when recording transcripts or screenshots so the output mirrors assistive-technology defaults.
-- Interactive lists (transactions, simulations, backups, etc.) always show a header (`Select a simulation:`), numbered entries, and the footer `Type cancel to abort.`. Cancelling prints `WARNING: [!] Operation cancelled.` for deterministic scripting.
-- Wizard prompts display progress (`Step 4 of 10`), render defaults in square brackets, and accept `back`, `help`, or `cancel` on any field. Validation errors reprint the field with `ERROR:` messaging before allowing you to continue.
+- All output flows through `cli::output`, which attaches explicit labels (`INFO`, `SUCCESS`, `WARNING`, `ERROR`, `HINT`) plus emoji/colour decorations. `config theme plain` or `config high-contrast on` disables colour/emoji while keeping labels intact for screen readers.
+- List commands render monospace tables with Unicode borders when colour is enabled and ASCII borders in plain mode so screen readers can enumerate columns.
+- `config screen-reader on` switches to sentence-form rows, while `config audio-feedback on` adds soft beeps to warnings/errors for low-vision cues.
+- Interactive lists show numbered rows with `[default]` hints and `Type cancel to abort.` prompts; script mode bypasses the prompts entirely.
+- `BUDGET_CORE_CLI_SCRIPT=1` disables interactive prompts/line-editing so deterministic scripts can feed newline-delimited command files (see `tests/cli_script.rs`).
 
-Use `BUDGET_CORE_HOME=/custom/path` to relocate the managed store. `save-ledger <name>` remembers the canonical filename and enables quick resaves without re-entering the path.
+## Config, Simulation, & Forecast Capabilities
 
-## Forecasting & Recurrence
+- **Config** – `config show` prints locale/currency/theme/last-ledger information plus ledger-format details when a ledger is loaded. `config set`, `config screen-reader`, `config high-contrast`, and `config audio-feedback` update preferences live. Backups are versioned and restorable via `config backup|restore`.
+- **Simulations** – `create-simulation`, `enter-simulation`, `simulation add/modify/exclude`, `apply-simulation`, and `discard-simulation` make modelling scenarios trivial. `summary <name>` and `forecast <name>` overlay simulation deltas on the base ledger.
+- **Forecasts** – `forecast [simulation] [<n> <unit> | custom <start> <end>]` renders inflow/outflow projections in the same table style. Summaries and forecasts honour locale, base currency, and valuation policy.
 
-Budget Core now understands recurring obligations and can materialize missed occurrences automatically:
-
-- `recurring list [overdue|pending|all]` surfaces every recurrence with next-due dates, overdue counts, and status (Active/Paused/Completed). Use `recurring edit <transaction_index>` to attach or update a schedule for any transaction, `recurring clear` to remove it, `recurring pause`/`recurring resume` to toggle activity, `recurring skip <index> <YYYY-MM-DD>` to add exceptions, and `recurring sync [YYYY-MM-DD]` to backfill overdue ledger entries.
-- `forecast [simulation_name] [<number> <unit> | custom <start> <end>]` produces a deterministic projection for the requested window and reports inflow/outflow totals, overdue vs. pending counts, and the top upcoming instances. Prefix the command with a simulation name to preview "what-if" schedules.
-- `transaction complete <transaction_index> <YYYY-MM-DD> <amount>` (alias: `complete`) marks a scheduled transaction as finished and updates recurrence metadata automatically.
-- `config backup [note]` writes a timestamped snapshot of `config/config.json` to `~/.budget_core/config/backups/`.
-- `config restore <name?>` mirrors `restore-ledger`: pick a saved configuration snapshot interactively or pass the filename to restore directly.
-- `config backups` prints numbered configuration snapshots sorted by newest first; each entry shows the creation timestamp (parsed from the filename). Use `config restore` to select one from the list.
-
-Recurrence state is persisted with the ledger JSON so restarting the CLI preserves start dates, next occurrences, and skipped dates. Use `recurring sync` after structural changes (new accounts/categories) to ensure schedules stay aligned.
-
-## Persistence & Backups
-
-Phase 7 introduces a fully managed JSON store rooted at `~/.budget_core` (override with `BUDGET_CORE_HOME`). Each ledger is saved as `<slug>.json`, accompanied by rotating backups named `<slug>_YYYYMMDD_HHMM[_note].json` under `backups/<slug>/`.
-
-- `save-ledger [name]` writes the in-memory ledger using atomic temp-file swaps and records the name for future quick saves.
-- `load-ledger <name>` retrieves a named ledger while validating schema versions, rebuilding recurrence metadata, and surfacing any migration warnings.
-- `backup-ledger [name]` snapshots the current file, `list-backups [name]` enumerates available restore points, and `restore-ledger <index|pattern> [name]` reverts to the desired snapshot (with interactive confirmation).
-- The classic `save [path]` / `load [path]` commands remain for ad-hoc JSON paths.
-
-All saves are deterministic (bar timestamps), schema versioned, and guard against corruption via temp files plus optional rolling backups. The shared config file tracks the last opened ledger so interactive sessions auto-load it on startup for continuity.
-
-Additional architectural notes are captured in `docs/design_overview.md`.
-
-### File Layout
-
-```
-~/.budget_core/
-├── ledgers/
-│   └── demo.json                 # canonical ledger save
-├── backups/
-│   └── demo/
-│       ├── home_20251026_0820.json
-│       └── …
-└── config/
-    ├── config.json               # persisted CLI preferences
-    └── backups/
-        └── config_20251107_2057.json
-```
-
-Every save produces pretty JSON for human inspection, and backups are pruned according to the store’s retention setting (default 5). Loads validate schema versions (`schema_version`), rebuild recurrence metadata, and surface migration notes in the CLI.
-
-## Configuration Backups
-
-- Configuration snapshots live under `~/.budget_core/config_backups/` and use the schema:
-
-  ```json
-  {
-    "schema_version": 1,
-    "created_at": "2025-11-02T14:30:00Z",
-    "note": "before sync",
-    "config": {
-      "base_currency": "USD",
-      "locale": { "language_tag": "en-US", "decimal_separator": ".", ... },
-      "currency_display": "Symbol",
-      "negative_style": "Sign",
-      "screen_reader_mode": false,
-      "high_contrast_mode": false,
-      "valuation_policy": { "kind": "transaction_date" }
-    }
-  }
-  ```
-
-- Example workflow:
-
-  ```text
-  config backup "before sync"
-  ✔ Configuration backup saved: config_2025-11-02T14-30-00.json
-
-  config backups
-  Available configuration backups:
-    1. config_2025-11-02T14-30-00.json (Created: 2025-11-02 14:30) (note: before sync)
-
-  config restore
-  Select a configuration backup to restore:
-    1. config_2025-11-02T14-30-00.json (Created: 2025-11-02 14:30)  [note: before sync]
-    Type cancel or press Esc to abort.
-  Selected backup: config_2025-11-02T14-30-00.json
-  Created: 2025-11-02 14:30
-  Note: before sync
-  Base currency: USD
-  Locale: en-US
-  Currency display: Symbol | Negative style: Sign
-  Screen reader: off | High contrast: off
-  Valuation policy: TransactionDate
-  Restore configuration from this backup? (y/N)
-  ✔ Configuration restored from config_2025-11-02T14-30-00.json (Created: 2025-11-02 14:30)
-  ```
+See `docs/user_guide.md` for step-by-step workflows and `docs/development.md` for extending the CLI/service layers.
 
 ## Currency & Localization
 
-- **Base currency / valuation policy** – Summaries assume all amounts are recorded in the ledger’s base currency. `config valuation <transaction|report|custom>` controls the date referenced in disclosure footers but no longer triggers FX conversions.
-- **Account/transaction currency** – Account creation prompts for a currency override; transactions inherit from their source account unless explicitly set. Mixing currencies without manual conversion will mark summaries as incomplete.
-- **Locale & formatting** – `config locale <tag>` adjusts decimal/grouping separators, date formats, and the first weekday; `config negative-style`, `config screen-reader`, and `config high-contrast` tune CLI output for accessibility.
+- **Base currency / valuation policy** – Summaries assume all amounts are recorded in the ledger’s base currency. `config valuation <transaction|report|custom>` controls the date referenced in disclosure footers.
+- **Locale & formatting** – `config locale <tag>` adjusts decimal/grouping separators, date formats, and the first weekday. `config negative-style`, `config screen-reader`, and `config high-contrast` tune CLI output for accessibility.
 - **Disclosures** – Budget summaries and forecasts include a footer noting the active valuation policy and reminder that FX conversion is unavailable.
-
-### Accessibility & Internationalization
-
-- **Screen reader mode** (`config screen-reader on`) replaces ambiguous glyphs with explicit words (for example, `-` becomes “minus”) and ensures tables are narratable top-to-bottom. Disable again with `config screen-reader off`.
-- **High-contrast mode** (`config high-contrast on`) removes ANSI color and emoji reliance so totals remain legible in monochrome terminals. It is safe to enable alongside screen reader mode.
-- **Locale fallbacks** – When an unsupported `language_tag` is provided, the CLI keeps the requested tag but emits a warning while reverting to default separators. Adjust the decimal or grouping character manually with `config locale`.
-- **Date formatting** – Locale changes also update the first weekday so weekly/monthly summaries align with regional expectations. Use `config locale en-GB` (Monday week start) vs. `en-US` (Sunday).
-- See `docs/localization_and_accessibility.md` for deeper guidance on translation, formatting rules, and output conventions.
+- Refer to `docs/localization_and_accessibility.md` for translation and formatting guidance.
 
 ## Development Conventions
 
 - Crate edition: Rust 2021.
 - Tracing is initialized via `budget_core::init()` or `budget_core::utils::init_tracing()`.
 - All warnings are denied by default (`.cargo/config.toml`), so fix lint issues before committing.
+- Module naming uses snake_case files with one entity per file; enums implement `Display` so CLI output remains readable. `docs/development.md` covers naming, testing, and error-handling expectations in detail.
 
 ## Testing & CI
 
-- `cargo test` exercises unit, integration, CLI-script, currency formatting, and persistence suites.
-- `cargo test --features ffi` repeats the suite against the shared library to ensure ABI stability.
-- `cargo nextest run` and `cargo clippy --all-targets -- -D warnings` keep execution fast in CI.
-- CLI scenarios in `tests/cli_script.rs` demonstrate script mode pipelines; `tests/persistence_suite.rs` guards backup/restore flows.
-- `cargo test --test stress_suite` runs the soak test that iterates through recurrence materialization, simulations, forecasts, and save/load cycles.
-- `cargo bench` runs Criterion benchmarks (see `docs/performance.md`) for load/save, summary, and forecast workloads. Generated reports live under `target/criterion`.
-
-## Troubleshooting
-
-- **Schema migrations** – After upgrading, run `load-ledger <name>`; migration notes are echoed in the CLI. If a load fails, restore from `list-backups` and inspect the JSON diff.
-- **Currency mismatches** – When summaries warn about incomplete conversions, align the ledger/accounts on a single currency or adjust transaction amounts manually; automatic FX is not supported.
-- **Atomic save failures** – Errors mentioning temp files indicate filesystem permissions or disk space issues. Verify write access to `~/.budget_core` (or set `BUDGET_CORE_HOME`) and rerun `save-ledger`.
-- **Recurrence drift** – Run `recurring sync <YYYY-MM-DD>` to backfill overdue instances before generating forecasts. The command emits a summary of newly materialized transactions.
-- Additional developer-focused notes, schema references, and integration steps for Swift/Kotlin/C# live in `docs/design_overview.md` and `docs/integration_guides.md`.
+- `cargo test --all` exercises unit, integration, CLI-script, currency formatting, and persistence suites.
+- `cargo nextest run` executes the same tests in parallel; `cargo clippy --all-targets -- -D warnings` keeps lint debt at zero.
+- `cargo test --features ffi` loads the shared library dynamically to guarantee ABI stability.
+- CLI scenarios in `tests/cli_script.rs` demonstrate script mode pipelines; `tests/persistence_suite.rs` guards backup/restore flows, and `tests/stress_suite.rs` performs long-running save/load/forecast loops.
+- `cargo bench` runs Criterion benchmarks (see `docs/performance.md`) for load/save, summary, and forecast workloads. Generated HTML reports live under `target/criterion`.
 
 ## License
 
-Licensed under either of
-
-- Apache License, Version 2.0 (`LICENSE-APACHE`)
-- MIT license (`LICENSE-MIT`)
-
-at your option.
-
-Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in this project is licensed under the same dual license terms.
+Dual licensed under MIT or Apache 2.0 as documented in `LICENSE` and `LICENSE-APACHE`. See the individual files for more details.

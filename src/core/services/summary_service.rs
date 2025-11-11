@@ -7,6 +7,8 @@ use crate::domain::ledger::{BudgetScope, BudgetSummary, DateWindow};
 use crate::ledger::{ForecastReport, Ledger, SimulationBudgetImpact};
 
 /// Aggregates ledger data for summary and forecasting scenarios.
+///
+/// See also: [`crate::domain::ledger::BudgetSummary`] for the returned data model.
 pub struct SummaryService;
 
 impl SummaryService {

@@ -30,6 +30,8 @@ pub const CONFIG_BACKUP_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Clone)]
 /// Filesystem-backed persistence implementation used by the CLI.
+///
+/// See also: [`crate::config::ConfigManager`] for configuration storage.
 pub struct JsonStorage {
     root: PathBuf,
     ledgers_dir: PathBuf,

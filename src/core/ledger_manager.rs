@@ -20,6 +20,8 @@ pub struct LoadMetadata {
 }
 
 /// Facade that coordinates ledger state, persistence, and backups.
+///
+/// See also: [`crate::storage::json_backend::JsonStorage`] for the underlying storage backend.
 pub struct LedgerManager {
     pub current: Option<Arc<RwLock<Ledger>>>,
     current_name: Option<String>,

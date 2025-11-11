@@ -6,7 +6,9 @@ use crate::core::services::{ServiceError, ServiceResult};
 use crate::domain::category::Category;
 use crate::ledger::Ledger;
 
-/// Provides validated operations for budget categories.
+/// Provides validated operations for [`Category`] entities.
+///
+/// See also: [`crate::core::services::AccountService`] when linking accounts to categories.
 pub struct CategoryService;
 
 impl CategoryService {

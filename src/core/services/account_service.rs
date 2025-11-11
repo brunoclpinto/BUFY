@@ -6,7 +6,9 @@ use crate::core::services::{ServiceError, ServiceResult};
 use crate::domain::account::Account;
 use crate::ledger::Ledger;
 
-/// Provides validated mutations for `Account` entities.
+/// Provides validated mutations for [`Account`] entities.
+/// 
+/// See also: [`crate::core::services::CategoryService`] for linked category validation.
 pub struct AccountService;
 
 impl AccountService {

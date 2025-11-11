@@ -6,7 +6,7 @@ use crate::core::services::{ServiceError, ServiceResult};
 use crate::domain::transaction::Transaction;
 use crate::ledger::Ledger;
 
-/// Provides validated CRUD helpers for ledger transactions.
+/// Provides validated CRUD helpers for [`Transaction`] entities.
 pub struct TransactionService;
 
 impl TransactionService {
