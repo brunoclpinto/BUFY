@@ -139,6 +139,26 @@ impl LedgerManager {
         self.current_name = None;
     }
 
+    /// Executes a closure with an immutable reference to the current ledger.
+    /// Returns [`BudgetError::LedgerNotLoaded`] when no ledger is available.
+    pub fn with_current<T, F>(&self, f: F) -> Result<T, BudgetError>
+    where
+        F: FnOnce(&Ledger) -> T,
+    {
+        let ledger = self.current.as_ref().ok_or(BudgetError::LedgerNotLoaded)?;
+        Ok(f(ledger))
+    }
+
+    /// Executes a closure with a mutable reference to the current ledger.
+    /// Returns [`BudgetError::LedgerNotLoaded`] when no ledger is available.
+    pub fn with_current_mut<T, F>(&mut self, f: F) -> Result<T, BudgetError>
+    where
+        F: FnOnce(&mut Ledger) -> T,
+    {
+        let ledger = self.current.as_mut().ok_or(BudgetError::LedgerNotLoaded)?;
+        Ok(f(ledger))
+    }
+
     fn process_loaded_ledger(&self, ledger: &mut Ledger) -> Result<LoadEffects, BudgetError> {
         let original_version = ledger.schema_version;
         self.ensure_schema_support(original_version)?;
@@ -241,5 +261,31 @@ mod tests {
             }
             other => panic!("expected persistence error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn with_current_helpers_access_loaded_ledger() {
+        let temp = tempdir().unwrap();
+        let store = crate::storage::json_backend::JsonStorage::new(
+            Some(temp.path().to_path_buf()),
+            Some(3),
+        )
+        .unwrap();
+        let mut manager = LedgerManager::new(Box::new(store));
+        let ledger = Ledger::new("Helpers", BudgetPeriod::monthly());
+        manager.set_current(ledger, None, Some("helpers".into()));
+
+        let name = manager
+            .with_current(|ledger| ledger.name.clone())
+            .expect("ledger present");
+        assert_eq!(name, "Helpers");
+
+        manager
+            .with_current_mut(|ledger| ledger.name.push_str(" Updated"))
+            .expect("ledger present");
+        let updated = manager
+            .with_current(|ledger| ledger.name.clone())
+            .expect("ledger present");
+        assert_eq!(updated, "Helpers Updated");
     }
 }
