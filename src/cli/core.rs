@@ -3,6 +3,7 @@ use std::{
     collections::{HashMap, HashSet},
     io,
     path::{Path, PathBuf},
+    sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
 };
 
 use chrono::{DateTime, Duration, Local, NaiveDate, NaiveDateTime, Utc};
@@ -12,7 +13,7 @@ use strsim::levenshtein;
 use uuid::Uuid;
 
 use crate::{
-    config::ConfigManager,
+    config::{Config, ConfigManager},
     core::errors::BudgetError,
     core::ledger_manager::LedgerManager,
     core::services::{
@@ -74,10 +75,15 @@ impl ShellContext {
         if self.manager().with_current(|_| ()).is_ok() {
             return Ok(());
         }
-        let Some(name) = self.config.last_opened_ledger.clone() else {
+        let last_opened = { self.config_read().last_opened_ledger.clone() };
+        let Some(name) = last_opened else {
             return Ok(());
         };
-        if let Ok(report) = self.manager_mut().load(&name) {
+        let load_result = {
+            let mut manager = self.manager_mut();
+            manager.load(&name)
+        };
+        if let Ok(report) = load_result {
             let path = self.storage.ledger_path(&name);
             self.ledger_path = Some(path);
             self.clear_active_simulation();
@@ -87,22 +93,44 @@ impl ShellContext {
         Ok(())
     }
 
-    pub(crate) fn manager(&self) -> &LedgerManager {
-        &self.ledger_manager
+    pub(crate) fn manager(&self) -> RwLockReadGuard<'_, LedgerManager> {
+        self.ledger_manager
+            .read()
+            .expect("LedgerManager lock poisoned")
     }
 
-    pub(crate) fn manager_mut(&mut self) -> &mut LedgerManager {
-        &mut self.ledger_manager
+    pub(crate) fn manager_mut(&self) -> RwLockWriteGuard<'_, LedgerManager> {
+        self.ledger_manager
+            .write()
+            .expect("LedgerManager lock poisoned")
+    }
+
+    fn config_read(&self) -> RwLockReadGuard<'_, Config> {
+        self.config.read().expect("Config lock poisoned")
+    }
+
+    fn config_write(&self) -> RwLockWriteGuard<'_, Config> {
+        self.config.write().expect("Config lock poisoned")
+    }
+
+    fn config_manager(&self) -> RwLockReadGuard<'_, ConfigManager> {
+        self.config_manager
+            .read()
+            .expect("ConfigManager lock poisoned")
     }
 
     fn persist_config(&self) -> Result<(), CommandError> {
-        self.config_manager
-            .save(&self.config)
+        let config = self.config_read();
+        self.config_manager()
+            .save(&config)
             .map_err(CommandError::from_core)
     }
 
     fn update_last_opened(&mut self, name: Option<&str>) -> CommandResult {
-        self.config.last_opened_ledger = name.map(|value| value.to_string());
+        {
+            let mut config = self.config_write();
+            config.last_opened_ledger = name.map(|value| value.to_string());
+        }
         self.persist_config()
     }
 
@@ -111,10 +139,12 @@ impl ShellContext {
         commands::register_all(&mut registry);
 
         let storage = JsonStorage::new_default().map_err(CliError::from)?;
-        let manager = LedgerManager::new(Box::new(storage.clone()));
-        let config_manager = ConfigManager::new().map_err(CliError::from)?;
-        let config = config_manager.load().map_err(CliError::from)?;
+        let manager = Arc::new(RwLock::new(LedgerManager::new(Box::new(storage.clone()))));
+        let config_manager_raw = ConfigManager::new().map_err(CliError::from)?;
+        let config = config_manager_raw.load().map_err(CliError::from)?;
         cli_io::apply_config(&config);
+        let config = Arc::new(RwLock::new(config));
+        let config_manager = Arc::new(RwLock::new(config_manager_raw));
 
         let mut app = ShellContext {
             mode,
@@ -145,8 +175,8 @@ impl ShellContext {
         &self.theme
     }
 
-    pub(crate) fn ledger_name(&self) -> Option<&str> {
-        self.manager().current_name()
+    pub(crate) fn ledger_name(&self) -> Option<String> {
+        self.manager().current_name().map(|name| name.to_string())
     }
 
     pub(crate) fn ledger_path(&self) -> Option<PathBuf> {
@@ -157,9 +187,9 @@ impl ShellContext {
         match name {
             Some(sim_name) => {
                 let simulation = self
-                    .current_ledger()
+                    .with_ledger(|ledger| Ok(ledger.simulation(&sim_name).cloned()))
                     .ok()
-                    .and_then(|ledger| ledger.simulation(&sim_name).cloned());
+                    .flatten();
                 self.current_simulation = simulation;
                 self.active_simulation_name = Some(sim_name);
             }
@@ -200,21 +230,19 @@ impl ShellContext {
     }
 
     pub(crate) fn show_config(&self) -> CommandResult {
+        let config = self.config_read();
         output_section("Configuration");
-        output_info(format!("  Locale: {}", self.config.locale));
-        output_info(format!("  Currency: {}", self.config.currency));
+        output_info(format!("  Locale: {}", config.locale));
+        output_info(format!("  Currency: {}", config.currency));
         output_info(format!(
             "  Theme: {}",
-            self.config.theme.as_deref().unwrap_or("default")
+            config.theme.as_deref().unwrap_or("default")
         ));
         output_info(format!(
             "  Last opened ledger: {}",
-            self.config
-                .last_opened_ledger
-                .as_deref()
-                .unwrap_or("(none)")
+            config.last_opened_ledger.as_deref().unwrap_or("(none)")
         ));
-        if let Ok(ledger) = self.current_ledger() {
+        let _ = self.with_ledger(|ledger| {
             output_section("Ledger Format");
             output_info(format!(
                 "  Base currency: {}",
@@ -242,54 +270,66 @@ impl ShellContext {
                 }
             ));
             output_info(format!("  Valuation policy: {:?}", ledger.valuation_policy));
-        }
+            Ok(())
+        });
         Ok(())
     }
 
     pub(crate) fn set_config_value(&mut self, key: &str, value: &str) -> CommandResult {
-        match key.to_lowercase().as_str() {
-            "locale" => self.config.locale = value.to_string(),
-            "currency" => self.config.currency = value.to_string(),
-            "theme" => {
-                if value.eq_ignore_ascii_case("none") || value.is_empty() {
-                    self.config.theme = None;
-                } else {
-                    self.config.theme = Some(value.to_string());
+        {
+            let mut config = self.config_write();
+            match key.to_lowercase().as_str() {
+                "locale" => config.locale = value.to_string(),
+                "currency" => config.currency = value.to_string(),
+                "theme" => {
+                    if value.eq_ignore_ascii_case("none") || value.is_empty() {
+                        config.theme = None;
+                    } else {
+                        config.theme = Some(value.to_string());
+                    }
                 }
-            }
-            "last_opened_ledger" => {
-                if value.eq_ignore_ascii_case("none") || value.is_empty() {
-                    self.config.last_opened_ledger = None;
-                } else {
-                    self.config.last_opened_ledger = Some(value.to_string());
+                "last_opened_ledger" => {
+                    if value.eq_ignore_ascii_case("none") || value.is_empty() {
+                        config.last_opened_ledger = None;
+                    } else {
+                        config.last_opened_ledger = Some(value.to_string());
+                    }
                 }
-            }
-            other => {
-                return Err(CommandError::InvalidArguments(format!(
-                    "unknown config key `{}`",
-                    other
-                )))
+                other => {
+                    return Err(CommandError::InvalidArguments(format!(
+                        "unknown config key `{}`",
+                        other
+                    )))
+                }
             }
         }
         self.persist_config()?;
-        cli_io::apply_config(&self.config);
+        let config = self.config_read();
+        cli_io::apply_config(&config);
         output_success("Configuration updated.");
         Ok(())
     }
 
-    pub(crate) fn require_named_ledger(&self) -> Result<&str, CommandError> {
-        self.manager().current_name().ok_or_else(|| {
-            CommandError::InvalidArguments(
-                "No named ledger associated. Use `save-ledger <name>` once to bind it.".into(),
-            )
-        })
+    pub(crate) fn require_named_ledger(&self) -> Result<String, CommandError> {
+        let manager = self.manager();
+        manager
+            .current_name()
+            .map(|name| name.to_string())
+            .ok_or_else(|| {
+                CommandError::InvalidArguments(
+                    "No named ledger associated. Use `save-ledger <name>` once to bind it.".into(),
+                )
+            })
     }
 
     pub(crate) fn prompt(&self) -> String {
-        let context = self
-            .current_ledger_opt()
-            .map(|ledger| format!("ledger({})", ledger.name))
-            .unwrap_or_else(|| "no-ledger".to_string());
+        let context = {
+            let manager = self.manager();
+            manager
+                .current_name()
+                .map(|name| format!("ledger({})", name))
+                .unwrap_or_else(|| "no-ledger".to_string())
+        };
 
         let sim_segment = self
             .active_simulation_name()
@@ -394,24 +434,26 @@ impl ShellContext {
         output_warning(message);
     }
 
-    fn with_ledger<'a, T>(&'a self, f: impl FnOnce(&'a Ledger) -> T) -> Result<T, CommandError> {
-        self.manager()
-            .with_current(f)
-            .map_err(CommandError::from_core)
+    pub(crate) fn with_ledger<T>(
+        &self,
+        f: impl FnOnce(&Ledger) -> Result<T, CommandError>,
+    ) -> Result<T, CommandError> {
+        let manager = self.manager();
+        let result = manager
+            .with_current(|ledger| f(ledger))
+            .map_err(CommandError::from_core)?;
+        result
     }
 
-    fn with_ledger_mut<'a, T>(&'a mut self, f: impl FnOnce(&'a mut Ledger) -> T) -> Result<T, CommandError> {
-        self.manager_mut()
-            .with_current_mut(f)
-            .map_err(CommandError::from_core)
-    }
-
-    pub(crate) fn current_ledger(&self) -> Result<&Ledger, CommandError> {
-        self.with_ledger(|ledger| ledger)
-    }
-
-    pub(crate) fn current_ledger_mut(&mut self) -> Result<&mut Ledger, CommandError> {
-        self.with_ledger_mut(|ledger| ledger)
+    pub(crate) fn with_ledger_mut<T>(
+        &self,
+        f: impl FnOnce(&mut Ledger) -> Result<T, CommandError>,
+    ) -> Result<T, CommandError> {
+        let manager = self.manager();
+        let result = manager
+            .with_current_mut(|ledger| f(ledger))
+            .map_err(CommandError::from_core)?;
+        result
     }
 
     pub(crate) fn active_simulation_name(&self) -> Option<&str> {
@@ -494,7 +536,7 @@ impl ShellContext {
         prompt: &str,
     ) -> Result<Option<String>, CommandError> {
         self.select_with(
-            ConfigBackupSelectionProvider::new(&self.config_manager),
+            ConfigBackupSelectionProvider::new(self.config_manager.clone()),
             prompt,
             "No configuration backups found.",
         )
@@ -596,50 +638,54 @@ impl ShellContext {
     }
 
     fn apply_account_form(&mut self, data: AccountFormData) -> CommandResult {
-        let ledger = self.current_ledger_mut()?;
-        match data.id {
-            Some(id) => {
-                let mut changes = Account::new(data.name.clone(), data.kind);
-                changes.id = id;
-                changes.category_id = data.category_id;
-                changes.opening_balance = data.opening_balance;
-                changes.notes = data.notes.clone();
-                AccountService::edit(ledger, id, changes)?;
-                output_success(format!("Account `{}` updated.", data.name));
+        self.with_ledger_mut(|ledger| {
+            match data.id {
+                Some(id) => {
+                    let mut changes = Account::new(data.name.clone(), data.kind);
+                    changes.id = id;
+                    changes.category_id = data.category_id;
+                    changes.opening_balance = data.opening_balance;
+                    changes.notes = data.notes.clone();
+                    AccountService::edit(ledger, id, changes)?;
+                    output_success(format!("Account `{}` updated.", data.name));
+                }
+                None => {
+                    let mut account = Account::new(data.name.clone(), data.kind);
+                    account.category_id = data.category_id;
+                    account.opening_balance = data.opening_balance;
+                    account.notes = data.notes.clone();
+                    AccountService::add(ledger, account)?;
+                    output_success(format!("Account `{}` added.", data.name));
+                }
             }
-            None => {
-                let mut account = Account::new(data.name.clone(), data.kind);
-                account.category_id = data.category_id;
-                account.opening_balance = data.opening_balance;
-                account.notes = data.notes.clone();
-                AccountService::add(ledger, account)?;
-                output_success(format!("Account `{}` added.", data.name));
-            }
-        }
+            Ok(())
+        })?;
         Ok(())
     }
 
     fn apply_category_form(&mut self, data: CategoryFormData) -> CommandResult {
-        let ledger = self.current_ledger_mut()?;
-        match data.id {
-            Some(id) => {
-                let mut changes = Category::new(data.name.clone(), data.kind);
-                changes.id = id;
-                changes.parent_id = data.parent_id;
-                changes.is_custom = data.is_custom;
-                changes.notes = data.notes.clone();
-                CategoryService::edit(ledger, id, changes)?;
-                output_success(format!("Category `{}` updated.", data.name));
+        self.with_ledger_mut(|ledger| {
+            match data.id {
+                Some(id) => {
+                    let mut changes = Category::new(data.name.clone(), data.kind);
+                    changes.id = id;
+                    changes.parent_id = data.parent_id;
+                    changes.is_custom = data.is_custom;
+                    changes.notes = data.notes.clone();
+                    CategoryService::edit(ledger, id, changes)?;
+                    output_success(format!("Category `{}` updated.", data.name));
+                }
+                None => {
+                    let mut category = Category::new(data.name.clone(), data.kind);
+                    category.parent_id = data.parent_id;
+                    category.is_custom = data.is_custom;
+                    category.notes = data.notes.clone();
+                    CategoryService::add(ledger, category)?;
+                    output_success(format!("Category `{}` added.", data.name));
+                }
             }
-            None => {
-                let mut category = Category::new(data.name.clone(), data.kind);
-                category.parent_id = data.parent_id;
-                category.is_custom = data.is_custom;
-                category.notes = data.notes.clone();
-                CategoryService::add(ledger, category)?;
-                output_success(format!("Category `{}` added.", data.name));
-            }
-        }
+            Ok(())
+        })?;
         Ok(())
     }
 
@@ -693,34 +739,29 @@ impl ShellContext {
         );
         Self::populate_transaction_from_form(&mut transaction, &data);
 
-        let summary = {
-            let ledger = self.current_ledger()?;
-            self.transaction_summary_line(ledger, &transaction)
-        };
+        let summary =
+            self.with_ledger(|ledger| Ok(self.transaction_summary_line(ledger, &transaction)))?;
 
         if let Some(name) = simulation {
-            {
-                let ledger = self.current_ledger_mut()?;
+            self.with_ledger_mut(|ledger| {
                 ledger
                     .add_simulation_transaction(name, transaction)
-                    .map_err(CommandError::from_core)?;
-            }
+                    .map_err(CommandError::from_core)
+            })?;
             output_success(format!(
                 "Transaction saved to simulation `{}`: {}",
                 name, summary
             ));
         } else {
-            let id = {
-                let ledger = self.current_ledger_mut()?;
-                TransactionService::add(ledger, transaction)?
-            };
-            let summary = {
-                let ledger = self.current_ledger()?;
+            let id = self.with_ledger_mut(|ledger| {
+                TransactionService::add(ledger, transaction).map_err(CommandError::from)
+            })?;
+            let summary = self.with_ledger(|ledger| {
                 let txn = ledger
                     .transaction(id)
                     .expect("transaction just added should exist");
-                self.transaction_summary_line(ledger, txn)
-            };
+                Ok(self.transaction_summary_line(ledger, txn))
+            })?;
             output_success(format!("Transaction saved: {}", summary));
         }
         Ok(())
@@ -730,95 +771,93 @@ impl ShellContext {
         let txn_id = data.id.ok_or_else(|| {
             CommandError::InvalidArguments("transaction identifier missing".into())
         })?;
-        {
-            let ledger = self.current_ledger_mut()?;
+        self.with_ledger_mut(|ledger| {
             TransactionService::update(ledger, txn_id, |transaction| {
                 Self::populate_transaction_from_form(transaction, &data);
-            })?;
-        }
-        let summary = {
-            let ledger = self.current_ledger()?;
+            })
+            .map_err(CommandError::from)
+        })?;
+        let summary = self.with_ledger(|ledger| {
             let txn = ledger
                 .transaction(txn_id)
                 .expect("transaction should exist after update");
-            self.transaction_summary_line(ledger, txn)
-        };
+            Ok(self.transaction_summary_line(ledger, txn))
+        })?;
         output_success(format!("Transaction updated: {}", summary));
         Ok(())
     }
 
     fn remove_transaction_by_index(&mut self, index: usize) -> CommandResult {
-        let (transaction_id, summary) = {
-            let ledger = self.current_ledger()?;
+        let (transaction_id, summary) = self.with_ledger(|ledger| {
             let txn = ledger.transactions.get(index).ok_or_else(|| {
                 CommandError::InvalidArguments("transaction index out of range".into())
             })?;
             let summary = self.transaction_summary_line(ledger, txn);
-            (txn.id, summary)
-        };
-        {
-            let ledger = self.current_ledger_mut()?;
-            TransactionService::remove(ledger, transaction_id)?;
-        }
+            Ok((txn.id, summary))
+        })?;
+        self.with_ledger_mut(|ledger| {
+            TransactionService::remove(ledger, transaction_id).map_err(CommandError::from)
+        })?;
         output_success(format!("Transaction removed: {}", summary));
         Ok(())
     }
 
     fn display_transaction(&self, index: usize) -> CommandResult {
-        let ledger = self.current_ledger()?;
-        let txn = ledger.transactions.get(index).ok_or_else(|| {
-            CommandError::InvalidArguments("transaction index out of range".into())
-        })?;
+        self.with_ledger(|ledger| {
+            let txn = ledger.transactions.get(index).ok_or_else(|| {
+                CommandError::InvalidArguments("transaction index out of range".into())
+            })?;
 
-        output_info(format!("Transaction [{}]", index));
-        let route = self.describe_transaction_route(ledger, txn);
-        output_info(format!("Route: {}", route));
-        let category = txn
-            .category_id
-            .and_then(|id| self.lookup_category_name(ledger, id))
-            .unwrap_or_else(|| "Uncategorized".into());
-        output_info(format!("Category: {}", category));
-        output_info(format!(
-            "Scheduled: {}",
-            self.format_date(ledger, txn.scheduled_date)
-        ));
-        let budget = format_currency_value(
-            txn.budgeted_amount,
-            &ledger.transaction_currency(txn),
-            &ledger.locale,
-            &ledger.format,
-        );
-        output_info(format!("Budgeted: {}", budget));
-        if txn.actual_amount.is_some() || txn.actual_date.is_some() {
-            let amount_label = txn
-                .actual_amount
-                .map(|value| {
-                    format_currency_value(
-                        value,
-                        &ledger.transaction_currency(txn),
-                        &ledger.locale,
-                        &ledger.format,
-                    )
-                })
-                .unwrap_or_else(|| "-".into());
-            let date_label = txn
-                .actual_date
-                .map(|date| self.format_date(ledger, date))
-                .unwrap_or_else(|| "-".into());
-            output_info(format!("Actual: {} on {}", amount_label, date_label));
-        }
-        output_info(format!("Status: {:?}", txn.status));
-        if let Some(hint) = self.transaction_recurrence_hint(txn) {
-            output_info(format!("Recurrence: {}", hint));
-        } else if txn.recurrence.is_some() || txn.recurrence_series_id.is_some() {
-            output_info("Recurrence: linked instance");
-        }
-        if let Some(notes) = &txn.notes {
-            if !notes.trim().is_empty() {
-                output_info(format!("Notes: {}", notes));
+            output_info(format!("Transaction [{}]", index));
+            let route = self.describe_transaction_route(ledger, txn);
+            output_info(format!("Route: {}", route));
+            let category = txn
+                .category_id
+                .and_then(|id| self.lookup_category_name(ledger, id))
+                .unwrap_or_else(|| "Uncategorized".into());
+            output_info(format!("Category: {}", category));
+            output_info(format!(
+                "Scheduled: {}",
+                self.format_date(ledger, txn.scheduled_date)
+            ));
+            let budget = format_currency_value(
+                txn.budgeted_amount,
+                &ledger.transaction_currency(txn),
+                &ledger.locale,
+                &ledger.format,
+            );
+            output_info(format!("Budgeted: {}", budget));
+            if txn.actual_amount.is_some() || txn.actual_date.is_some() {
+                let amount_label = txn
+                    .actual_amount
+                    .map(|value| {
+                        format_currency_value(
+                            value,
+                            &ledger.transaction_currency(txn),
+                            &ledger.locale,
+                            &ledger.format,
+                        )
+                    })
+                    .unwrap_or_else(|| "-".into());
+                let date_label = txn
+                    .actual_date
+                    .map(|date| self.format_date(ledger, date))
+                    .unwrap_or_else(|| "-".into());
+                output_info(format!("Actual: {} on {}", amount_label, date_label));
             }
-        }
-        Ok(())
+            output_info(format!("Status: {:?}", txn.status));
+            if let Some(hint) = self.transaction_recurrence_hint(txn) {
+                output_info(format!("Recurrence: {}", hint));
+            } else if txn.recurrence.is_some() || txn.recurrence_series_id.is_some() {
+                output_info("Recurrence: linked instance");
+            }
+            if let Some(notes) = &txn.notes {
+                if !notes.trim().is_empty() {
+                    output_info(format!("Notes: {}", notes));
+                }
+            }
+            Ok(())
+        })
     }
 
     pub(crate) fn run_account_add_wizard(&mut self) -> CommandResult {
@@ -829,12 +868,11 @@ impl ShellContext {
             ));
         }
 
-        let (existing_names, category_options) = {
-            let ledger = self.current_ledger()?;
+        let (existing_names, category_options) = self.with_ledger(|ledger| {
             let names: HashSet<String> = ledger.accounts.iter().map(|a| a.name.clone()).collect();
             let categories = self.account_category_options(ledger);
-            (names, categories)
-        };
+            Ok((names, categories))
+        })?;
 
         let wizard = AccountWizard::new_create(existing_names, category_options);
         let mut interaction = DialoguerInteraction::new(&self.theme);
@@ -855,8 +893,7 @@ impl ShellContext {
             ));
         }
 
-        let (existing_names, category_options, initial) = {
-            let ledger = self.current_ledger()?;
+        let (existing_names, category_options, initial) = self.with_ledger(|ledger| {
             if index >= ledger.accounts.len() {
                 return Err(CommandError::InvalidArguments(
                     "account index out of range".into(),
@@ -873,8 +910,8 @@ impl ShellContext {
                 opening_balance: account.opening_balance,
                 notes: account.notes.clone(),
             };
-            (names, categories, initial)
-        };
+            Ok((names, categories, initial))
+        })?;
 
         let wizard = AccountWizard::new_edit(existing_names, initial, category_options);
         let mut interaction = DialoguerInteraction::new(&self.theme);
@@ -895,12 +932,11 @@ impl ShellContext {
             ));
         }
 
-        let (existing_names, parent_options) = {
-            let ledger = self.current_ledger()?;
+        let (existing_names, parent_options) = self.with_ledger(|ledger| {
             let names: HashSet<String> = ledger.categories.iter().map(|c| c.name.clone()).collect();
             let parents = self.category_parent_options(ledger, &HashSet::new());
-            (names, parents)
-        };
+            Ok((names, parents))
+        })?;
 
         let wizard = CategoryWizard::new_create(existing_names, parent_options);
         let mut interaction = DialoguerInteraction::new(&self.theme);
@@ -921,36 +957,37 @@ impl ShellContext {
             ));
         }
 
-        let (existing_names, parent_options, initial, allow_kind_change, allow_custom_change) = {
-            let ledger = self.current_ledger()?;
-            if index >= ledger.categories.len() {
-                return Err(CommandError::InvalidArguments(
-                    "category index out of range".into(),
-                ));
-            }
-            let category = &ledger.categories[index];
-            let names: HashSet<String> = ledger.categories.iter().map(|c| c.name.clone()).collect();
-            let mut exclude = self.category_descendants(ledger, category.id);
-            exclude.insert(category.id);
-            let parents = self.category_parent_options(ledger, &exclude);
-            let initial = CategoryInitialData {
-                id: category.id,
-                name: category.name.clone(),
-                kind: category.kind.clone(),
-                parent_id: category.parent_id,
-                is_custom: category.is_custom,
-                notes: category.notes.clone(),
-            };
-            let allow_kind_change = category.is_custom;
-            let allow_custom_change = category.is_custom;
-            (
-                names,
-                parents,
-                initial,
-                allow_kind_change,
-                allow_custom_change,
-            )
-        };
+        let (existing_names, parent_options, initial, allow_kind_change, allow_custom_change) =
+            self.with_ledger(|ledger| {
+                if index >= ledger.categories.len() {
+                    return Err(CommandError::InvalidArguments(
+                        "category index out of range".into(),
+                    ));
+                }
+                let category = &ledger.categories[index];
+                let names: HashSet<String> =
+                    ledger.categories.iter().map(|c| c.name.clone()).collect();
+                let mut exclude = self.category_descendants(ledger, category.id);
+                exclude.insert(category.id);
+                let parents = self.category_parent_options(ledger, &exclude);
+                let initial = CategoryInitialData {
+                    id: category.id,
+                    name: category.name.clone(),
+                    kind: category.kind.clone(),
+                    parent_id: category.parent_id,
+                    is_custom: category.is_custom,
+                    notes: category.notes.clone(),
+                };
+                let allow_kind_change = category.is_custom;
+                let allow_custom_change = category.is_custom;
+                Ok((
+                    names,
+                    parents,
+                    initial,
+                    allow_kind_change,
+                    allow_custom_change,
+                ))
+            })?;
 
         if !allow_kind_change || !allow_custom_change {
             output_info("Note: predefined categories cannot change their type or custom flag.");
@@ -1009,7 +1046,10 @@ impl ShellContext {
     }
 
     fn set_ledger(&mut self, ledger: Ledger, path: Option<PathBuf>, name: Option<String>) {
-        self.ledger_manager.set_current(ledger, path.clone(), name);
+        {
+            let mut manager = self.manager_mut();
+            manager.set_current(ledger, path.clone(), name);
+        }
         self.ledger_path = path;
         self.active_simulation_name = None;
         self.current_simulation = None;
@@ -1178,10 +1218,11 @@ impl ShellContext {
     }
 
     pub(crate) fn save_to_path(&mut self, path: &Path) -> CommandResult {
-        let ledger = self.current_ledger()?;
-        self.storage
-            .save_to_path(ledger, path)
-            .map_err(CommandError::from_core)?;
+        self.with_ledger(|ledger| {
+            self.storage
+                .save_to_path(ledger, path)
+                .map_err(CommandError::from_core)
+        })?;
         self.ledger_path = Some(path.to_path_buf());
         self.manager_mut().clear_name();
         output_success(format!("Ledger saved to {}.", path.display()));
@@ -1190,10 +1231,11 @@ impl ShellContext {
     }
 
     pub(crate) fn load_named_ledger(&mut self, name: &str) -> CommandResult {
-        let report = self
-            .manager_mut()
-            .load(name)
-            .map_err(CommandError::from_core)?;
+        let report = {
+            let mut manager = self.manager_mut();
+            manager.load(name)
+        }
+        .map_err(CommandError::from_core)?;
         let path = self.storage.ledger_path(name);
         self.ledger_path = Some(path.clone());
         self.clear_active_simulation();
@@ -1204,9 +1246,10 @@ impl ShellContext {
     }
 
     pub(crate) fn save_named_ledger(&mut self, name: &str) -> CommandResult {
-        self.manager_mut()
-            .save_as(name)
-            .map_err(CommandError::from_core)?;
+        {
+            let mut manager = self.manager_mut();
+            manager.save_as(name).map_err(CommandError::from_core)?;
+        }
         let path = self.storage.ledger_path(name);
         self.ledger_path = Some(path.clone());
         output_success(format!("Ledger `{}` saved to {}.", name, path.display()));
@@ -1215,7 +1258,7 @@ impl ShellContext {
     }
 
     pub(crate) fn create_backup(&mut self, name: &str) -> CommandResult {
-        let current = self.require_named_ledger()?.to_string();
+        let current = self.require_named_ledger()?;
         if !current.eq_ignore_ascii_case(name) {
             return Err(CommandError::InvalidArguments(format!(
                 "`{}` is not the active ledger (current: `{}`).",
@@ -1321,19 +1364,18 @@ impl ShellContext {
     }
 
     pub(crate) fn backup_app_config(&mut self, note: Option<String>) -> CommandResult {
-        let file_name = self
-            .config_manager
-            .backup(&self.config, note.as_deref())
+        let config = self.config_read();
+        let manager = self.config_manager();
+        let file_name = manager
+            .backup(&config, note.as_deref())
             .map_err(CommandError::from_core)?;
         output_success(format!("Configuration backup saved: {}", file_name));
         Ok(())
     }
 
     pub(crate) fn list_config_backups(&self) -> CommandResult {
-        let backups = self
-            .config_manager
-            .list_backups()
-            .map_err(CommandError::from_core)?;
+        let manager = self.config_manager();
+        let backups = manager.list_backups().map_err(CommandError::from_core)?;
         if backups.is_empty() {
             output_warning("No configuration backups found.");
             return Ok(());
@@ -1346,52 +1388,55 @@ impl ShellContext {
     }
 
     pub(crate) fn restore_config_by_reference(&mut self, reference: &str) -> CommandResult {
-        let backups = self
-            .config_manager
-            .list_backups()
-            .map_err(CommandError::from_core)?;
-        if backups.is_empty() {
-            return Err(CommandError::InvalidArguments(
-                "no configuration backups available".into(),
-            ));
-        }
-        let target = if let Ok(index_raw) = reference.parse::<usize>() {
-            let index = if index_raw > 0 {
-                index_raw - 1
+        let target = {
+            let manager = self.config_manager();
+            let backups = manager.list_backups().map_err(CommandError::from_core)?;
+            if backups.is_empty() {
+                return Err(CommandError::InvalidArguments(
+                    "no configuration backups available".into(),
+                ));
+            }
+            if let Ok(index_raw) = reference.parse::<usize>() {
+                let index = if index_raw > 0 {
+                    index_raw - 1
+                } else {
+                    index_raw
+                };
+                backups
+                    .get(index)
+                    .ok_or_else(|| {
+                        CommandError::InvalidArguments(format!(
+                            "configuration backup index {} out of range",
+                            reference
+                        ))
+                    })?
+                    .clone()
             } else {
-                index_raw
-            };
-            backups
-                .get(index)
-                .ok_or_else(|| {
-                    CommandError::InvalidArguments(format!(
-                        "configuration backup index {} out of range",
-                        reference
-                    ))
-                })?
-                .clone()
-        } else {
-            backups
-                .iter()
-                .find(|candidate| candidate.contains(reference))
-                .cloned()
-                .ok_or_else(|| {
-                    CommandError::InvalidArguments(format!(
-                        "no configuration backup matches reference `{}`",
-                        reference
-                    ))
-                })?
+                backups
+                    .iter()
+                    .find(|candidate| candidate.contains(reference))
+                    .cloned()
+                    .ok_or_else(|| {
+                        CommandError::InvalidArguments(format!(
+                            "no configuration backup matches reference `{}`",
+                            reference
+                        ))
+                    })?
+            }
         };
         self.restore_config_from_name(target)
     }
 
     pub(crate) fn restore_config_from_name(&mut self, backup_name: String) -> CommandResult {
-        let restored = self
-            .config_manager
+        let manager = self.config_manager();
+        let restored = manager
             .restore(&backup_name)
             .map_err(CommandError::from_core)?;
-        self.config = restored;
-        cli_io::apply_config(&self.config);
+        {
+            let mut config = self.config_write();
+            *config = restored;
+            cli_io::apply_config(&config);
+        }
         self.persist_config()?;
         output_success(format!("Configuration restored from {}.", backup_name));
         Ok(())
@@ -1416,8 +1461,10 @@ impl ShellContext {
         let name = args[0].to_string();
         let kind = parse_account_kind(args[1])?;
         let account = Account::new(name, kind);
-        let ledger = self.current_ledger_mut()?;
-        ledger.add_account(account);
+        self.with_ledger_mut(|ledger| {
+            ledger.add_account(account);
+            Ok(())
+        })?;
         output_success("Account added.");
         Ok(())
     }
@@ -1441,8 +1488,10 @@ impl ShellContext {
         let name = args[0].to_string();
         let kind = parse_category_kind(args[1])?;
         let category = Category::new(name, kind);
-        let ledger = self.current_ledger_mut()?;
-        ledger.add_category(category);
+        self.with_ledger_mut(|ledger| {
+            ledger.add_category(category);
+            Ok(())
+        })?;
         output_success("Category added.");
         Ok(())
     }
@@ -1480,8 +1529,7 @@ impl ShellContext {
             .parse()
             .map_err(|_| CommandError::InvalidArguments("invalid amount".into()))?;
 
-        let (from_id, to_id) = {
-            let ledger = self.current_ledger()?;
+        let (from_id, to_id) = self.with_ledger(|ledger| {
             if ledger.accounts.is_empty() {
                 return Err(CommandError::Message(
                     "Add at least one account before creating transactions".into(),
@@ -1492,54 +1540,51 @@ impl ShellContext {
                     "account indices out of range".into(),
                 ));
             }
-            (ledger.accounts[from_index].id, ledger.accounts[to_index].id)
-        };
+            Ok((ledger.accounts[from_index].id, ledger.accounts[to_index].id))
+        })?;
 
         let transaction = Transaction::new(from_id, to_id, None, date, amount);
-        let summary = {
-            let ledger = self.current_ledger()?;
-            self.transaction_summary_line(ledger, &transaction)
-        };
+        let summary =
+            self.with_ledger(|ledger| Ok(self.transaction_summary_line(ledger, &transaction)))?;
 
         if let Some(sim_name) = sim {
-            {
-                let ledger = self.current_ledger_mut()?;
+            self.with_ledger_mut(|ledger| {
                 ledger
                     .add_simulation_transaction(&sim_name, transaction)
-                    .map_err(CommandError::from_core)?;
-            }
+                    .map_err(CommandError::from_core)
+            })?;
             output_success(format!(
                 "Transaction saved to simulation `{}`: {}",
                 sim_name, summary
             ));
         } else {
-            let id = {
-                let ledger = self.current_ledger_mut()?;
-                TransactionService::add(ledger, transaction)?
-            };
-            let summary = {
-                let ledger = self.current_ledger()?;
+            let id = self.with_ledger_mut(|ledger| {
+                TransactionService::add(ledger, transaction).map_err(CommandError::from)
+            })?;
+            let summary = self.with_ledger(|ledger| {
                 let txn = ledger
                     .transaction(id)
                     .expect("transaction just added should exist");
-                self.transaction_summary_line(ledger, txn)
-            };
+                Ok(self.transaction_summary_line(ledger, txn))
+            })?;
             output_success(format!("Transaction saved: {}", summary));
         }
         Ok(())
     }
 
     fn run_transaction_add_wizard(&mut self, simulation: Option<&str>) -> CommandResult {
-        let ledger = self.current_ledger()?;
-        if ledger.accounts.is_empty() {
-            return Err(CommandError::Message(
-                "Add at least one account before creating transactions".into(),
-            ));
-        }
-        let accounts = self.transaction_account_options(ledger);
-        let categories = self.account_category_options(ledger);
+        let (accounts, categories, min_date) = self.with_ledger(|ledger| {
+            if ledger.accounts.is_empty() {
+                return Err(CommandError::Message(
+                    "Add at least one account before creating transactions".into(),
+                ));
+            }
+            let accounts = self.transaction_account_options(ledger);
+            let categories = self.account_category_options(ledger);
+            let min_date = ledger.created_at.date_naive();
+            Ok((accounts, categories, min_date))
+        })?;
         let today = Utc::now().date_naive();
-        let min_date = ledger.created_at.date_naive();
         let default_status = if simulation.is_some() {
             TransactionStatus::Simulated
         } else {
@@ -1564,8 +1609,7 @@ impl ShellContext {
                 "usage: transaction edit <index>".into(),
             ));
         }
-        let (accounts, categories, initial, created_at) = {
-            let ledger = self.current_ledger()?;
+        let (accounts, categories, initial, created_at) = self.with_ledger(|ledger| {
             if index >= ledger.transactions.len() {
                 return Err(CommandError::InvalidArguments(
                     "transaction index out of range".into(),
@@ -1588,8 +1632,8 @@ impl ShellContext {
                 status: txn.status.clone(),
                 notes: txn.notes.clone(),
             };
-            (accounts, categories, initial, created_at)
-        };
+            Ok((accounts, categories, initial, created_at))
+        })?;
         let today = Utc::now().date_naive();
         let min_date = created_at.date_naive();
         let wizard = TransactionWizard::new_edit(accounts, categories, today, min_date, initial);
@@ -1620,7 +1664,7 @@ impl ShellContext {
     }
 
     pub(crate) fn transaction_edit(&mut self, args: &[&str]) -> CommandResult {
-        if self.current_ledger()?.transactions.is_empty() {
+        if self.with_ledger(|ledger| Ok(ledger.transactions.is_empty()))? {
             output_warning("No transactions available.");
             return Ok(());
         }
@@ -1640,7 +1684,7 @@ impl ShellContext {
 
     pub(crate) fn transaction_remove(&mut self, args: &[&str]) -> CommandResult {
         self.ensure_base_mode("Transaction removal")?;
-        if self.current_ledger()?.transactions.is_empty() {
+        if self.with_ledger(|ledger| Ok(ledger.transactions.is_empty()))? {
             output_warning("No transactions available.");
             return Ok(());
         }
@@ -1659,7 +1703,7 @@ impl ShellContext {
     }
 
     pub(crate) fn transaction_show(&mut self, args: &[&str]) -> CommandResult {
-        if self.current_ledger()?.transactions.is_empty() {
+        if self.with_ledger(|ledger| Ok(ledger.transactions.is_empty()))? {
             output_warning("No transactions available.");
             return Ok(());
         }
@@ -1684,7 +1728,7 @@ impl ShellContext {
         prompt: &str,
     ) -> CommandResult {
         self.ensure_base_mode("Completion")?;
-        if self.current_ledger()?.transactions.is_empty() {
+        if self.with_ledger(|ledger| Ok(ledger.transactions.is_empty()))? {
             output_warning("No transactions available.");
             return Ok(());
         }
@@ -1693,16 +1737,15 @@ impl ShellContext {
             return Ok(());
         };
 
-        let (scheduled_default, budget_default) = {
-            let ledger = self.current_ledger()?;
+        let (scheduled_default, budget_default) = self.with_ledger(|ledger| {
             let txn = ledger.transactions.get(idx).ok_or_else(|| {
                 CommandError::InvalidArguments("transaction index out of range".into())
             })?;
-            (
+            Ok((
                 txn.scheduled_date,
                 txn.actual_amount.unwrap_or(txn.budgeted_amount),
-            )
-        };
+            ))
+        })?;
 
         let actual_date = if let Some(raw) = args.get(1) {
             parse_date(raw)?
@@ -1736,20 +1779,19 @@ impl ShellContext {
             return Err(CommandError::InvalidArguments(usage.into()));
         };
 
-        let txn_id = {
-            let ledger = self.current_ledger()?;
+        let txn_id = self.with_ledger(|ledger| {
             let txn = ledger.transactions.get(idx).ok_or_else(|| {
                 CommandError::InvalidArguments("transaction index out of range".into())
             })?;
-            txn.id
-        };
+            Ok(txn.id)
+        })?;
 
-        {
-            let ledger = self.current_ledger_mut()?;
+        self.with_ledger_mut(|ledger| {
             TransactionService::update(ledger, txn_id, |txn| {
                 txn.mark_completed(actual_date, amount);
-            })?;
-        }
+            })
+            .map_err(CommandError::from)
+        })?;
         output_success(format!("Transaction {} marked completed", idx));
         Ok(())
     }
@@ -1870,128 +1912,132 @@ impl ShellContext {
     }
 
     pub(crate) fn list_accounts(&self) -> CommandResult {
-        let ledger = self.current_ledger()?;
-        if ledger.accounts.is_empty() {
-            output_warning("No accounts defined.");
-            return Ok(());
-        }
+        self.with_ledger(|ledger| {
+            if ledger.accounts.is_empty() {
+                output_warning("No accounts defined.");
+                return Ok(());
+            }
 
-        output_section("Accounts");
-        for (idx, account) in ledger.accounts.iter().enumerate() {
-            output_info(format!(
-                "  [{idx:>3}] {name} ({kind:?})",
-                idx = idx,
-                name = account.name,
-                kind = account.kind
-            ));
-        }
-        Ok(())
+            output_section("Accounts");
+            for (idx, account) in ledger.accounts.iter().enumerate() {
+                output_info(format!(
+                    "  [{idx:>3}] {name} ({kind:?})",
+                    idx = idx,
+                    name = account.name,
+                    kind = account.kind
+                ));
+            }
+            Ok(())
+        })
     }
 
     pub(crate) fn list_categories(&self) -> CommandResult {
-        let ledger = self.current_ledger()?;
-        if ledger.categories.is_empty() {
-            output_warning("No categories defined.");
-            return Ok(());
-        }
+        self.with_ledger(|ledger| {
+            if ledger.categories.is_empty() {
+                output_warning("No categories defined.");
+                return Ok(());
+            }
 
-        output_section("Categories");
-        for (idx, category) in ledger.categories.iter().enumerate() {
-            let parent_marker = if category.parent_id.is_some() {
-                " [child]"
-            } else {
-                ""
-            };
-            output_info(format!(
-                "  [{idx:>3}] {name} ({kind:?}){parent_marker}",
-                idx = idx,
-                name = category.name,
-                kind = category.kind,
-                parent_marker = parent_marker
-            ));
-        }
-        Ok(())
+            output_section("Categories");
+            for (idx, category) in ledger.categories.iter().enumerate() {
+                let parent_marker = if category.parent_id.is_some() {
+                    " [child]"
+                } else {
+                    ""
+                };
+                output_info(format!(
+                    "  [{idx:>3}] {name} ({kind:?}){parent_marker}",
+                    idx = idx,
+                    name = category.name,
+                    kind = category.kind,
+                    parent_marker = parent_marker
+                ));
+            }
+            Ok(())
+        })
     }
 
     pub(crate) fn list_transactions(&self) -> CommandResult {
-        let ledger = self.current_ledger()?;
-        if ledger.transactions.is_empty() {
-            output_warning("No transactions recorded.");
-            return Ok(());
-        }
+        self.with_ledger(|ledger| {
+            if ledger.transactions.is_empty() {
+                output_warning("No transactions recorded.");
+                return Ok(());
+            }
 
-        output_section("Transactions");
-        for (idx, txn) in ledger.transactions.iter().enumerate() {
-            let route = self.describe_transaction_route(ledger, txn);
-            let category = txn
-                .category_id
-                .and_then(|id| self.lookup_category_name(ledger, id))
-                .unwrap_or_else(|| "Uncategorized".into());
-            let status = format!("{:?}", txn.status);
-            let txn_currency = ledger.transaction_currency(txn);
-            let scheduled = self.format_date(ledger, txn.scheduled_date);
-            let budget_amount = format_currency_value(
-                txn.budgeted_amount,
-                &txn_currency,
-                &ledger.locale,
-                &ledger.format,
-            );
-            output_info(format!(
-                "  [{idx:>3}] {date} | {amount} | {status:<10} | {route} ({category})",
-                idx = idx,
-                date = scheduled,
-                amount = budget_amount,
-                status = status,
-                route = route,
-                category = category
-            ));
-            if let Some(actual_date) = txn.actual_date {
-                if let Some(actual_amount) = txn.actual_amount {
-                    let formatted_date = self.format_date(ledger, actual_date);
-                    let formatted_amount = format_currency_value(
-                        actual_amount,
-                        &txn_currency,
-                        &ledger.locale,
-                        &ledger.format,
-                    );
-                    output_info(format!(
-                        "        actual {} | {}",
-                        formatted_date, formatted_amount
-                    ));
+            output_section("Transactions");
+            for (idx, txn) in ledger.transactions.iter().enumerate() {
+                let route = self.describe_transaction_route(ledger, txn);
+                let category = txn
+                    .category_id
+                    .and_then(|id| self.lookup_category_name(ledger, id))
+                    .unwrap_or_else(|| "Uncategorized".into());
+                let status = format!("{:?}", txn.status);
+                let txn_currency = ledger.transaction_currency(txn);
+                let scheduled = self.format_date(ledger, txn.scheduled_date);
+                let budget_amount = format_currency_value(
+                    txn.budgeted_amount,
+                    &txn_currency,
+                    &ledger.locale,
+                    &ledger.format,
+                );
+                output_info(format!(
+                    "  [{idx:>3}] {date} | {amount} | {status:<10} | {route} ({category})",
+                    idx = idx,
+                    date = scheduled,
+                    amount = budget_amount,
+                    status = status,
+                    route = route,
+                    category = category
+                ));
+                if let Some(actual_date) = txn.actual_date {
+                    if let Some(actual_amount) = txn.actual_amount {
+                        let formatted_date = self.format_date(ledger, actual_date);
+                        let formatted_amount = format_currency_value(
+                            actual_amount,
+                            &txn_currency,
+                            &ledger.locale,
+                            &ledger.format,
+                        );
+                        output_info(format!(
+                            "        actual {} | {}",
+                            formatted_date, formatted_amount
+                        ));
+                    }
+                }
+                if let Some(hint) = self.transaction_recurrence_hint(txn) {
+                    output_info(format!("        {}", hint));
+                } else if txn.recurrence_series_id.is_some() {
+                    output_info("        [instance] scheduled entry from recurrence");
                 }
             }
-            if let Some(hint) = self.transaction_recurrence_hint(txn) {
-                output_info(format!("        {}", hint));
-            } else if txn.recurrence_series_id.is_some() {
-                output_info("        [instance] scheduled entry from recurrence");
-            }
-        }
-        Ok(())
+            Ok(())
+        })
     }
 
     pub(crate) fn show_budget_summary(&self, args: &[&str]) -> CommandResult {
-        let ledger = self.current_ledger()?;
-        let today = Utc::now().date_naive();
+        self.with_ledger(|ledger| {
+            let today = Utc::now().date_naive();
 
-        let (simulation_name, remainder) =
-            if !args.is_empty() && ledger.simulation(args[0]).is_some() {
-                (Some(args[0]), &args[1..])
-            } else {
-                (None, args)
-            };
+            let (simulation_name, remainder) =
+                if !args.is_empty() && ledger.simulation(args[0]).is_some() {
+                    (Some(args[0]), &args[1..])
+                } else {
+                    (None, args)
+                };
 
-        let (window, scope) = self.resolve_summary_window(ledger, remainder, today)?;
+            let (window, scope) = self.resolve_summary_window(ledger, remainder, today)?;
 
-        if let Some(name) = simulation_name {
-            let impact = SummaryService::summarize_simulation(ledger, name, window, scope)
-                .map_err(CommandError::from)?;
-            self.print_simulation_impact(ledger, &impact);
-            return Ok(());
-        }
+            if let Some(name) = simulation_name {
+                let impact = SummaryService::summarize_simulation(ledger, name, window, scope)
+                    .map_err(CommandError::from)?;
+                self.print_simulation_impact(ledger, &impact);
+                return Ok(());
+            }
 
-        let summary = SummaryService::summarize_window(ledger, window, scope);
-        self.print_budget_summary(ledger, &summary);
-        Ok(())
+            let summary = SummaryService::summarize_window(ledger, window, scope);
+            self.print_budget_summary(ledger, &summary);
+            Ok(())
+        })
     }
 
     fn resolve_summary_window(
@@ -2087,8 +2133,8 @@ impl ShellContext {
         output_section(format!(
             "{:?} {} → {}",
             summary.scope,
-            self.format_date(ledger, summary.window.start),
-            self.format_date(ledger, end_display)
+            self.format_date(&ledger, summary.window.start),
+            self.format_date(&ledger, end_display)
         ));
 
         output_info(format!(
@@ -2211,8 +2257,8 @@ impl ShellContext {
             .unwrap_or(window.end);
         output_section(format!(
             "{header} {} → {}",
-            self.format_date(ledger, window.start),
-            self.format_date(ledger, end_display)
+            self.format_date(&ledger, window.start),
+            self.format_date(&ledger, end_display)
         ));
 
         let totals = &report.forecast.totals;
@@ -2271,11 +2317,11 @@ impl ShellContext {
         output_info("Upcoming projections:");
         for item in report.forecast.transactions.iter().take(8) {
             let status = self.scheduled_status_label(item.status);
-            let route = self.describe_transaction_route(ledger, &item.transaction);
+            let route = self.describe_transaction_route(&ledger, &item.transaction);
             let category = item
                 .transaction
                 .category_id
-                .and_then(|id| self.lookup_category_name(ledger, id))
+                .and_then(|id| self.lookup_category_name(&ledger, id))
                 .unwrap_or_else(|| "Uncategorized".into());
             let txn_currency = ledger.transaction_currency(&item.transaction);
             let amount = format_currency_value(
@@ -2286,7 +2332,7 @@ impl ShellContext {
             );
             output_info(format!(
                 "  {date} | {amount} | {status:<8} | {route} ({category})",
-                date = self.format_date(ledger, item.transaction.scheduled_date),
+                date = self.format_date(&ledger, item.transaction.scheduled_date),
                 amount = amount,
                 status = status,
                 route = route,
@@ -2324,7 +2370,7 @@ impl ShellContext {
     fn transaction_summary_line(&self, ledger: &Ledger, txn: &Transaction) -> String {
         let category = txn
             .category_id
-            .and_then(|id| self.lookup_category_name(ledger, id))
+            .and_then(|id| self.lookup_category_name(&ledger, id))
             .unwrap_or_else(|| "Uncategorized".into());
         let amount = format_currency_value(
             txn.budgeted_amount,
@@ -2332,8 +2378,8 @@ impl ShellContext {
             &ledger.locale,
             &ledger.format,
         );
-        let route = self.describe_transaction_route(ledger, txn);
-        let date = self.format_date(ledger, txn.scheduled_date);
+        let route = self.describe_transaction_route(&ledger, txn);
+        let date = self.format_date(&ledger, txn.scheduled_date);
         format!("{} {} ({} ) on {}", category, amount, route, date)
     }
 
@@ -2366,49 +2412,50 @@ impl ShellContext {
     }
 
     pub(crate) fn list_recurrences(&self, filter: RecurrenceListFilter) -> CommandResult {
-        let ledger = self.current_ledger()?;
-        let today = Utc::now().date_naive();
-        let snapshot_map: HashMap<Uuid, RecurrenceSnapshot> = ledger
-            .recurrence_snapshots(today)
-            .into_iter()
-            .map(|snap| (snap.series_id, snap))
-            .collect();
-        if snapshot_map.is_empty() {
-            output_warning("No recurring schedules defined.");
-            return Ok(());
-        }
-        let mut entries: Vec<(usize, &Transaction, &RecurrenceSnapshot)> = ledger
-            .transactions
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, txn)| {
-                txn.recurrence.as_ref().and_then(|recurrence| {
-                    snapshot_map
-                        .get(&recurrence.series_id)
-                        .map(|snap| (idx, txn, snap))
-                })
-            })
-            .collect();
-        entries.sort_by(|(_, _, a), (_, _, b)| match (a.next_due, b.next_due) {
-            (Some(lhs), Some(rhs)) => lhs.cmp(&rhs),
-            (Some(_), None) => Ordering::Less,
-            (None, Some(_)) => Ordering::Greater,
-            (None, None) => Ordering::Equal,
-        });
-
-        output_section("Recurring schedules");
-        let mut shown = 0;
-        for (index, txn, snapshot) in entries {
-            if !filter.matches(snapshot) {
-                continue;
+        self.with_ledger(|ledger| {
+            let today = Utc::now().date_naive();
+            let snapshot_map: HashMap<Uuid, RecurrenceSnapshot> = ledger
+                .recurrence_snapshots(today)
+                .into_iter()
+                .map(|snap| (snap.series_id, snap))
+                .collect();
+            if snapshot_map.is_empty() {
+                output_warning("No recurring schedules defined.");
+                return Ok(());
             }
-            shown += 1;
-            self.print_recurrence_entry(ledger, index, txn, snapshot);
-        }
-        if shown == 0 {
-            output_info("No recurring entries match the requested filter.");
-        }
-        Ok(())
+            let mut entries: Vec<(usize, &Transaction, &RecurrenceSnapshot)> = ledger
+                .transactions
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, txn)| {
+                    txn.recurrence.as_ref().and_then(|recurrence| {
+                        snapshot_map
+                            .get(&recurrence.series_id)
+                            .map(|snap| (idx, txn, snap))
+                    })
+                })
+                .collect();
+            entries.sort_by(|(_, _, a), (_, _, b)| match (a.next_due, b.next_due) {
+                (Some(lhs), Some(rhs)) => lhs.cmp(&rhs),
+                (Some(_), None) => Ordering::Less,
+                (None, Some(_)) => Ordering::Greater,
+                (None, None) => Ordering::Equal,
+            });
+
+            output_section("Recurring schedules");
+            let mut shown = 0;
+            for (index, txn, snapshot) in entries {
+                if !filter.matches(snapshot) {
+                    continue;
+                }
+                shown += 1;
+                self.print_recurrence_entry(ledger, index, txn, snapshot);
+            }
+            if shown == 0 {
+                output_info("No recurring entries match the requested filter.");
+            }
+            Ok(())
+        })
     }
 
     fn print_recurrence_entry(
@@ -2418,10 +2465,10 @@ impl ShellContext {
         txn: &Transaction,
         snapshot: &RecurrenceSnapshot,
     ) {
-        let route = self.describe_transaction_route(ledger, txn);
+        let route = self.describe_transaction_route(&ledger, txn);
         let category = txn
             .category_id
-            .and_then(|id| self.lookup_category_name(ledger, id))
+            .and_then(|id| self.lookup_category_name(&ledger, id))
             .unwrap_or_else(|| "Uncategorized".into());
         let next_due = snapshot
             .next_due
@@ -2454,39 +2501,47 @@ impl ShellContext {
 
     pub(crate) fn recurrence_edit(&mut self, index: usize) -> CommandResult {
         self.ensure_base_mode("Recurrence editing")?;
-        let (scheduled_date, existing) = {
-            let ledger = self.current_ledger()?;
+        let (scheduled_date, existing) = self.with_ledger(|ledger| {
             let txn = ledger.transactions.get(index).ok_or_else(|| {
                 CommandError::InvalidArguments("transaction index out of range".into())
             })?;
-            (txn.scheduled_date, txn.recurrence.clone())
-        };
-        let recurrence = self.prompt_recurrence(scheduled_date, existing.as_ref())?;
-        let ledger = self.current_ledger_mut()?;
-        let txn = ledger.transactions.get_mut(index).ok_or_else(|| {
-            CommandError::InvalidArguments("transaction index out of range".into())
+            Ok((txn.scheduled_date, txn.recurrence.clone()))
         })?;
-        txn.set_recurrence(Some(recurrence));
-        ledger.refresh_recurrence_metadata();
-        ledger.touch();
+        let recurrence = self.prompt_recurrence(scheduled_date, existing.as_ref())?;
+        self.with_ledger_mut(|ledger| {
+            let txn = ledger.transactions.get_mut(index).ok_or_else(|| {
+                CommandError::InvalidArguments("transaction index out of range".into())
+            })?;
+            txn.set_recurrence(Some(recurrence));
+            ledger.refresh_recurrence_metadata();
+            ledger.touch();
+            Ok(())
+        })?;
         output_success(format!("Recurrence updated for transaction {}.", index));
         Ok(())
     }
 
     pub(crate) fn recurrence_clear(&mut self, index: usize) -> CommandResult {
         self.ensure_base_mode("Recurrence removal")?;
-        let ledger = self.current_ledger_mut()?;
-        let txn = ledger.transactions.get_mut(index).ok_or_else(|| {
-            CommandError::InvalidArguments("transaction index out of range".into())
+        let mut removed = false;
+        self.with_ledger_mut(|ledger| {
+            let txn = ledger.transactions.get_mut(index).ok_or_else(|| {
+                CommandError::InvalidArguments("transaction index out of range".into())
+            })?;
+            if txn.recurrence.is_none() {
+                output_warning("Transaction has no recurrence defined.");
+                return Ok(());
+            }
+            removed = true;
+            txn.set_recurrence(None);
+            txn.recurrence_series_id = None;
+            ledger.refresh_recurrence_metadata();
+            ledger.touch();
+            Ok(())
         })?;
-        if txn.recurrence.is_none() {
-            output_warning("Transaction has no recurrence defined.");
+        if !removed {
             return Ok(());
         }
-        txn.set_recurrence(None);
-        txn.recurrence_series_id = None;
-        ledger.refresh_recurrence_metadata();
-        ledger.touch();
         output_success(format!("Recurrence removed from transaction {}.", index));
         Ok(())
     }
@@ -2497,16 +2552,18 @@ impl ShellContext {
         status: RecurrenceStatus,
     ) -> CommandResult {
         self.ensure_base_mode("Recurrence status change")?;
-        let ledger = self.current_ledger_mut()?;
-        let txn = ledger.transactions.get_mut(index).ok_or_else(|| {
-            CommandError::InvalidArguments("transaction index out of range".into())
+        self.with_ledger_mut(|ledger| {
+            let txn = ledger.transactions.get_mut(index).ok_or_else(|| {
+                CommandError::InvalidArguments("transaction index out of range".into())
+            })?;
+            let recurrence = txn.recurrence.as_mut().ok_or_else(|| {
+                CommandError::InvalidArguments("transaction has no recurrence".into())
+            })?;
+            recurrence.status = status.clone();
+            ledger.refresh_recurrence_metadata();
+            ledger.touch();
+            Ok(())
         })?;
-        let recurrence = txn.recurrence.as_mut().ok_or_else(|| {
-            CommandError::InvalidArguments("transaction has no recurrence".into())
-        })?;
-        recurrence.status = status.clone();
-        ledger.refresh_recurrence_metadata();
-        ledger.touch();
         output_success(format!(
             "Recurrence status set to {:?} for transaction {}.",
             status, index
@@ -2516,24 +2573,31 @@ impl ShellContext {
 
     pub(crate) fn recurrence_skip_date(&mut self, index: usize, date: NaiveDate) -> CommandResult {
         self.ensure_base_mode("Recurrence exception editing")?;
-        let ledger = self.current_ledger_mut()?;
-        let txn = ledger.transactions.get_mut(index).ok_or_else(|| {
-            CommandError::InvalidArguments("transaction index out of range".into())
+        let mut skipped = false;
+        self.with_ledger_mut(|ledger| {
+            let txn = ledger.transactions.get_mut(index).ok_or_else(|| {
+                CommandError::InvalidArguments("transaction index out of range".into())
+            })?;
+            let recurrence = txn.recurrence.as_mut().ok_or_else(|| {
+                CommandError::InvalidArguments("transaction has no recurrence".into())
+            })?;
+            if recurrence.exceptions.contains(&date) {
+                output_info(format!(
+                    "Date {} already marked as skipped for this recurrence.",
+                    date
+                ));
+                return Ok(());
+            }
+            skipped = true;
+            recurrence.exceptions.push(date);
+            recurrence.exceptions.sort();
+            ledger.refresh_recurrence_metadata();
+            ledger.touch();
+            Ok(())
         })?;
-        let recurrence = txn.recurrence.as_mut().ok_or_else(|| {
-            CommandError::InvalidArguments("transaction has no recurrence".into())
-        })?;
-        if recurrence.exceptions.contains(&date) {
-            output_info(format!(
-                "Date {} already marked as skipped for this recurrence.",
-                date
-            ));
+        if !skipped {
             return Ok(());
         }
-        recurrence.exceptions.push(date);
-        recurrence.exceptions.sort();
-        ledger.refresh_recurrence_metadata();
-        ledger.touch();
         output_success(format!(
             "Added skip date {} for transaction {}.",
             date, index
@@ -2543,8 +2607,8 @@ impl ShellContext {
 
     pub(crate) fn recurrence_sync(&mut self, reference: NaiveDate) -> CommandResult {
         self.ensure_base_mode("Recurrence synchronization")?;
-        let ledger = self.current_ledger_mut()?;
-        let created = ledger.materialize_due_recurrences(reference);
+        let created =
+            self.with_ledger_mut(|ledger| Ok(ledger.materialize_due_recurrences(reference)))?;
         if created == 0 {
             output_info("All due recurring instances already exist.");
         } else {
@@ -2593,15 +2657,17 @@ impl ShellContext {
 
         match candidate {
             Some(name) => {
-                let ledger = self.current_ledger()?;
-                if ledger.simulation(&name).is_none() {
-                    Err(CommandError::InvalidArguments(format!(
-                        "simulation `{}` not found",
-                        name
-                    )))
-                } else {
-                    Ok(Some(name))
-                }
+                let validated = self.with_ledger(|ledger| {
+                    if ledger.simulation(&name).is_none() {
+                        Err(CommandError::InvalidArguments(format!(
+                            "simulation `{}` not found",
+                            name
+                        )))
+                    } else {
+                        Ok(name)
+                    }
+                })?;
+                Ok(Some(validated))
             }
             None => {
                 if attempted_prompt || self.can_prompt() {
@@ -2614,35 +2680,36 @@ impl ShellContext {
     }
 
     pub(crate) fn print_simulation_changes(&self, sim_name: &str) -> CommandResult {
-        let ledger = self.current_ledger()?;
-        let sim = ledger.simulation(sim_name).ok_or_else(|| {
-            CommandError::InvalidArguments(format!("simulation `{}` not found", sim_name))
-        })?;
-        output_info(format!("Simulation `{}` ({:?})", sim.name, sim.status));
-        if sim.changes.is_empty() {
-            output_info("No pending changes.");
-        } else {
-            for (idx, change) in sim.changes.iter().enumerate() {
-                match change {
-                    SimulationChange::AddTransaction { transaction } => output_info(format!(
-                        "  [{:>2}] Add transaction {} -> {} on {} (budgeted {:.2})",
-                        idx,
-                        transaction.from_account,
-                        transaction.to_account,
-                        transaction.scheduled_date,
-                        transaction.budgeted_amount
-                    )),
-                    SimulationChange::ModifyTransaction(patch) => output_info(format!(
-                        "  [{:>2}] Modify transaction {}",
-                        idx, patch.transaction_id
-                    )),
-                    SimulationChange::ExcludeTransaction { transaction_id } => output_info(
-                        format!("  [{:>2}] Exclude transaction {}", idx, transaction_id),
-                    ),
+        self.with_ledger(|ledger| {
+            let sim = ledger.simulation(sim_name).ok_or_else(|| {
+                CommandError::InvalidArguments(format!("simulation `{}` not found", sim_name))
+            })?;
+            output_info(format!("Simulation `{}` ({:?})", sim.name, sim.status));
+            if sim.changes.is_empty() {
+                output_info("No pending changes.");
+            } else {
+                for (idx, change) in sim.changes.iter().enumerate() {
+                    match change {
+                        SimulationChange::AddTransaction { transaction } => output_info(format!(
+                            "  [{:>2}] Add transaction {} -> {} on {} (budgeted {:.2})",
+                            idx,
+                            transaction.from_account,
+                            transaction.to_account,
+                            transaction.scheduled_date,
+                            transaction.budgeted_amount
+                        )),
+                        SimulationChange::ModifyTransaction(patch) => output_info(format!(
+                            "  [{:>2}] Modify transaction {}",
+                            idx, patch.transaction_id
+                        )),
+                        SimulationChange::ExcludeTransaction { transaction_id } => output_info(
+                            format!("  [{:>2}] Exclude transaction {}", idx, transaction_id),
+                        ),
+                    }
                 }
             }
-        }
-        Ok(())
+            Ok(())
+        })
     }
 
     pub(crate) fn simulation_add_transaction(&mut self, sim_name: &str) -> CommandResult {
@@ -2651,9 +2718,11 @@ impl ShellContext {
 
     pub(crate) fn simulation_exclude_transaction(&mut self, sim_name: &str) -> CommandResult {
         let txn_id = self.select_transaction_id("Exclude which transaction?")?;
-        self.current_ledger_mut()?
-            .exclude_transaction_in_simulation(sim_name, txn_id)
-            .map_err(CommandError::from_core)?;
+        self.with_ledger_mut(|ledger| {
+            ledger
+                .exclude_transaction_in_simulation(sim_name, txn_id)
+                .map_err(CommandError::from_core)
+        })?;
         output_success(format!("Transaction {} excluded in `{}`", txn_id, sim_name));
         Ok(())
     }
@@ -2688,38 +2757,54 @@ impl ShellContext {
             ));
         }
 
-        self.current_ledger_mut()?
-            .modify_transaction_in_simulation(sim_name, patch)
-            .map_err(CommandError::from_core)?;
+        self.with_ledger_mut(|ledger| {
+            ledger
+                .modify_transaction_in_simulation(sim_name, patch)
+                .map_err(CommandError::from_core)
+        })?;
         output_success(format!("Transaction {} modified in `{}`", txn_id, sim_name));
         Ok(())
     }
 
     fn select_transaction_id(&self, prompt: &str) -> Result<Uuid, CommandError> {
-        let ledger = self.current_ledger()?;
-        if ledger.transactions.is_empty() {
-            return Err(CommandError::InvalidArguments(
-                "No transactions available".into(),
-            ));
-        }
-        let items: Vec<String> = ledger
-            .transactions
-            .iter()
-            .enumerate()
-            .map(|(idx, txn)| {
-                format!(
-                    "[{}] {} -> {} | {} | {:.2}",
-                    idx, txn.from_account, txn.to_account, txn.scheduled_date, txn.budgeted_amount
-                )
-            })
-            .collect();
+        let items = self.with_ledger(|ledger| {
+            if ledger.transactions.is_empty() {
+                return Err(CommandError::InvalidArguments(
+                    "No transactions available".into(),
+                ));
+            }
+            let items: Vec<String> = ledger
+                .transactions
+                .iter()
+                .enumerate()
+                .map(|(idx, txn)| {
+                    format!(
+                        "[{}] {} -> {} | {} | {:.2}",
+                        idx,
+                        txn.from_account,
+                        txn.to_account,
+                        txn.scheduled_date,
+                        txn.budgeted_amount
+                    )
+                })
+                .collect();
+            Ok(items)
+        })?;
         let selection = Select::with_theme(&self.theme)
             .with_prompt(prompt)
             .items(&items)
             .default(0)
             .interact()
             .map_err(CommandError::from)?;
-        Ok(ledger.transactions[selection].id)
+        self.with_ledger(|ledger| {
+            ledger
+                .transactions
+                .get(selection)
+                .map(|txn| txn.id)
+                .ok_or_else(|| {
+                    CommandError::InvalidArguments("transaction index out of range".into())
+                })
+        })
     }
 
     fn prompt_optional_f64(&self, prompt: &str) -> Result<Option<f64>, CommandError> {
@@ -3116,6 +3201,7 @@ mod tests {
     use crate::ledger::{Simulation, SimulationStatus};
     use crate::storage::json_backend::JsonStorage;
     use chrono::{NaiveDate, Utc};
+    use std::sync::{Arc, RwLock};
     use tempfile::{tempdir, NamedTempFile};
 
     #[test]
@@ -3128,10 +3214,14 @@ mod tests {
     #[test]
     fn script_runner_creates_ledger() {
         let context = process_script(&["new-ledger Demo 3 months", "exit"]).unwrap();
-        let ledger = context.current_ledger().expect("ledger present");
-        assert_eq!(ledger.name, "Demo");
-        assert_eq!(ledger.budget_period.0.every, 3);
-        assert_eq!(ledger.budget_period.0.unit, TimeUnit::Month);
+        context
+            .with_ledger(|ledger| {
+                assert_eq!(ledger.name, "Demo");
+                assert_eq!(ledger.budget_period.0.every, 3);
+                assert_eq!(ledger.budget_period.0.unit, TimeUnit::Month);
+                Ok(())
+            })
+            .expect("ledger present");
     }
 
     #[test]
@@ -3157,10 +3247,14 @@ mod tests {
         ];
         let load_refs: Vec<&str> = load_cmds.iter().map(String::as_str).collect();
         let context = process_script(&load_refs).unwrap();
-        let ledger = context.current_ledger().expect("ledger present");
-        assert_eq!(ledger.name, "Testing");
-        assert_eq!(ledger.budget_period.0.every, 2);
-        assert_eq!(ledger.budget_period.0.unit, TimeUnit::Week);
+        context
+            .with_ledger(|ledger| {
+                assert_eq!(ledger.name, "Testing");
+                assert_eq!(ledger.budget_period.0.every, 2);
+                assert_eq!(ledger.budget_period.0.unit, TimeUnit::Week);
+                Ok(())
+            })
+            .expect("ledger present");
     }
 
     #[test]
@@ -3313,7 +3407,7 @@ mod tests {
         let storage = JsonStorage::new(Some(temp.path().to_path_buf()), Some(5)).unwrap();
         let mut context = ShellContext::new(CliMode::Script).unwrap();
         context.storage = storage.clone();
-        context.ledger_manager = LedgerManager::new(Box::new(storage));
+        context.ledger_manager = Arc::new(RwLock::new(LedgerManager::new(Box::new(storage))));
         context.set_ledger(sample_ledger(), None, Some("sample".into()));
         context.manager_mut().backup(None).unwrap();
         let expected = context
@@ -3341,15 +3435,23 @@ mod tests {
     #[test]
     fn config_backup_selection_paths() {
         let temp = tempdir().unwrap();
-        let manager = ConfigManager::with_base_dir(temp.path().to_path_buf()).unwrap();
+        let manager = Arc::new(RwLock::new(
+            ConfigManager::with_base_dir(temp.path().to_path_buf()).unwrap(),
+        ));
         let mut config = Config::default();
         config.locale = "en-GB".into();
-        manager.save(&config).unwrap();
-        let backup_name = manager
-            .backup(&config, Some("baseline"))
-            .expect("backup config");
+        {
+            let manager_guard = manager.read().unwrap();
+            manager_guard.save(&config).unwrap();
+        }
+        let backup_name = {
+            let manager_guard = manager.read().unwrap();
+            manager_guard
+                .backup(&config, Some("baseline"))
+                .expect("backup config")
+        };
 
-        let outcome = SelectionManager::new(ConfigBackupSelectionProvider::new(&manager))
+        let outcome = SelectionManager::new(ConfigBackupSelectionProvider::new(manager.clone()))
             .choose_with(
                 "Select config",
                 "No configuration backups found.",
@@ -3361,7 +3463,7 @@ mod tests {
             _ => panic!("expected config selection"),
         }
 
-        let outcome = SelectionManager::new(ConfigBackupSelectionProvider::new(&manager))
+        let outcome = SelectionManager::new(ConfigBackupSelectionProvider::new(manager))
             .choose_with(
                 "Select config",
                 "No configuration backups found.",

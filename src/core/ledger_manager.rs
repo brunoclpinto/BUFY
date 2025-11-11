@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::core::errors::BudgetError;
 use crate::ledger::ledger::CURRENT_SCHEMA_VERSION;
@@ -18,7 +19,7 @@ pub struct LoadMetadata {
 
 /// Facade that coordinates ledger state, persistence, and backups.
 pub struct LedgerManager {
-    pub current: Option<Ledger>,
+    pub current: Option<Arc<RwLock<Ledger>>>,
     current_name: Option<String>,
     storage: Box<dyn StorageBackend>,
 }
@@ -39,7 +40,7 @@ impl LedgerManager {
     pub fn load(&mut self, name: &str) -> Result<LoadMetadata, BudgetError> {
         let mut ledger = self.storage.load(name)?;
         let meta = self.process_loaded_ledger(&mut ledger)?;
-        self.current = Some(ledger);
+        self.current = Some(Arc::new(RwLock::new(ledger)));
         self.current_name = Some(name.to_string());
         Ok(LoadMetadata {
             warnings: meta.warnings,
@@ -53,7 +54,7 @@ impl LedgerManager {
     pub fn load_from_path(&mut self, path: &Path) -> Result<LoadMetadata, BudgetError> {
         let mut ledger = self.storage.load_from_path(path)?;
         let meta = self.process_loaded_ledger(&mut ledger)?;
-        self.current = Some(ledger);
+        self.current = Some(Arc::new(RwLock::new(ledger)));
         self.current_name = None;
         Ok(LoadMetadata {
             warnings: meta.warnings,
@@ -65,37 +66,33 @@ impl LedgerManager {
     }
 
     pub fn save(&mut self) -> Result<(), BudgetError> {
-        let ledger = self
-            .current
-            .as_ref()
-            .ok_or_else(|| BudgetError::StorageError("no ledger loaded".into()))?;
         let name = self
             .current_name
             .as_deref()
             .ok_or_else(|| BudgetError::StorageError("unnamed ledger cannot be saved".into()))?;
-        self.storage.save(ledger, name)
+        {
+            let ledger = self.read()?;
+            self.storage.save(&ledger, name)?;
+        }
+        Ok(())
     }
 
     pub fn save_as(&mut self, name: &str) -> Result<(), BudgetError> {
-        let ledger = self
-            .current
-            .as_ref()
-            .ok_or_else(|| BudgetError::StorageError("no ledger loaded".into()))?;
-        self.storage.save(ledger, name)?;
+        {
+            let ledger = self.read()?;
+            self.storage.save(&ledger, name)?;
+        }
         self.current_name = Some(name.to_string());
         Ok(())
     }
 
     pub fn backup(&self, note: Option<&str>) -> Result<(), BudgetError> {
-        let ledger = self
-            .current
-            .as_ref()
-            .ok_or_else(|| BudgetError::StorageError("no ledger loaded".into()))?;
+        let ledger = self.read()?;
         let name = self
             .current_name
             .as_deref()
             .ok_or_else(|| BudgetError::StorageError("current ledger is unnamed".into()))?;
-        self.storage.backup(ledger, name, note)
+        self.storage.backup(&ledger, name, note)
     }
 
     pub fn list_backups(&self, name: &str) -> Result<Vec<String>, BudgetError> {
@@ -109,7 +106,7 @@ impl LedgerManager {
     ) -> Result<LoadMetadata, BudgetError> {
         let mut ledger = self.storage.restore(name, backup_name)?;
         let meta = self.process_loaded_ledger(&mut ledger)?;
-        self.current = Some(ledger);
+        self.current = Some(Arc::new(RwLock::new(ledger)));
         self.current_name = Some(name.to_string());
         Ok(LoadMetadata {
             warnings: meta.warnings,
@@ -122,7 +119,7 @@ impl LedgerManager {
 
     pub fn set_current(&mut self, ledger: Ledger, path: Option<PathBuf>, name: Option<String>) {
         let _ = path;
-        self.current = Some(ledger);
+        self.current = Some(Arc::new(RwLock::new(ledger)));
         self.current_name = name;
     }
 
@@ -141,22 +138,40 @@ impl LedgerManager {
 
     /// Executes a closure with an immutable reference to the current ledger.
     /// Returns [`BudgetError::LedgerNotLoaded`] when no ledger is available.
-    pub fn with_current<'a, T, F>(&'a self, f: F) -> Result<T, BudgetError>
+    pub fn with_current<T, F>(&self, f: F) -> Result<T, BudgetError>
     where
-        F: FnOnce(&'a Ledger) -> T,
+        F: FnOnce(&Ledger) -> T,
     {
-        let ledger = self.current.as_ref().ok_or(BudgetError::LedgerNotLoaded)?;
-        Ok(f(ledger))
+        let ledger = self.read()?;
+        Ok(f(&ledger))
     }
 
     /// Executes a closure with a mutable reference to the current ledger.
     /// Returns [`BudgetError::LedgerNotLoaded`] when no ledger is available.
-    pub fn with_current_mut<'a, T, F>(&'a mut self, f: F) -> Result<T, BudgetError>
+    pub fn with_current_mut<T, F>(&self, f: F) -> Result<T, BudgetError>
     where
-        F: FnOnce(&'a mut Ledger) -> T,
+        F: FnOnce(&mut Ledger) -> T,
     {
-        let ledger = self.current.as_mut().ok_or(BudgetError::LedgerNotLoaded)?;
-        Ok(f(ledger))
+        let mut ledger = self.write()?;
+        Ok(f(&mut ledger))
+    }
+
+    pub fn current_handle(&self) -> Option<Arc<RwLock<Ledger>>> {
+        self.current.as_ref().map(Arc::clone)
+    }
+
+    pub fn read(&self) -> Result<RwLockReadGuard<'_, Ledger>, BudgetError> {
+        let handle = self.current.as_ref().ok_or(BudgetError::LedgerNotLoaded)?;
+        handle
+            .read()
+            .map_err(|_| BudgetError::StorageError("ledger lock poisoned".into()))
+    }
+
+    pub fn write(&self) -> Result<RwLockWriteGuard<'_, Ledger>, BudgetError> {
+        let handle = self.current.as_ref().ok_or(BudgetError::LedgerNotLoaded)?;
+        handle
+            .write()
+            .map_err(|_| BudgetError::StorageError("ledger lock poisoned".into()))
     }
 
     fn process_loaded_ledger(&self, ledger: &mut Ledger) -> Result<LoadEffects, BudgetError> {
@@ -213,7 +228,7 @@ mod tests {
         manager.clear();
         let metadata = manager.load("demo-ledger").expect("load ledger");
         assert_eq!(metadata.name.as_deref(), Some("demo-ledger"));
-        assert!(manager.current.is_some());
+        assert!(manager.current_handle().is_some());
     }
 
     #[test]

@@ -1,11 +1,16 @@
-use std::{cell::RefCell, collections::VecDeque, path::PathBuf};
+use std::{
+    cell::RefCell,
+    collections::VecDeque,
+    path::PathBuf,
+    sync::{Arc, RwLock},
+};
 
 use dialoguer::theme::ColorfulTheme;
 
 use crate::{
     config::{Config, ConfigManager},
     core::ledger_manager::LedgerManager,
-    ledger::{Ledger, Simulation},
+    ledger::Simulation,
     storage::json_backend::JsonStorage,
 };
 
@@ -45,11 +50,11 @@ impl SelectionOverride {
 pub struct ShellContext {
     pub mode: CliMode,
     pub registry: CommandRegistry,
-    pub ledger_manager: LedgerManager,
+    pub ledger_manager: Arc<RwLock<LedgerManager>>,
     pub theme: ColorfulTheme,
     pub storage: JsonStorage,
-    pub config_manager: ConfigManager,
-    pub config: Config,
+    pub config_manager: Arc<RwLock<ConfigManager>>,
+    pub config: Arc<RwLock<Config>>,
     pub ledger_path: Option<PathBuf>,
     pub active_simulation_name: Option<String>,
     pub selection_override: Option<SelectionOverride>,
@@ -59,14 +64,6 @@ pub struct ShellContext {
 }
 
 impl ShellContext {
-    pub fn current_ledger_opt(&self) -> Option<&Ledger> {
-        self.ledger_manager.with_current(|ledger| ledger).ok()
-    }
-
-    pub fn current_ledger_mut_opt(&mut self) -> Option<&mut Ledger> {
-        self.ledger_manager.with_current_mut(|ledger| ledger).ok()
-    }
-
     pub fn is_simulation_active(&self) -> bool {
         self.current_simulation.is_some()
     }
