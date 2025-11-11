@@ -116,6 +116,7 @@ dependencies = [
  "dialoguer",
  "dirs",
  "libloading",
+ "once_cell",
  "predicates",
  "rustyline",
  "serde",

@@ -198,6 +198,8 @@ Key decisions:
 ### Testing & Quality Infrastructure
 
 - **Unit & integration tests** – `cargo test` executes suites covering budgeting math, recurrence scheduling, currency conversions, CLI script flows, persistence, simulations, and the FFI boundary. Tests are organized by concern (`tests/phase2_time_and_recurrence.rs`, `tests/currency_tests.rs`, etc.).
+- **Structured regression suites** – dedicated harnesses (`tests/cli_tests.rs`, `tests/persistence_tests.rs`, `tests/service_tests.rs`, `tests/simulation_tests.rs`) exercise the new command registry, persistence layer, and forecasting/simulation flows end-to-end. Each suite uses the shared `tests/common::setup_test_env` helper to spin up isolated storage/config managers backed by `tempfile::TempDir`.
+- **Coverage target** – core modules (services, storage, config, and ledger manager) must sustain ≥80% line coverage before merging. PRs add/extend module-level unit tests plus black-box integrations; CI gates on `cargo test --all` and will fail if coverage reports dip beneath the threshold recorded in `docs/testing_strategy.md`.
 - **Stress harness** – `tests/stress_suite.rs` simulates months of ledger activity, repeatedly running recurrence materialization, forecasts, simulations, and persistence save/load cycles to guard against drift and IO regressions.
 - **Fault injection** – `tests/persistence_suite.rs::atomic_save_failure_preserves_original_file` validates that atomic saves never corrupt the primary ledger when temp-file creation fails; additional recovery scenarios are slated for future expansion.
 - **FFI regression** – `tests/ffi_integration.rs` dynamically loads the shared library, exercises thread-safe snapshotting, and verifies error propagation for invalid inputs.
