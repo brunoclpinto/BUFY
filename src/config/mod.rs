@@ -27,6 +27,8 @@ pub struct Config {
     pub theme: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_opened_ledger: Option<String>,
+    #[serde(default)]
+    pub audio_feedback: bool,
 }
 
 impl Default for Config {
@@ -36,6 +38,7 @@ impl Default for Config {
             currency: "USD".into(),
             theme: None,
             last_opened_ledger: None,
+            audio_feedback: false,
         }
     }
 }

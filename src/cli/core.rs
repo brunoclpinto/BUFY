@@ -51,8 +51,8 @@ pub use crate::core::errors::CliError;
 use super::commands;
 use super::io as cli_io;
 use super::output::{
-    error as output_error, info as output_info, section as output_section,
-    success as output_success, warning as output_warning,
+    error as output_error, hint as output_hint, info as output_info, render_table as output_table,
+    section as output_section, success as output_success, warning as output_warning,
 };
 use super::registry::{CommandEntry, CommandRegistry};
 #[cfg(test)]
@@ -111,7 +111,7 @@ impl ShellContext {
         self.config.read().expect("Config lock poisoned")
     }
 
-    fn config_write(&self) -> RwLockWriteGuard<'_, Config> {
+    pub(crate) fn config_write(&self) -> RwLockWriteGuard<'_, Config> {
         self.config.write().expect("Config lock poisoned")
     }
 
@@ -121,7 +121,7 @@ impl ShellContext {
             .expect("ConfigManager lock poisoned")
     }
 
-    fn persist_config(&self) -> Result<(), CommandError> {
+    pub(crate) fn persist_config(&self) -> Result<(), CommandError> {
         let config = self.config_read();
         self.config_manager()
             .save(&config)
@@ -421,6 +421,16 @@ impl ShellContext {
     pub(crate) fn report_error(&self, err: CommandError) -> Result<(), CliError> {
         match err {
             CommandError::ExitRequested => Ok(()),
+            CommandError::InvalidArguments(message) => {
+                self.print_error(&message);
+                self.print_hint("Use `help <command>` for usage details.");
+                Ok(())
+            }
+            CommandError::LedgerNotLoaded => {
+                self.print_error("Ledger not loaded. Use `new-ledger` or `load` first.");
+                self.print_hint("Try `new-ledger Demo monthly` to get started.");
+                Ok(())
+            }
             other => {
                 self.print_error(&other.to_string());
                 Ok(())
@@ -434,6 +444,10 @@ impl ShellContext {
 
     pub(crate) fn print_warning(&self, message: &str) {
         output_warning(message);
+    }
+
+    pub(crate) fn print_hint(&self, message: &str) {
+        output_hint(message);
     }
 
     pub(crate) fn with_ledger<T>(
@@ -1914,106 +1928,111 @@ impl ShellContext {
     }
 
     pub(crate) fn list_accounts(&self) -> CommandResult {
-        self.with_ledger(|ledger| {
+        let rows = self.with_ledger(|ledger| {
             if ledger.accounts.is_empty() {
-                output_warning("No accounts defined.");
-                return Ok(());
+                return Ok(None);
             }
+            let rows: Vec<Vec<String>> = ledger
+                .accounts
+                .iter()
+                .map(|account| {
+                    let category = account
+                        .category_id
+                        .and_then(|id| ledger.category(id))
+                        .map(|cat| cat.name.clone())
+                        .unwrap_or_else(|| "-".into());
+                    vec![
+                        account.name.clone(),
+                        account.kind.to_string(),
+                        category,
+                        account.notes.as_deref().unwrap_or("-").to_string(),
+                    ]
+                })
+                .collect();
+            Ok(Some(rows))
+        })?;
 
-            output_section("Accounts");
-            for (idx, account) in ledger.accounts.iter().enumerate() {
-                output_info(format!(
-                    "  [{idx:>3}] {name} ({kind:?})",
-                    idx = idx,
-                    name = account.name,
-                    kind = account.kind
-                ));
+        match rows {
+            Some(rows) => {
+                output_section("Accounts");
+                output_table(&["Name", "Kind", "Category", "Notes"], &rows);
             }
-            Ok(())
-        })
+            None => output_warning("No accounts defined."),
+        }
+        Ok(())
     }
 
     pub(crate) fn list_categories(&self) -> CommandResult {
-        self.with_ledger(|ledger| {
+        let rows = self.with_ledger(|ledger| {
             if ledger.categories.is_empty() {
-                output_warning("No categories defined.");
-                return Ok(());
+                return Ok(None);
             }
+            let rows: Vec<Vec<String>> = ledger
+                .categories
+                .iter()
+                .map(|category| {
+                    let parent = category
+                        .parent_id
+                        .and_then(|id| ledger.category(id))
+                        .map(|cat| cat.name.clone())
+                        .unwrap_or_else(|| "-".into());
+                    vec![
+                        category.name.clone(),
+                        category.kind.to_string(),
+                        parent,
+                        category.notes.as_deref().unwrap_or("-").to_string(),
+                    ]
+                })
+                .collect();
+            Ok(Some(rows))
+        })?;
 
-            output_section("Categories");
-            for (idx, category) in ledger.categories.iter().enumerate() {
-                let parent_marker = if category.parent_id.is_some() {
-                    " [child]"
-                } else {
-                    ""
-                };
-                output_info(format!(
-                    "  [{idx:>3}] {name} ({kind:?}){parent_marker}",
-                    idx = idx,
-                    name = category.name,
-                    kind = category.kind,
-                    parent_marker = parent_marker
-                ));
+        match rows {
+            Some(rows) => {
+                output_section("Categories");
+                output_table(&["Name", "Kind", "Parent", "Notes"], &rows);
             }
-            Ok(())
-        })
+            None => output_warning("No categories defined."),
+        }
+        Ok(())
     }
 
     pub(crate) fn list_transactions(&self) -> CommandResult {
-        self.with_ledger(|ledger| {
+        let rows = self.with_ledger(|ledger| {
             if ledger.transactions.is_empty() {
-                output_warning("No transactions recorded.");
-                return Ok(());
+                return Ok(None);
             }
+            let rows: Vec<Vec<String>> = ledger
+                .transactions
+                .iter()
+                .map(|txn| {
+                    let from = ledger
+                        .account(txn.from_account)
+                        .map(|acc| acc.name.clone())
+                        .unwrap_or_else(|| "Unknown".into());
+                    let to = ledger
+                        .account(txn.to_account)
+                        .map(|acc| acc.name.clone())
+                        .unwrap_or_else(|| "Unknown".into());
+                    vec![
+                        self.format_date(ledger, txn.scheduled_date),
+                        from,
+                        to,
+                        self.format_amount(ledger, txn.budgeted_amount),
+                    ]
+                })
+                .collect();
+            Ok(Some(rows))
+        })?;
 
-            output_section("Transactions");
-            for (idx, txn) in ledger.transactions.iter().enumerate() {
-                let route = self.describe_transaction_route(ledger, txn);
-                let category = txn
-                    .category_id
-                    .and_then(|id| self.lookup_category_name(ledger, id))
-                    .unwrap_or_else(|| "Uncategorized".into());
-                let status = format!("{:?}", txn.status);
-                let txn_currency = ledger.transaction_currency(txn);
-                let scheduled = self.format_date(ledger, txn.scheduled_date);
-                let budget_amount = format_currency_value(
-                    txn.budgeted_amount,
-                    &txn_currency,
-                    &ledger.locale,
-                    &ledger.format,
-                );
-                output_info(format!(
-                    "  [{idx:>3}] {date} | {amount} | {status:<10} | {route} ({category})",
-                    idx = idx,
-                    date = scheduled,
-                    amount = budget_amount,
-                    status = status,
-                    route = route,
-                    category = category
-                ));
-                if let Some(actual_date) = txn.actual_date {
-                    if let Some(actual_amount) = txn.actual_amount {
-                        let formatted_date = self.format_date(ledger, actual_date);
-                        let formatted_amount = format_currency_value(
-                            actual_amount,
-                            &txn_currency,
-                            &ledger.locale,
-                            &ledger.format,
-                        );
-                        output_info(format!(
-                            "        actual {} | {}",
-                            formatted_date, formatted_amount
-                        ));
-                    }
-                }
-                if let Some(hint) = self.transaction_recurrence_hint(txn) {
-                    output_info(format!("        {}", hint));
-                } else if txn.recurrence_series_id.is_some() {
-                    output_info("        [instance] scheduled entry from recurrence");
-                }
+        match rows {
+            Some(rows) => {
+                output_section("Transactions");
+                output_table(&["Date", "From", "To", "Amount"], &rows);
             }
-            Ok(())
-        })
+            None => output_warning("No transactions recorded."),
+        }
+        Ok(())
     }
 
     pub(crate) fn show_budget_summary(&self, args: &[&str]) -> CommandResult {

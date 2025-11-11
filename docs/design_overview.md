@@ -232,11 +232,12 @@ and dialoguer prompts in interactive sessions.
 
 #### Unified Output & Accessibility (Phase 19)
 
-- **Message kinds** – every command routes through `cli::output`, which prefixes messages with textual status labels (`INFO:`, `SUCCESS:`, `WARNING:`, `ERROR:`, `PROMPT:`) plus ASCII-friendly icons. That keeps transcripts understandable for screen readers and in monochrome terminals.
-- **Output preferences** – `OutputPreferences` capture `screen_reader_mode`, `high_contrast_mode`, `quiet_mode`, and `audio_feedback`. Configuration commands update these flags at runtime so new output immediately reflects the user’s accessibility choices.
-- **Layout rules** – sections render via `output::section("Title")`, lists/rows indent by two spaces through `output::info`, and separators/blank lines go through dedicated helpers. Direct `println!`/colour calls are banned outside `cli::output`.
+- **Message kinds** – every command routes through `cli::output`, which prefixes messages with textual status labels (`INFO:`, `SUCCESS:`, `WARNING:`, `ERROR:`, `PROMPT:`, `HINT:`) and the matching icon/colour (`ℹ️`, `✅`, `⚠️`, `❌`, `💡`). Setting `config theme plain` disables both colour and emoji to keep transcripts screen-reader friendly.
+- **Output preferences** – `OutputPreferences` capture `plain_mode`, `screen_reader_mode`, `high_contrast_mode`, `quiet_mode`, and `audio_feedback`. Configuration commands update these flags at runtime (`config audio-feedback on|off`), and the shell immediately reapplies the requested theme.
+- **Layout rules** – sections render via `output::section("Title")`, all tabular data uses a monospace grid renderer (with Unicode box-drawing in colour mode and ASCII fallbacks in plain mode), and separators/blank lines go through dedicated helpers. Direct `println!`/colour calls are banned outside `cli::output`.
+- **Tabular summaries** – list commands (`account list`, `category list`, `transaction list`, etc.) now share a single renderer that emits headers plus aligned columns (e.g., `Date | From | To | Amount`). Screen readers can iterate column headers predictably because the borders and spacing are consistent.
 - **Interactive flows** – wizards show step counters (`Step 3 of 10`), `[default]` hints, and consistent `back`/`cancel` controls; validation errors re-render the prompt via `output::error`. Selection lists share the same “Select …” header, numbered rows, and `Type cancel to abort.` footer.
-- **Non-colour operation** – prompts no longer rely on ANSI styling; even the simulation banner in the prompt is rendered as plain `[sim:name]`. High-contrast mode bolds success/warning/error headings instead of changing colours, while `audio_feedback` adds `[ding]` to warnings/errors for low-vision cues.
+- **Non-colour operation** – prompts no longer rely on ANSI styling; even the simulation banner in the prompt is rendered as plain `[sim:name]`. High-contrast mode bolds success/warning/error headings instead of changing colours, while `audio_feedback` emits a short beep on warning/error for low-vision cues.
 
 ### Account & Category Wizards (Phase 15)
 

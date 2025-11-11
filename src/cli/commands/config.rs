@@ -190,8 +190,25 @@ fn cmd_config(context: &mut ShellContext, args: &[&str]) -> CommandResult {
             io::print_success("Valuation policy updated.");
             Ok(())
         }
+        "audio-feedback" => {
+            let mode = args.get(1).ok_or_else(|| {
+                CommandError::InvalidArguments("usage: config audio-feedback <on|off>".into())
+            })?;
+            let enabled = matches!(mode.to_lowercase().as_str(), "on" | "true" | "yes");
+            {
+                let mut config = context.config_write();
+                config.audio_feedback = enabled;
+            }
+            context.persist_config()?;
+            io::print_success(if enabled {
+                "Audio feedback enabled."
+            } else {
+                "Audio feedback disabled."
+            });
+            Ok(())
+        }
         _ => Err(CommandError::InvalidArguments(
-            "usage: config [show|set <key> <value>|backup [note]|backups|restore [name]|base-currency <ISO>|locale <tag>|negative-style <sign|parentheses>|screen-reader <on|off>|high-contrast <on|off>|valuation <transaction|report|custom> [date]]".into(),
+            "usage: config [show|set <key> <value>|backup [note]|backups|restore [name]|base-currency <ISO>|locale <tag>|negative-style <sign|parentheses>|screen-reader <on|off>|high-contrast <on|off>|audio-feedback <on|off>|valuation <transaction|report|custom> [date]]".into(),
         )),
     }
 }

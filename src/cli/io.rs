@@ -56,10 +56,11 @@ pub fn apply_config(config: &Config) {
     }
 
     output::set_preferences(OutputPreferences {
+        plain_mode: plain,
         screen_reader_mode: plain,
         high_contrast_mode: plain,
         quiet_mode: false,
-        audio_feedback: false,
+        audio_feedback: config.audio_feedback,
     });
 }
 
@@ -138,4 +139,13 @@ pub fn print_error(message: impl Display) {
 
 pub fn print_success(message: impl Display) {
     output::success(message);
+}
+
+pub fn print_hint(message: impl Display) {
+    output::hint(message);
+}
+
+pub fn print_error_with_hint(error: impl Display, hint: impl Display) {
+    print_error(error);
+    print_hint(hint);
 }
