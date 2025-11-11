@@ -71,7 +71,7 @@ impl ShellContext {
         if self.mode != CliMode::Interactive {
             return Ok(());
         }
-        if self.manager().current.is_some() {
+        if self.manager().with_current(|_| ()).is_ok() {
             return Ok(());
         }
         let Some(name) = self.config.last_opened_ledger.clone() else {
@@ -394,18 +394,24 @@ impl ShellContext {
         output_warning(message);
     }
 
-    pub(crate) fn current_ledger(&self) -> Result<&Ledger, CommandError> {
+    fn with_ledger<'a, T>(&'a self, f: impl FnOnce(&'a Ledger) -> T) -> Result<T, CommandError> {
         self.manager()
-            .current
-            .as_ref()
-            .ok_or(CommandError::LedgerNotLoaded)
+            .with_current(f)
+            .map_err(CommandError::from_core)
+    }
+
+    fn with_ledger_mut<'a, T>(&'a mut self, f: impl FnOnce(&'a mut Ledger) -> T) -> Result<T, CommandError> {
+        self.manager_mut()
+            .with_current_mut(f)
+            .map_err(CommandError::from_core)
+    }
+
+    pub(crate) fn current_ledger(&self) -> Result<&Ledger, CommandError> {
+        self.with_ledger(|ledger| ledger)
     }
 
     pub(crate) fn current_ledger_mut(&mut self) -> Result<&mut Ledger, CommandError> {
-        self.manager_mut()
-            .current
-            .as_mut()
-            .ok_or(CommandError::LedgerNotLoaded)
+        self.with_ledger_mut(|ledger| ledger)
     }
 
     pub(crate) fn active_simulation_name(&self) -> Option<&str> {

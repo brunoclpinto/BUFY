@@ -60,11 +60,11 @@ pub struct ShellContext {
 
 impl ShellContext {
     pub fn current_ledger_opt(&self) -> Option<&Ledger> {
-        self.ledger_manager.current.as_ref()
+        self.ledger_manager.with_current(|ledger| ledger).ok()
     }
 
     pub fn current_ledger_mut_opt(&mut self) -> Option<&mut Ledger> {
-        self.ledger_manager.current.as_mut()
+        self.ledger_manager.with_current_mut(|ledger| ledger).ok()
     }
 
     pub fn is_simulation_active(&self) -> bool {

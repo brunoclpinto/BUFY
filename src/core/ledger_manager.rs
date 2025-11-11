@@ -141,9 +141,9 @@ impl LedgerManager {
 
     /// Executes a closure with an immutable reference to the current ledger.
     /// Returns [`BudgetError::LedgerNotLoaded`] when no ledger is available.
-    pub fn with_current<T, F>(&self, f: F) -> Result<T, BudgetError>
+    pub fn with_current<'a, T, F>(&'a self, f: F) -> Result<T, BudgetError>
     where
-        F: FnOnce(&Ledger) -> T,
+        F: FnOnce(&'a Ledger) -> T,
     {
         let ledger = self.current.as_ref().ok_or(BudgetError::LedgerNotLoaded)?;
         Ok(f(ledger))
@@ -151,9 +151,9 @@ impl LedgerManager {
 
     /// Executes a closure with a mutable reference to the current ledger.
     /// Returns [`BudgetError::LedgerNotLoaded`] when no ledger is available.
-    pub fn with_current_mut<T, F>(&mut self, f: F) -> Result<T, BudgetError>
+    pub fn with_current_mut<'a, T, F>(&'a mut self, f: F) -> Result<T, BudgetError>
     where
-        F: FnOnce(&mut Ledger) -> T,
+        F: FnOnce(&'a mut Ledger) -> T,
     {
         let ledger = self.current.as_mut().ok_or(BudgetError::LedgerNotLoaded)?;
         Ok(f(ledger))
