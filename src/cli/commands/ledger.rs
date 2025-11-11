@@ -52,11 +52,11 @@ fn cmd_save(context: &mut ShellContext, args: &[&str]) -> CommandResult {
     } else if let Some(path) = context.ledger_path() {
         context.save_to_path(&path)
     } else if context.mode() == CliMode::Interactive {
-        let current = context.current_ledger()?;
-        let suggested = context
-            .ledger_name()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| current.name.clone());
+        let suggested = if let Some(name) = context.ledger_name() {
+            name
+        } else {
+            context.with_ledger(|ledger| Ok(ledger.name.clone()))?
+        };
         let choice =
             io::prompt_select_index("Choose save method", &["Name in store", "Custom path"])
                 .map_err(CommandError::from)?;
@@ -107,7 +107,7 @@ fn cmd_backup_ledger(context: &mut ShellContext, args: &[&str]) -> CommandResult
     let name = if let Some(name) = args.first() {
         (*name).to_string()
     } else {
-        context.require_named_ledger()?.to_string()
+        context.require_named_ledger()?
     };
     context.create_backup(&name)
 }
@@ -159,7 +159,7 @@ fn cmd_restore_ledger(context: &mut ShellContext, args: &[&str]) -> CommandResul
         }
         1 => {
             let reference = args[0];
-            let name = context.require_named_ledger()?.to_string();
+            let name = context.require_named_ledger()?;
             context.restore_backup(&name, reference)
         }
         2 => {
@@ -204,7 +204,7 @@ fn cmd_list_backups(context: &mut ShellContext, args: &[&str]) -> CommandResult 
     let name = if let Some(name) = args.first() {
         (*name).to_string()
     } else {
-        context.require_named_ledger()?.to_string()
+        context.require_named_ledger()?
     };
     context.list_backups(&name)
 }
@@ -214,16 +214,17 @@ fn cmd_summary(context: &mut ShellContext, args: &[&str]) -> CommandResult {
 }
 
 fn cmd_forecast(context: &mut ShellContext, args: &[&str]) -> CommandResult {
-    let ledger = context.current_ledger()?;
-    let today = Utc::now().date_naive();
-    let (simulation, remainder) = if !args.is_empty() && ledger.simulation(args[0]).is_some() {
-        (Some(args[0]), &args[1..])
-    } else {
-        (None, args)
-    };
-    let window = context.resolve_forecast_window(remainder, today)?;
-    let report = SummaryService::forecast_window(ledger, window, today, simulation)
-        .map_err(CommandError::from)?;
-    context.print_forecast_report(ledger, simulation, &report);
-    Ok(())
+    context.with_ledger(|ledger| {
+        let today = Utc::now().date_naive();
+        let (simulation, remainder) = if !args.is_empty() && ledger.simulation(args[0]).is_some() {
+            (Some(args[0]), &args[1..])
+        } else {
+            (None, args)
+        };
+        let window = context.resolve_forecast_window(remainder, today)?;
+        let report = SummaryService::forecast_window(ledger, window, today, simulation)
+            .map_err(CommandError::from)?;
+        context.print_forecast_report(ledger, simulation, &report);
+        Ok(())
+    })
 }

@@ -1,3 +1,5 @@
+use std::sync::{Arc, RwLock};
+
 use crate::{
     cli::selectors::{SelectionItem, SelectionProvider},
     cli::shell_context::ShellContext,
@@ -33,16 +35,17 @@ impl<'a> SelectionProvider for AccountSelectionProvider<'a> {
     type Error = ProviderError;
 
     fn items(&mut self) -> Result<Vec<SelectionItem<Self::Id>>, Self::Error> {
-        let ledger = self
-            .context
-            .current_ledger_opt()
-            .ok_or(ProviderError::MissingLedger)?;
-        Ok(ledger
-            .accounts
-            .iter()
-            .enumerate()
-            .map(|(idx, account)| account_item(idx, account))
-            .collect())
+        let manager = self.context.manager();
+        manager
+            .with_current(|ledger| {
+                ledger
+                    .accounts
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, account)| account_item(idx, account))
+                    .collect()
+            })
+            .map_err(|_| ProviderError::MissingLedger)
     }
 }
 
@@ -61,16 +64,17 @@ impl<'a> SelectionProvider for CategorySelectionProvider<'a> {
     type Error = ProviderError;
 
     fn items(&mut self) -> Result<Vec<SelectionItem<Self::Id>>, Self::Error> {
-        let ledger = self
-            .context
-            .current_ledger_opt()
-            .ok_or(ProviderError::MissingLedger)?;
-        Ok(ledger
-            .categories
-            .iter()
-            .enumerate()
-            .map(|(idx, category)| category_item(idx, category))
-            .collect())
+        let manager = self.context.manager();
+        manager
+            .with_current(|ledger| {
+                ledger
+                    .categories
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, category)| category_item(idx, category))
+                    .collect()
+            })
+            .map_err(|_| ProviderError::MissingLedger)
     }
 }
 
@@ -89,16 +93,17 @@ impl<'a> SelectionProvider for TransactionSelectionProvider<'a> {
     type Error = ProviderError;
 
     fn items(&mut self) -> Result<Vec<SelectionItem<Self::Id>>, Self::Error> {
-        let ledger = self
-            .context
-            .current_ledger_opt()
-            .ok_or(ProviderError::MissingLedger)?;
-        Ok(ledger
-            .transactions
-            .iter()
-            .enumerate()
-            .map(|(idx, txn)| transaction_item(idx, txn, ledger))
-            .collect())
+        let manager = self.context.manager();
+        manager
+            .with_current(|ledger| {
+                ledger
+                    .transactions
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, txn)| transaction_item(idx, txn, ledger))
+                    .collect()
+            })
+            .map_err(|_| ProviderError::MissingLedger)
     }
 }
 
@@ -117,11 +122,10 @@ impl<'a> SelectionProvider for SimulationSelectionProvider<'a> {
     type Error = ProviderError;
 
     fn items(&mut self) -> Result<Vec<SelectionItem<Self::Id>>, Self::Error> {
-        let ledger = self
-            .context
-            .current_ledger_opt()
-            .ok_or(ProviderError::MissingLedger)?;
-        Ok(ledger.simulations().iter().map(simulation_item).collect())
+        let manager = self.context.manager();
+        manager
+            .with_current(|ledger| ledger.simulations().iter().map(simulation_item).collect())
+            .map_err(|_| ProviderError::MissingLedger)
     }
 }
 
@@ -147,7 +151,7 @@ impl<'a> SelectionProvider for LedgerBackupSelectionProvider<'a> {
         let backups = self
             .context
             .manager()
-            .list_backups(name)
+            .list_backups(&name)
             .map_err(|err| ProviderError::Store(err.to_string()))?;
         Ok(backups
             .into_iter()
@@ -156,23 +160,26 @@ impl<'a> SelectionProvider for LedgerBackupSelectionProvider<'a> {
     }
 }
 
-pub struct ConfigBackupSelectionProvider<'a> {
-    manager: &'a ConfigManager,
+pub struct ConfigBackupSelectionProvider {
+    manager: Arc<RwLock<ConfigManager>>,
 }
 
-impl<'a> ConfigBackupSelectionProvider<'a> {
-    pub fn new(manager: &'a ConfigManager) -> Self {
+impl ConfigBackupSelectionProvider {
+    pub fn new(manager: Arc<RwLock<ConfigManager>>) -> Self {
         Self { manager }
     }
 }
 
-impl<'a> SelectionProvider for ConfigBackupSelectionProvider<'a> {
+impl SelectionProvider for ConfigBackupSelectionProvider {
     type Id = String;
     type Error = ProviderError;
 
     fn items(&mut self) -> Result<Vec<SelectionItem<Self::Id>>, Self::Error> {
-        let backups = self
+        let manager = self
             .manager
+            .read()
+            .map_err(|_| ProviderError::Store("config manager lock poisoned".into()))?;
+        let backups = manager
             .list_backups()
             .map_err(|err| ProviderError::Store(err.to_string()))?;
         Ok(backups

@@ -83,11 +83,13 @@ fn cmd_config(context: &mut ShellContext, args: &[&str]) -> CommandResult {
             let code = args.get(1).ok_or_else(|| {
                 CommandError::InvalidArguments("usage: config base-currency <ISO>".into())
             })?;
-            let ledger = context.current_ledger_mut()?;
-            ledger.base_currency = CurrencyCode::new(*code);
+            context.with_ledger_mut(|ledger| {
+                ledger.base_currency = CurrencyCode::new(*code);
+                Ok(())
+            })?;
             io::print_success(format!(
                 "Base currency set to {}.",
-                ledger.base_currency.as_str()
+                CurrencyCode::new(*code).as_str()
             ));
             Ok(())
         }
@@ -95,9 +97,12 @@ fn cmd_config(context: &mut ShellContext, args: &[&str]) -> CommandResult {
             let tag = args.get(1).ok_or_else(|| {
                 CommandError::InvalidArguments("usage: config locale <tag>".into())
             })?;
-            let ledger = context.current_ledger_mut()?;
-            ledger.locale = locale_template(tag);
-            io::print_success(format!("Locale set to {}.", ledger.locale.language_tag));
+            let locale = locale_template(tag);
+            context.with_ledger_mut(|ledger| {
+                ledger.locale = locale.clone();
+                Ok(())
+            })?;
+            io::print_success(format!("Locale set to {}.", locale.language_tag));
             Ok(())
         }
         "negative-style" => {
@@ -106,8 +111,7 @@ fn cmd_config(context: &mut ShellContext, args: &[&str]) -> CommandResult {
                     "usage: config negative-style <sign|parentheses>".into(),
                 )
             })?;
-            let ledger = context.current_ledger_mut()?;
-            ledger.format.negative_style = match style.to_lowercase().as_str() {
+            let negative = match style.to_lowercase().as_str() {
                 "sign" => NegativeStyle::Sign,
                 "parentheses" => NegativeStyle::Parentheses,
                 other => {
@@ -117,6 +121,10 @@ fn cmd_config(context: &mut ShellContext, args: &[&str]) -> CommandResult {
                     )))
                 }
             };
+            context.with_ledger_mut(|ledger| {
+                ledger.format.negative_style = negative;
+                Ok(())
+            })?;
             io::print_success("Negative style updated.");
             Ok(())
         }
@@ -124,9 +132,11 @@ fn cmd_config(context: &mut ShellContext, args: &[&str]) -> CommandResult {
             let mode = args.get(1).ok_or_else(|| {
                 CommandError::InvalidArguments("usage: config screen-reader <on|off>".into())
             })?;
-            let ledger = context.current_ledger_mut()?;
-            ledger.format.screen_reader_mode =
-                matches!(mode.to_lowercase().as_str(), "on" | "true" | "yes");
+            let enabled = matches!(mode.to_lowercase().as_str(), "on" | "true" | "yes");
+            context.with_ledger_mut(|ledger| {
+                ledger.format.screen_reader_mode = enabled;
+                Ok(())
+            })?;
             io::print_success("Screen reader mode updated.");
             Ok(())
         }
@@ -134,9 +144,11 @@ fn cmd_config(context: &mut ShellContext, args: &[&str]) -> CommandResult {
             let mode = args.get(1).ok_or_else(|| {
                 CommandError::InvalidArguments("usage: config high-contrast <on|off>".into())
             })?;
-            let ledger = context.current_ledger_mut()?;
-            ledger.format.high_contrast_mode =
-                matches!(mode.to_lowercase().as_str(), "on" | "true" | "yes");
+            let enabled = matches!(mode.to_lowercase().as_str(), "on" | "true" | "yes");
+            context.with_ledger_mut(|ledger| {
+                ledger.format.high_contrast_mode = enabled;
+                Ok(())
+            })?;
             io::print_success("Contrast preference updated.");
             Ok(())
         }
@@ -146,8 +158,7 @@ fn cmd_config(context: &mut ShellContext, args: &[&str]) -> CommandResult {
                     "usage: config valuation <transaction|report|custom> [YYYY-MM-DD]".into(),
                 )
             })?;
-            let ledger = context.current_ledger_mut()?;
-            ledger.valuation_policy = match policy.to_lowercase().as_str() {
+            let valuation = match policy.to_lowercase().as_str() {
                 "transaction" => ValuationPolicy::TransactionDate,
                 "report" => ValuationPolicy::ReportDate,
                 "custom" => {
@@ -170,6 +181,10 @@ fn cmd_config(context: &mut ShellContext, args: &[&str]) -> CommandResult {
                     )))
                 }
             };
+            context.with_ledger_mut(|ledger| {
+                ledger.valuation_policy = valuation;
+                Ok(())
+            })?;
             io::print_success("Valuation policy updated.");
             Ok(())
         }
