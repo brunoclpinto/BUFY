@@ -15,7 +15,7 @@ pub use crate::core::simulation::types::{
 };
 pub use account::{Account, AccountKind};
 pub use budget::Budget;
-pub use category::{Category, CategoryKind};
+pub use category::{Category, CategoryBudgetDefinition, CategoryKind};
 pub use ledger::{
     AccountBudget, BudgetPeriod, BudgetScope, BudgetStatus, BudgetSummary, BudgetTotals,
     BudgetTotalsDelta, DateWindow, ForecastReport, Ledger,

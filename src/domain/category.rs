@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::domain::common::*;
 
 /// Categorises ledger activity for budgeting and reporting.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Category {
     pub id: Uuid,
     pub name: String,
@@ -18,6 +18,8 @@ pub struct Category {
     pub is_custom: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget: Option<CategoryBudgetDefinition>,
 }
 
 impl Category {
@@ -29,6 +31,7 @@ impl Category {
             parent_id: None,
             is_custom: true,
             notes: None,
+            budget: None,
         }
     }
 }
