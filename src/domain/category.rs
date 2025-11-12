@@ -34,6 +34,40 @@ impl Category {
             budget: None,
         }
     }
+
+    /// Returns the active budget definition, if one exists.
+    pub fn budget(&self) -> Option<&CategoryBudgetDefinition> {
+        self.budget.as_ref()
+    }
+
+    /// Returns `true` when the category has a budget assigned.
+    pub fn has_budget(&self) -> bool {
+        self.budget.is_some()
+    }
+
+    /// Assigns a budget using primitive values, overwriting prior data.
+    pub fn set_budget(
+        &mut self,
+        amount: f64,
+        period: BudgetPeriod,
+        reference_date: Option<NaiveDate>,
+    ) {
+        self.budget = Some(CategoryBudgetDefinition {
+            amount,
+            period,
+            reference_date,
+        });
+    }
+
+    /// Assigns a pre-built budget definition.
+    pub fn set_budget_definition(&mut self, definition: CategoryBudgetDefinition) {
+        self.budget = Some(definition);
+    }
+
+    /// Removes any assigned budget configuration.
+    pub fn clear_budget(&mut self) {
+        self.budget = None;
+    }
 }
 
 impl Identifiable for Category {
