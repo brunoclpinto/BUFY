@@ -2,7 +2,7 @@
 
 use chrono::NaiveDate;
 
-use crate::core::services::{ServiceError, ServiceResult};
+use crate::core::services::{BudgetService, ServiceError, ServiceResult};
 use crate::domain::ledger::{BudgetScope, BudgetSummary, DateWindow};
 use crate::ledger::{ForecastReport, Ledger, SimulationBudgetImpact};
 
@@ -14,7 +14,7 @@ pub struct SummaryService;
 impl SummaryService {
     /// Summarizes the ledger's current budget window.
     pub fn current_totals(ledger: &Ledger) -> BudgetSummary {
-        ledger.summarize_current_period()
+        BudgetService::summarize_current_period(ledger)
     }
 
     /// Summarizes the supplied window and scope against the ledger.
@@ -23,7 +23,7 @@ impl SummaryService {
         window: DateWindow,
         scope: BudgetScope,
     ) -> BudgetSummary {
-        ledger.summarize_window_scope(window, scope)
+        BudgetService::summarize_window_scope(ledger, window, scope)
     }
 
     /// Summarizes the impact of a simulation in a specific window and scope.
