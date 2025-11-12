@@ -1,9 +1,11 @@
 pub mod account_service;
+pub mod budget_service;
 pub mod category_service;
 pub mod summary_service;
 pub mod transaction_service;
 
 pub use account_service::AccountService;
+pub use budget_service::{BudgetService, CategoryBudgetAssignment, CategoryBudgetStatus};
 pub use category_service::CategoryService;
 pub use summary_service::SummaryService;
 pub use transaction_service::TransactionService;
