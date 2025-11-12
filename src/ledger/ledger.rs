@@ -26,7 +26,7 @@ use super::{
 use crate::{
     core::{
         errors::BudgetError,
-        services::BudgetService,
+        services::{BudgetService, CategoryBudgetAssignment, CategoryBudgetStatus},
         simulation::{
             engine::SimulationEngine,
             types::{
@@ -356,6 +356,46 @@ impl Ledger {
         (1..=periods)
             .map(|idx| self.summarize_period_offset(reference, idx as i32))
             .collect()
+    }
+
+    /// Returns every category that currently has an explicit budget definition.
+    pub fn categories_with_budgets(&self) -> Vec<CategoryBudgetAssignment> {
+        BudgetService::categories_with_budgets(self)
+    }
+
+    /// Returns the budget status for a specific category within a window.
+    pub fn category_budget_status(
+        &self,
+        category_id: Uuid,
+        window: DateWindow,
+        scope: BudgetScope,
+    ) -> Option<CategoryBudgetStatus> {
+        BudgetService::category_budget_status(self, category_id, window, scope)
+    }
+
+    /// Returns budget usage for all categories within a window.
+    pub fn category_budget_statuses(
+        &self,
+        window: DateWindow,
+        scope: BudgetScope,
+    ) -> Vec<CategoryBudgetStatus> {
+        BudgetService::category_budget_statuses(self, window, scope)
+    }
+
+    /// Convenience helper for retrieving category budget usage for the period containing `reference`.
+    pub fn category_budget_statuses_at(
+        &self,
+        reference: NaiveDate,
+    ) -> Vec<CategoryBudgetStatus> {
+        let window = self.budget_window_for(reference);
+        let scope = window.scope(reference);
+        self.category_budget_statuses(window, scope)
+    }
+
+    /// Returns the category budget usage for the current ledger period.
+    pub fn category_budget_statuses_current(&self) -> Vec<CategoryBudgetStatus> {
+        let today = Utc::now().date_naive();
+        self.category_budget_statuses_at(today)
     }
 
     pub fn summarize_range(
