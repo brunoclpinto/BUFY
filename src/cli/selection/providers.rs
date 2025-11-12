@@ -198,8 +198,11 @@ fn account_item(index: usize, account: &Account) -> SelectionItem<usize> {
 }
 
 fn category_item(index: usize, category: &Category) -> SelectionItem<usize> {
-    let mut item = SelectionItem::new(index, category.name.clone())
-        .with_subtitle(format!("{:?}", category.kind));
+    let mut subtitle = format!("{:?}", category.kind);
+    if category.budget.is_some() {
+        subtitle.push_str(" • budget set");
+    }
+    let mut item = SelectionItem::new(index, category.name.clone()).with_subtitle(subtitle);
     if let Some(parent) = category.parent_id {
         item = item.with_category(format!("parent: {}", parent));
     }

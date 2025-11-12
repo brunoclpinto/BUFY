@@ -29,6 +29,10 @@ pub struct Config {
     pub last_opened_ledger: Option<String>,
     #[serde(default)]
     pub audio_feedback: bool,
+    #[serde(default = "Config::default_budget_period_value")]
+    pub default_budget_period: String,
+    #[serde(default)]
+    pub default_currency_precision: Option<u8>,
 }
 
 impl Default for Config {
@@ -39,7 +43,15 @@ impl Default for Config {
             theme: None,
             last_opened_ledger: None,
             audio_feedback: false,
+            default_budget_period: Self::default_budget_period_value(),
+            default_currency_precision: None,
         }
+    }
+}
+
+impl Config {
+    pub fn default_budget_period_value() -> String {
+        "monthly".into()
     }
 }
 

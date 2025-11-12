@@ -19,9 +19,11 @@ use crate::{
     core::errors::BudgetError,
     core::ledger_manager::LedgerManager,
     core::services::{
-        AccountService, CategoryService, ServiceError, SummaryService, TransactionService,
+        AccountService, CategoryBudgetStatus, CategoryService, ServiceError, SummaryService,
+        TransactionService,
     },
-    currency::{format_currency_value, format_date},
+    currency::{format_currency_value, format_currency_value_with_precision, format_date},
+    domain::BudgetPeriod as CategoryBudgetPeriod,
     ledger::{
         account::AccountKind, category::CategoryKind, Account, BudgetPeriod, BudgetScope,
         BudgetSummary, Category, DateWindow, ForecastReport, Ledger, Recurrence, RecurrenceEnd,
@@ -219,16 +221,57 @@ impl ShellContext {
     }
 
     fn format_amount(&self, ledger: &Ledger, amount: f64) -> String {
-        format_currency_value(
+        let precision_override = {
+            let config = self.config_read();
+            config.default_currency_precision
+        };
+        format_currency_value_with_precision(
             amount,
             ledger.base_currency(),
             &ledger.locale,
             &ledger.format,
+            precision_override,
         )
     }
 
     fn format_date(&self, ledger: &Ledger, date: NaiveDate) -> String {
         format_date(&ledger.locale, date)
+    }
+
+    fn config_default_category_period(&self) -> CategoryBudgetPeriod {
+        let raw_value = {
+            let config = self.config_read();
+            config.default_budget_period.clone()
+        };
+        parse_category_budget_period_str(&raw_value).unwrap_or(CategoryBudgetPeriod::Monthly)
+    }
+
+    fn describe_budget_period_label(
+        &self,
+        ledger: &Ledger,
+        period: &CategoryBudgetPeriod,
+        reference_date: Option<NaiveDate>,
+    ) -> String {
+        let mut label = describe_category_budget_period(period);
+        if let Some(date) = reference_date {
+            label.push_str(&format!(" • anchor {}", self.format_date(ledger, date)));
+        }
+        label
+    }
+
+    fn category_budget_row(&self, ledger: &Ledger, status: &CategoryBudgetStatus) -> Vec<String> {
+        let budget = status
+            .budget
+            .as_ref()
+            .expect("row rendering requires budget details");
+        vec![
+            status.name.clone(),
+            self.format_amount(ledger, budget.amount),
+            self.format_amount(ledger, status.totals.real),
+            self.format_amount(ledger, status.totals.remaining),
+            self.describe_budget_period_label(ledger, &budget.period, budget.reference_date),
+            format!("{:?}", status.totals.status),
+        ]
     }
 
     pub(crate) fn show_config(&self) -> CommandResult {
@@ -243,6 +286,17 @@ impl ShellContext {
         output_info(format!(
             "  Last opened ledger: {}",
             config.last_opened_ledger.as_deref().unwrap_or("(none)")
+        ));
+        output_info(format!(
+            "  Default budget period: {}",
+            config.default_budget_period
+        ));
+        output_info(format!(
+            "  Currency precision override: {}",
+            config
+                .default_currency_precision
+                .map(|value| format!("{value} places"))
+                .unwrap_or_else(|| "auto".into())
         ));
         let _ = self.with_ledger(|ledger| {
             output_section("Ledger Format");
@@ -295,6 +349,27 @@ impl ShellContext {
                         config.last_opened_ledger = None;
                     } else {
                         config.last_opened_ledger = Some(value.to_string());
+                    }
+                }
+                "default_budget_period" => {
+                    let period = parse_category_budget_period_str(value)?;
+                    config.default_budget_period = category_budget_period_token(&period);
+                }
+                "default_currency_precision" => {
+                    if value.eq_ignore_ascii_case("auto") || value.is_empty() {
+                        config.default_currency_precision = None;
+                    } else {
+                        let parsed: u8 = value.parse().map_err(|_| {
+                            CommandError::InvalidArguments(
+                                "default_currency_precision must be numeric (0-6)".into(),
+                            )
+                        })?;
+                        if parsed > 6 {
+                            return Err(CommandError::InvalidArguments(
+                                "default_currency_precision must be between 0 and 6".into(),
+                            ));
+                        }
+                        config.default_currency_precision = Some(parsed);
                     }
                 }
                 other => {
@@ -575,6 +650,52 @@ impl ShellContext {
             prompt,
             "No categories available.",
         )
+    }
+
+    fn resolve_category_target(
+        &self,
+        name_arg: Option<&str>,
+        usage: &str,
+        prompt: &str,
+    ) -> Result<Option<(Uuid, String)>, CommandError> {
+        if let Some(raw) = name_arg {
+            let needle = raw.trim();
+            if needle.is_empty() {
+                return Err(CommandError::InvalidArguments(usage.into()));
+            }
+            return self
+                .with_ledger(|ledger| {
+                    ledger
+                        .categories
+                        .iter()
+                        .find(|category| category.name.eq_ignore_ascii_case(needle))
+                        .map(|category| Ok((category.id, category.name.clone())))
+                        .unwrap_or_else(|| {
+                            Err(CommandError::InvalidArguments(format!(
+                                "category `{}` not found. Use `category list` to view available names.",
+                                needle
+                            )))
+                        })
+                })
+                .map(Some);
+        }
+        if !self.can_prompt() {
+            return Err(CommandError::InvalidArguments(usage.into()));
+        }
+        match self.select_category_index(prompt)? {
+            Some(index) => self
+                .with_ledger(|ledger| {
+                    ledger
+                        .categories
+                        .get(index)
+                        .map(|category| (category.id, category.name.clone()))
+                        .ok_or_else(|| {
+                            CommandError::InvalidArguments("category index out of range".into())
+                        })
+                })
+                .map(Some),
+            None => Ok(None),
+        }
     }
 
     fn account_category_options(&self, ledger: &Ledger) -> Vec<(String, Option<Uuid>)> {
@@ -1101,9 +1222,67 @@ impl ShellContext {
         Ok(())
     }
 
+    fn prompt_budget_amount(&self, prompt: &str) -> Result<f64, CommandError> {
+        Input::<f64>::with_theme(&self.theme)
+            .with_prompt(prompt)
+            .validate_with(|value: &f64| -> Result<(), &str> {
+                if *value <= 0.0 {
+                    Err("Amount must be greater than 0")
+                } else {
+                    Ok(())
+                }
+            })
+            .interact()
+            .map_err(CommandError::from)
+    }
+
     fn prompt_budget_period(&self) -> Result<BudgetPeriod, CommandError> {
         let interval = self.prompt_time_interval(None)?;
         Ok(BudgetPeriod(interval))
+    }
+
+    fn prompt_category_budget_period(
+        &self,
+        default: CategoryBudgetPeriod,
+    ) -> Result<CategoryBudgetPeriod, CommandError> {
+        let options = ["Monthly", "Weekly", "Daily", "Yearly", "Custom..."];
+        let mut default_index = match default {
+            CategoryBudgetPeriod::Monthly => 0,
+            CategoryBudgetPeriod::Weekly => 1,
+            CategoryBudgetPeriod::Daily => 2,
+            CategoryBudgetPeriod::Yearly => 3,
+            CategoryBudgetPeriod::Custom(_) => options.len() - 1,
+        };
+        default_index = default_index.min(options.len() - 1);
+        let selection = Select::with_theme(&self.theme)
+            .with_prompt("Budget period")
+            .items(&options)
+            .default(default_index)
+            .interact()
+            .map_err(CommandError::from)?;
+        if selection == options.len() - 1 {
+            let mut custom_input = Input::<u32>::with_theme(&self.theme)
+                .with_prompt("Custom period length (days)")
+                .validate_with(|value: &u32| -> Result<(), &str> {
+                    if *value == 0 {
+                        Err("Value must be greater than 0")
+                    } else {
+                        Ok(())
+                    }
+                });
+            if let CategoryBudgetPeriod::Custom(days) = default {
+                custom_input = custom_input.with_initial_text(days.to_string());
+            }
+            let days = custom_input.interact().map_err(CommandError::from)?;
+            return Ok(CategoryBudgetPeriod::Custom(days));
+        }
+        Ok(match selection {
+            0 => CategoryBudgetPeriod::Monthly,
+            1 => CategoryBudgetPeriod::Weekly,
+            2 => CategoryBudgetPeriod::Daily,
+            3 => CategoryBudgetPeriod::Yearly,
+            _ => CategoryBudgetPeriod::Monthly,
+        })
     }
 
     fn prompt_time_interval(
@@ -1509,6 +1688,217 @@ impl ShellContext {
             Ok(())
         })?;
         output_success("Category added.");
+        Ok(())
+    }
+
+    pub(crate) fn category_budget_set(&mut self, args: &[&str]) -> CommandResult {
+        self.ensure_base_mode("Category budgets")?;
+        if self.active_simulation_name().is_some() {
+            return Err(CommandError::InvalidArguments(
+                "Leave simulation mode before editing categories".into(),
+            ));
+        }
+
+        let (positionals, period_arg) = split_period_flag(args);
+        if period_arg.as_deref().is_some_and(|value| value.is_empty()) {
+            return Err(CommandError::InvalidArguments(
+                "missing value for --period".into(),
+            ));
+        }
+        if positionals.len() > 2 {
+            return Err(CommandError::InvalidArguments(
+                "usage: category budget set <category_name> <amount> [--period <period>]".into(),
+            ));
+        }
+
+        let mut positional_iter = positionals.iter();
+        let category_arg = positional_iter.next().map(|value| value.as_str());
+        let amount_arg = positional_iter.next().map(|value| value.as_str());
+
+        let target = self.resolve_category_target(
+            category_arg,
+            "usage: category budget set <category_name> <amount> [--period <period>]",
+            "Select a category to assign a budget to:",
+        )?;
+        let Some((category_id, category_name)) = target else {
+            output_info("Budget assignment cancelled.");
+            return Ok(());
+        };
+
+        let amount = if let Some(raw) = amount_arg {
+            parse_budget_amount(raw)?
+        } else if self.can_prompt() {
+            self.prompt_budget_amount("Budget amount")?
+        } else {
+            return Err(CommandError::InvalidArguments(
+                "usage: category budget set <category_name> <amount> [--period <period>]".into(),
+            ));
+        };
+
+        let should_prompt_period = period_arg.is_none()
+            && self.can_prompt()
+            && (category_arg.is_none() || amount_arg.is_none());
+        let mut used_default_period = false;
+        let period_value = period_arg.clone();
+        let period = if should_prompt_period {
+            self.prompt_category_budget_period(self.config_default_category_period())?
+        } else if let Some(value) = period_value {
+            if value.eq_ignore_ascii_case("default") {
+                used_default_period = true;
+                self.config_default_category_period()
+            } else {
+                parse_category_budget_period_str(&value)?
+            }
+        } else {
+            used_default_period = true;
+            self.config_default_category_period()
+        };
+
+        self.with_ledger_mut(|ledger| {
+            let category = ledger.category_mut(category_id).ok_or_else(|| {
+                CommandError::InvalidArguments(format!(
+                    "category `{}` no longer exists.",
+                    category_name
+                ))
+            })?;
+            category.set_budget(amount, period.clone(), None);
+            Ok(())
+        })?;
+
+        let budget_label = self.with_ledger(|ledger| {
+            let amount_label = self.format_amount(ledger, amount);
+            Ok((
+                amount_label,
+                self.describe_budget_period_label(ledger, &period, None),
+            ))
+        })?;
+        output_success(format!(
+            "Budget for `{}` set to {} ({})",
+            category_name, budget_label.0, budget_label.1
+        ));
+        if used_default_period {
+            self.print_hint(
+                "Hint: Change the default via `config set default_budget_period monthly`.",
+            );
+        }
+        Ok(())
+    }
+
+    pub(crate) fn category_budget_clear(&mut self, args: &[&str]) -> CommandResult {
+        self.ensure_base_mode("Category budgets")?;
+        if args.len() > 1 {
+            return Err(CommandError::InvalidArguments(
+                "usage: category budget clear <category_name>".into(),
+            ));
+        }
+        let target = self.resolve_category_target(
+            args.get(0).copied(),
+            "usage: category budget clear <category_name>",
+            "Select a category to clear:",
+        )?;
+        let Some((category_id, category_name)) = target else {
+            output_info("Budget removal cancelled.");
+            return Ok(());
+        };
+
+        let removed = self.with_ledger_mut(|ledger| {
+            let category = ledger.category_mut(category_id).ok_or_else(|| {
+                CommandError::InvalidArguments(format!(
+                    "category `{}` no longer exists.",
+                    category_name
+                ))
+            })?;
+            let had_budget = category.budget.is_some();
+            if had_budget {
+                category.clear_budget();
+            }
+            Ok(had_budget)
+        })?;
+
+        if removed {
+            output_success(format!("Budget cleared for `{}`.", category_name));
+        } else {
+            output_info(format!(
+                "Category `{}` has no budget assigned.",
+                category_name
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn category_budget_show(&self, args: &[&str]) -> CommandResult {
+        if args.len() > 1 {
+            return Err(CommandError::InvalidArguments(
+                "usage: category budget show [<category_name>]".into(),
+            ));
+        }
+        let name_filter = args
+            .first()
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty());
+        let data = self.with_ledger(|ledger| {
+            let mut statuses: Vec<CategoryBudgetStatus> = ledger
+                .category_budget_statuses_current()
+                .into_iter()
+                .filter(|status| status.budget.is_some())
+                .collect();
+            if statuses.is_empty() {
+                if let Some(filter) = name_filter {
+                    return Err(CommandError::InvalidArguments(format!(
+                        "category `{}` has no budget configured",
+                        filter
+                    )));
+                }
+                return Ok(None);
+            }
+            if let Some(filter) = name_filter {
+                if let Some(status) = statuses
+                    .into_iter()
+                    .find(|status| status.name.eq_ignore_ascii_case(filter))
+                {
+                    let row = self.category_budget_row(ledger, &status);
+                    let heading = format!("Category Budget: {}", status.name);
+                    return Ok(Some((heading, vec![row])));
+                } else {
+                    return Err(CommandError::InvalidArguments(format!(
+                        "category `{}` has no budget configured",
+                        filter
+                    )));
+                }
+            }
+            statuses.sort_by(|a, b| a.name.cmp(&b.name));
+            let rows: Vec<Vec<String>> = statuses
+                .iter()
+                .map(|status| self.category_budget_row(ledger, status))
+                .collect();
+            Ok(Some((
+                "Category Budgets (current period)".to_string(),
+                rows,
+            )))
+        })?;
+
+        match data {
+            None => output_warning("No category budgets configured."),
+            Some((heading, rows)) => {
+                output_section(heading);
+                output_table(
+                    &[
+                        "Category",
+                        "Budget",
+                        "Spent",
+                        "Remaining",
+                        "Period",
+                        "Status",
+                    ],
+                    &rows,
+                );
+            }
+        }
+        if name_filter.is_none() {
+            self.print_hint(
+                "Hint: Use `category budget set <name> <amount>` to add or update a budget.",
+            );
+        }
         Ok(())
     }
 
@@ -1976,10 +2366,26 @@ impl ShellContext {
                         .and_then(|id| ledger.category(id))
                         .map(|cat| cat.name.clone())
                         .unwrap_or_else(|| "-".into());
+                    let budget_display = category
+                        .budget
+                        .as_ref()
+                        .map(|budget| {
+                            format!(
+                                "{} ({})",
+                                self.format_amount(ledger, budget.amount),
+                                self.describe_budget_period_label(
+                                    ledger,
+                                    &budget.period,
+                                    budget.reference_date
+                                )
+                            )
+                        })
+                        .unwrap_or_else(|| "-".into());
                     vec![
                         category.name.clone(),
                         category.kind.to_string(),
                         parent,
+                        budget_display,
                         category.notes.as_deref().unwrap_or("-").to_string(),
                     ]
                 })
@@ -1990,7 +2396,7 @@ impl ShellContext {
         match rows {
             Some(rows) => {
                 output_section("Categories");
-                output_table(&["Name", "Kind", "Parent", "Notes"], &rows);
+                output_table(&["Name", "Kind", "Parent", "Budget", "Notes"], &rows);
             }
             None => output_warning("No categories defined."),
         }
@@ -2970,6 +3376,111 @@ fn parse_time_interval_str(input: &str) -> Result<TimeInterval, CommandError> {
 
     let unit = parse_time_unit(unit_str)?;
     Ok(TimeInterval { every, unit })
+}
+
+fn parse_category_budget_period_str(input: &str) -> Result<CategoryBudgetPeriod, CommandError> {
+    let normalized = input.trim().to_lowercase();
+    if normalized.is_empty() {
+        return Err(CommandError::InvalidArguments(
+            "budget period cannot be empty".into(),
+        ));
+    }
+    match normalized.as_str() {
+        "daily" => return Ok(CategoryBudgetPeriod::Daily),
+        "weekly" => return Ok(CategoryBudgetPeriod::Weekly),
+        "monthly" => return Ok(CategoryBudgetPeriod::Monthly),
+        "yearly" => return Ok(CategoryBudgetPeriod::Yearly),
+        _ => {}
+    }
+    if normalized.starts_with("custom") {
+        let value_part = normalized
+            .split(&[':', '=', ' '][..])
+            .skip(1)
+            .find(|segment| !segment.is_empty())
+            .ok_or_else(|| {
+                CommandError::InvalidArguments(
+                    "custom period must include a numeric day count (e.g. custom:45)".into(),
+                )
+            })?;
+        let days: u32 = value_part.parse().map_err(|_| {
+            CommandError::InvalidArguments(format!(
+                "invalid custom period `{}` (use custom:<days>)",
+                input
+            ))
+        })?;
+        if days == 0 {
+            return Err(CommandError::InvalidArguments(
+                "custom period must be greater than 0 days".into(),
+            ));
+        }
+        return Ok(CategoryBudgetPeriod::Custom(days));
+    }
+    Err(CommandError::InvalidArguments(format!(
+        "unknown budget period `{}` (use daily, weekly, monthly, yearly, or custom:<days>)",
+        input
+    )))
+}
+
+fn category_budget_period_token(period: &CategoryBudgetPeriod) -> String {
+    match period {
+        CategoryBudgetPeriod::Daily => "daily".into(),
+        CategoryBudgetPeriod::Weekly => "weekly".into(),
+        CategoryBudgetPeriod::Monthly => "monthly".into(),
+        CategoryBudgetPeriod::Yearly => "yearly".into(),
+        CategoryBudgetPeriod::Custom(days) => format!("custom:{days}"),
+    }
+}
+
+fn describe_category_budget_period(period: &CategoryBudgetPeriod) -> String {
+    match period {
+        CategoryBudgetPeriod::Daily => "Daily".into(),
+        CategoryBudgetPeriod::Weekly => "Weekly".into(),
+        CategoryBudgetPeriod::Monthly => "Monthly".into(),
+        CategoryBudgetPeriod::Yearly => "Yearly".into(),
+        CategoryBudgetPeriod::Custom(days) => {
+            format!("Every {} day{}", days, if *days == 1 { "" } else { "s" })
+        }
+    }
+}
+
+fn parse_budget_amount(value: &str) -> Result<f64, CommandError> {
+    let amount: f64 = value
+        .parse()
+        .map_err(|_| CommandError::InvalidArguments(format!("invalid amount `{}`", value)))?;
+    if amount <= 0.0 {
+        return Err(CommandError::InvalidArguments(
+            "amount must be greater than 0".into(),
+        ));
+    }
+    Ok(amount)
+}
+
+fn split_period_flag(args: &[&str]) -> (Vec<String>, Option<String>) {
+    let mut positionals = Vec::new();
+    let mut period = None;
+    let mut idx = 0;
+    while idx < args.len() {
+        let token = args[idx];
+        let lowered = token.to_lowercase();
+        if lowered.starts_with("--period=") {
+            if let Some(eq_index) = token.find('=') {
+                period = Some(token[eq_index + 1..].to_string());
+            } else {
+                period = Some(String::new());
+            }
+        } else if lowered == "--period" {
+            if idx + 1 < args.len() {
+                period = Some(args[idx + 1].to_string());
+                idx += 1;
+            } else {
+                period = Some(String::new());
+            }
+        } else {
+            positionals.push(token.to_string());
+        }
+        idx += 1;
+    }
+    (positionals, period)
 }
 
 fn format_backup_label(file_name: &str) -> String {

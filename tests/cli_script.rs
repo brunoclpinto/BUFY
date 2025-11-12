@@ -94,3 +94,34 @@ exit
                 .and(contains("Ledger `demo` loaded")),
         );
 }
+
+#[test]
+fn category_budget_cli_flow() {
+    let home = tempfile::tempdir().unwrap();
+    let script = "\
+config set default_budget_period weekly
+new-ledger Demo monthly
+add category Groceries expense
+category budget set Groceries 400
+category budget show Groceries
+category budget set Groceries 600 --period monthly
+category budget show Groceries
+category budget clear Groceries
+category budget show
+exit
+";
+
+    let mut cmd = Command::cargo_bin("budget_core_cli").unwrap();
+    cmd.env("BUDGET_CORE_CLI_SCRIPT", "1")
+        .env("BUDGET_CORE_HOME", home.path())
+        .write_stdin(script)
+        .assert()
+        .success()
+        .stdout(
+            contains("Budget for `Groceries` set to")
+                .and(contains("Weekly"))
+                .and(contains("Monthly"))
+                .and(contains("Budget cleared for `Groceries`"))
+                .and(contains("No category budgets configured")),
+        );
+}

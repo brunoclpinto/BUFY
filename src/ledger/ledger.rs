@@ -383,10 +383,7 @@ impl Ledger {
     }
 
     /// Convenience helper for retrieving category budget usage for the period containing `reference`.
-    pub fn category_budget_statuses_at(
-        &self,
-        reference: NaiveDate,
-    ) -> Vec<CategoryBudgetStatus> {
+    pub fn category_budget_statuses_at(&self, reference: NaiveDate) -> Vec<CategoryBudgetStatus> {
         let window = self.budget_window_for(reference);
         let scope = window.scope(reference);
         self.category_budget_statuses(window, scope)

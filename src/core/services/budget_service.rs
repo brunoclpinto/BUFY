@@ -11,12 +11,7 @@ use crate::domain::category::CategoryBudgetDefinition;
 use crate::domain::ledger::{
     AccountBudget, BudgetScope, BudgetSummary, BudgetTotals, CategoryBudget, DateWindow,
 };
-use crate::ledger::{
-    account::Account,
-    category::Category,
-    transaction::Transaction,
-    Ledger,
-};
+use crate::ledger::{account::Account, category::Category, transaction::Transaction, Ledger};
 
 /// Stateless budgeting utilities that operate over [`Ledger`] snapshots.
 pub struct BudgetService;
@@ -77,12 +72,14 @@ impl BudgetService {
         scope: BudgetScope,
     ) -> Option<CategoryBudgetStatus> {
         let totals = Self::category_totals_in_window(ledger, category_id, window, scope)?;
-        ledger.category(category_id).map(|category| CategoryBudgetStatus {
-            category_id,
-            name: category.name.clone(),
-            budget: category.budget.clone(),
-            totals,
-        })
+        ledger
+            .category(category_id)
+            .map(|category| CategoryBudgetStatus {
+                category_id,
+                name: category.name.clone(),
+                budget: category.budget.clone(),
+                totals,
+            })
     }
 
     /// Lists all categories and their budget usage for a window.
@@ -118,11 +115,14 @@ impl BudgetService {
             .categories
             .iter()
             .filter_map(|category| {
-                category.budget.as_ref().map(|budget| CategoryBudgetAssignment {
-                    category_id: category.id,
-                    name: category.name.clone(),
-                    budget: budget.clone(),
-                })
+                category
+                    .budget
+                    .as_ref()
+                    .map(|budget| CategoryBudgetAssignment {
+                        category_id: category.id,
+                        name: category.name.clone(),
+                        budget: budget.clone(),
+                    })
             })
             .collect()
     }

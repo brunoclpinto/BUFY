@@ -192,13 +192,14 @@ fn group_digits(digits: &str, separator: char) -> String {
     grouped
 }
 
-pub fn format_currency_value(
+pub fn format_currency_value_with_precision(
     amount: f64,
     code: &CurrencyCode,
     locale: &LocaleConfig,
     options: &FormatOptions,
+    precision_override: Option<u8>,
 ) -> String {
-    let precision = minor_units_for(code.as_str());
+    let precision = precision_override.unwrap_or_else(|| minor_units_for(code.as_str()));
     let abs_value = amount.abs();
     let mut body = format_number(locale, abs_value, precision);
     if amount < 0.0 {
@@ -234,6 +235,15 @@ pub fn format_currency_value(
     } else {
         formatted
     }
+}
+
+pub fn format_currency_value(
+    amount: f64,
+    code: &CurrencyCode,
+    locale: &LocaleConfig,
+    options: &FormatOptions,
+) -> String {
+    format_currency_value_with_precision(amount, code, locale, options, None)
 }
 
 pub fn format_date(locale: &LocaleConfig, date: NaiveDate) -> String {
