@@ -2,6 +2,7 @@
 
 use std::fmt;
 
+use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -47,6 +48,30 @@ impl NamedEntity for Category {
 impl Displayable for Category {
     fn display_label(&self) -> String {
         format!("{} ({})", self.name, self.kind)
+    }
+}
+
+/// Budget settings attached directly to a category.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CategoryBudgetDefinition {
+    pub amount: f64,
+    pub period: BudgetPeriod,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_date: Option<NaiveDate>,
+}
+
+impl CategoryBudgetDefinition {
+    pub fn new(amount: f64, period: BudgetPeriod) -> Self {
+        Self {
+            amount,
+            period,
+            reference_date: None,
+        }
+    }
+
+    pub fn with_reference_date(mut self, reference_date: NaiveDate) -> Self {
+        self.reference_date = Some(reference_date);
+        self
     }
 }
 
