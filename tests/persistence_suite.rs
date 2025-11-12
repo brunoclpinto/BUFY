@@ -1,5 +1,6 @@
 use budget_core::{
-    ledger::{Account, AccountKind, BudgetPeriod, Ledger, Transaction},
+    domain::BudgetPeriod as CategoryBudgetPeriod,
+    ledger::{Account, AccountKind, BudgetPeriod, Category, CategoryKind, Ledger, Transaction},
     storage::{json_backend::JsonStorage, StorageBackend},
 };
 use chrono::NaiveDate;
@@ -114,4 +115,25 @@ fn store_creates_and_restores_backups() {
         1,
         "restored ledger should match the first snapshot"
     );
+}
+
+#[test]
+fn category_budget_field_roundtrips_through_storage() {
+    let temp = tempdir().unwrap();
+    let store = JsonStorage::new(Some(temp.path().to_path_buf()), Some(2)).unwrap();
+    let mut ledger = Ledger::new("Categories", BudgetPeriod::monthly());
+    let mut groceries = Category::new("Groceries", CategoryKind::Expense);
+    groceries.set_budget(450.0, CategoryBudgetPeriod::Monthly, None);
+    let groceries_id = groceries.id;
+    ledger.add_category(groceries);
+    store
+        .save(&ledger, "category-ledger")
+        .expect("stored ledger with budgets");
+    let restored = store.load("category-ledger").expect("load ledger");
+    let category = restored
+        .category(groceries_id)
+        .expect("category present after load");
+    let budget = category.budget.as_ref().expect("budget data persisted");
+    assert_eq!(budget.amount, 450.0);
+    assert_eq!(budget.reference_date, None);
 }
