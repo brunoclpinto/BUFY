@@ -2,7 +2,9 @@
 
 use chrono::NaiveDate;
 
-use crate::core::services::{BudgetService, ServiceError, ServiceResult};
+use crate::core::services::{
+    BudgetService, CategoryBudgetAssignment, CategoryBudgetStatus, ServiceError, ServiceResult,
+};
 use crate::domain::ledger::{BudgetScope, BudgetSummary, DateWindow};
 use crate::ledger::{ForecastReport, Ledger, SimulationBudgetImpact};
 
@@ -24,6 +26,25 @@ impl SummaryService {
         scope: BudgetScope,
     ) -> BudgetSummary {
         BudgetService::summarize_window_scope(ledger, window, scope)
+    }
+
+    /// Returns category budget usage for the supplied window.
+    pub fn category_budget_statuses(
+        ledger: &Ledger,
+        window: DateWindow,
+        scope: BudgetScope,
+    ) -> Vec<CategoryBudgetStatus> {
+        ledger.category_budget_statuses(window, scope)
+    }
+
+    /// Returns category budget usage for the ledger's current budgeting period.
+    pub fn current_category_budget_statuses(ledger: &Ledger) -> Vec<CategoryBudgetStatus> {
+        ledger.category_budget_statuses_current()
+    }
+
+    /// Lists every category with an explicit budget assignment.
+    pub fn categories_with_budgets(ledger: &Ledger) -> Vec<CategoryBudgetAssignment> {
+        ledger.categories_with_budgets()
     }
 
     /// Summarizes the impact of a simulation in a specific window and scope.
@@ -56,12 +77,15 @@ mod tests {
     use super::*;
     use crate::domain::{
         account::{Account, AccountKind},
+        category::{Category, CategoryKind},
         ledger::{BudgetScope, DateWindow},
         transaction::{Recurrence, RecurrenceMode, TransactionStatus},
+        BudgetPeriod as CategoryBudgetPeriod,
     };
     use crate::ledger::time_interval::{TimeInterval, TimeUnit};
     use crate::ledger::{Ledger, Transaction};
-    use chrono::NaiveDate;
+    use chrono::{NaiveDate, Utc};
+    use uuid::Uuid;
 
     fn ledger_with_transaction() -> Ledger {
         let mut ledger = Ledger::new("Summary", crate::ledger::BudgetPeriod::monthly());
@@ -81,6 +105,21 @@ mod tests {
         txn.set_recurrence(Some(recurrence));
         ledger.add_transaction(txn);
         ledger
+    }
+
+    fn ledger_with_category_budget(reference: NaiveDate) -> (Ledger, Uuid) {
+        let mut ledger = Ledger::new("CategorySummary", crate::ledger::BudgetPeriod::monthly());
+        let checking = ledger.add_account(Account::new("Checking", AccountKind::Bank));
+        let savings = ledger.add_account(Account::new("Savings", AccountKind::Savings));
+        let mut dining = Category::new("Dining", CategoryKind::Expense);
+        dining.set_budget(250.0, CategoryBudgetPeriod::Monthly, None);
+        let category_id = dining.id;
+        ledger.add_category(dining);
+        let mut txn = Transaction::new(checking, savings, Some(category_id), reference, 75.0);
+        txn.actual_amount = Some(70.0);
+        txn.actual_date = Some(reference);
+        ledger.add_transaction(txn);
+        (ledger, category_id)
     }
 
     #[test]
@@ -109,5 +148,32 @@ mod tests {
                 .expect_err("missing simulation should fail");
         let message = format!("{err}");
         assert!(message.contains("missing"), "unexpected error: {message}");
+    }
+
+    #[test]
+    fn category_budget_statuses_surface_budget_data() {
+        let reference = NaiveDate::from_ymd_opt(2024, 1, 10).unwrap();
+        let (ledger, category_id) = ledger_with_category_budget(reference);
+        let window = ledger.budget_window_for(reference);
+        let scope = window.scope(reference);
+        let statuses = SummaryService::category_budget_statuses(&ledger, window, scope);
+        let status = statuses
+            .into_iter()
+            .find(|entry| entry.category_id == category_id)
+            .expect("category status present");
+        assert_eq!(status.totals.budgeted, 75.0);
+        assert_eq!(status.totals.real, 70.0);
+        assert_eq!(status.budget.as_ref().map(|b| b.amount), Some(250.0));
+    }
+
+    #[test]
+    fn current_category_statuses_include_budgeted_categories() {
+        let today = Utc::now().date_naive();
+        let (ledger, _) = ledger_with_category_budget(today);
+        let statuses = SummaryService::current_category_budget_statuses(&ledger);
+        assert!(
+            !statuses.is_empty(),
+            "expected at least one budgeted category in the current window"
+        );
     }
 }
