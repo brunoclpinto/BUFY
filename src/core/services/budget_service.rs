@@ -8,8 +8,10 @@ use uuid::Uuid;
 
 use crate::currency::ConvertedAmount;
 use crate::domain::category::CategoryBudgetDefinition;
+use crate::domain::common::BudgetPeriod as CategoryBudgetPeriod;
 use crate::domain::ledger::{
-    AccountBudget, BudgetScope, BudgetSummary, BudgetTotals, CategoryBudget, DateWindow,
+    AccountBudget, BudgetScope, BudgetStatus, BudgetSummary, BudgetTotals, CategoryBudget,
+    DateWindow,
 };
 use crate::ledger::{account::Account, category::Category, transaction::Transaction, Ledger};
 
@@ -123,6 +125,50 @@ impl BudgetService {
                         name: category.name.clone(),
                         budget: budget.clone(),
                     })
+            })
+            .collect()
+    }
+
+    /// Builds detailed summaries for categories with budgets using canonical ledger totals.
+    pub fn category_budget_summaries(
+        ledger: &Ledger,
+        window: DateWindow,
+        scope: BudgetScope,
+        kind: CategoryBudgetSummaryKind,
+    ) -> Vec<CategoryBudgetSummary> {
+        Self::category_budget_summaries_with_transactions(ledger, window, scope, None, kind)
+    }
+
+    /// Builds category budget summaries using an alternate set of transactions.
+    pub fn category_budget_summaries_with_transactions(
+        ledger: &Ledger,
+        window: DateWindow,
+        scope: BudgetScope,
+        tx_override: Option<&[Transaction]>,
+        kind: CategoryBudgetSummaryKind,
+    ) -> Vec<CategoryBudgetSummary> {
+        let summary = Self::summarize_window_internal(ledger, window, scope, tx_override);
+        let totals_by_category: HashMap<Uuid, BudgetTotals> = summary
+            .per_category
+            .into_iter()
+            .filter_map(|entry| entry.category_id.map(|id| (id, entry.totals)))
+            .collect();
+        ledger
+            .categories
+            .iter()
+            .filter_map(|category| {
+                let budget = category.budget.as_ref()?;
+                let spent = totals_by_category
+                    .get(&category.id)
+                    .map(|totals| totals.real)
+                    .unwrap_or(0.0);
+                Some(CategoryBudgetSummary::from_definition(
+                    category.id,
+                    category.name.clone(),
+                    budget,
+                    spent,
+                    kind.clone(),
+                ))
             })
             .collect()
     }
@@ -322,6 +368,53 @@ pub struct CategoryBudgetStatus {
     pub name: String,
     pub budget: Option<CategoryBudgetDefinition>,
     pub totals: BudgetTotals,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum CategoryBudgetSummaryKind {
+    Actual,
+    Projected,
+    Simulated,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CategoryBudgetSummary {
+    pub category_id: Uuid,
+    pub name: String,
+    pub budget_amount: f64,
+    pub spent_amount: f64,
+    pub remaining_amount: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub utilization_percent: Option<f64>,
+    pub status: BudgetStatus,
+    pub period: CategoryBudgetPeriod,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_date: Option<NaiveDate>,
+    pub kind: CategoryBudgetSummaryKind,
+}
+
+impl CategoryBudgetSummary {
+    pub fn from_definition(
+        category_id: Uuid,
+        name: String,
+        budget: &CategoryBudgetDefinition,
+        spent: f64,
+        kind: CategoryBudgetSummaryKind,
+    ) -> Self {
+        let totals = BudgetTotals::from_parts(budget.amount, spent, false);
+        Self {
+            category_id,
+            name,
+            budget_amount: budget.amount,
+            spent_amount: spent,
+            remaining_amount: budget.amount - spent,
+            utilization_percent: totals.percent_used,
+            status: totals.status,
+            period: budget.period.clone(),
+            reference_date: budget.reference_date,
+            kind,
+        }
+    }
 }
 
 fn record_disclosure(disclosures: &mut BTreeSet<String>, converted: &ConvertedAmount) {

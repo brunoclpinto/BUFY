@@ -19,15 +19,15 @@ use crate::{
     core::errors::BudgetError,
     core::ledger_manager::LedgerManager,
     core::services::{
-        AccountService, CategoryBudgetStatus, CategoryService, ServiceError, SummaryService,
-        TransactionService,
+        AccountService, CategoryBudgetStatus, CategoryBudgetSummary, CategoryService,
+        ServiceError, SummaryService, TransactionService,
     },
     currency::{format_currency_value, format_currency_value_with_precision, format_date},
     domain::BudgetPeriod as CategoryBudgetPeriod,
     ledger::{
         account::AccountKind, category::CategoryKind, Account, BudgetPeriod, BudgetScope,
-        BudgetSummary, Category, DateWindow, ForecastReport, Ledger, Recurrence, RecurrenceEnd,
-        RecurrenceMode, RecurrenceSnapshot, RecurrenceStatus, ScheduledStatus,
+        BudgetStatus, BudgetSummary, Category, DateWindow, ForecastReport, Ledger, Recurrence,
+        RecurrenceEnd, RecurrenceMode, RecurrenceSnapshot, RecurrenceStatus, ScheduledStatus,
         SimulationBudgetImpact, SimulationChange, SimulationTransactionPatch, TimeInterval,
         TimeUnit, Transaction, TransactionStatus,
     },
@@ -2462,7 +2462,8 @@ impl ShellContext {
             }
 
             let summary = SummaryService::summarize_window(ledger, window, scope);
-            self.print_budget_summary(ledger, &summary);
+            let category_budgets = SummaryService::category_budget_summaries(ledger, window, scope);
+            self.print_budget_summary(ledger, &summary, &category_budgets);
             Ok(())
         })
     }
@@ -2551,7 +2552,12 @@ impl ShellContext {
         DateWindow::new(today, end).map_err(CommandError::from_core)
     }
 
-    fn print_budget_summary(&self, ledger: &Ledger, summary: &BudgetSummary) {
+    fn print_budget_summary(
+        &self,
+        ledger: &Ledger,
+        summary: &BudgetSummary,
+        category_budgets: &[CategoryBudgetSummary],
+    ) {
         let end_display = summary
             .window
             .end
@@ -2638,6 +2644,49 @@ impl ShellContext {
                 output_info(format!("  - {}", note));
             }
         }
+
+        self.print_category_budget_section(ledger, "Category Budgets", category_budgets);
+    }
+
+    fn print_category_budget_section(
+        &self,
+        ledger: &Ledger,
+        heading: &str,
+        budgets: &[CategoryBudgetSummary],
+    ) {
+        if budgets.is_empty() {
+            output_info(format!("{heading}: no category budgets configured."));
+            return;
+        }
+        output_info(heading);
+        for summary in budgets.iter().take(8) {
+            let icon = self.category_budget_status_icon(&summary.status);
+            let utilization = summary
+                .utilization_percent
+                .map(|value| format!("{value:.0}%"))
+                .unwrap_or_else(|| "-".into());
+            output_info(format!(
+                "  {icon} {:<20} Budget {} | Spent {} | Remaining {} | Used {} | {}",
+                summary.name,
+                self.format_amount(ledger, summary.budget_amount),
+                self.format_amount(ledger, summary.spent_amount),
+                self.format_amount(ledger, summary.remaining_amount),
+                utilization,
+                self.describe_budget_period_label(ledger, &summary.period, summary.reference_date)
+            ));
+        }
+        if budgets.len() > 8 {
+            output_info(format!("  ... {} more categories", budgets.len() - 8));
+        }
+    }
+
+    fn category_budget_status_icon(&self, status: &BudgetStatus) -> &'static str {
+        match status {
+            BudgetStatus::OnTrack | BudgetStatus::UnderBudget => "✅",
+            BudgetStatus::OverBudget => "❌",
+            BudgetStatus::Empty => "–",
+            BudgetStatus::Incomplete => "⚠️",
+        }
     }
 
     fn print_simulation_impact(&self, ledger: &Ledger, impact: &SimulationBudgetImpact) {
@@ -2666,6 +2715,16 @@ impl ShellContext {
             self.format_amount(ledger, impact.delta.remaining),
             self.format_amount(ledger, impact.delta.variance)
         ));
+        self.print_category_budget_section(
+            ledger,
+            "Category Budgets (Base)",
+            &impact.category_budgets_base,
+        );
+        self.print_category_budget_section(
+            ledger,
+            "Category Budgets (Simulated)",
+            &impact.category_budgets_simulated,
+        );
     }
 
     pub(crate) fn print_forecast_report(
@@ -2729,6 +2788,11 @@ impl ShellContext {
             self.format_amount(ledger, report.summary.totals.remaining),
             self.format_amount(ledger, report.summary.totals.variance)
         ));
+        self.print_category_budget_section(
+            ledger,
+            "Category Budgets (Projected)",
+            &report.category_budgets,
+        );
         if !report.summary.disclosures.is_empty() {
             output_info("Disclosures:");
             for note in &report.summary.disclosures {

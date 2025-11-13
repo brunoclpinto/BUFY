@@ -3,7 +3,8 @@
 use chrono::NaiveDate;
 
 use crate::core::services::{
-    BudgetService, CategoryBudgetAssignment, CategoryBudgetStatus, ServiceError, ServiceResult,
+    BudgetService, CategoryBudgetAssignment, CategoryBudgetStatus, CategoryBudgetSummary,
+    CategoryBudgetSummaryKind, ServiceError, ServiceResult,
 };
 use crate::domain::ledger::{BudgetScope, BudgetSummary, DateWindow};
 use crate::ledger::{ForecastReport, Ledger, SimulationBudgetImpact};
@@ -47,6 +48,20 @@ impl SummaryService {
         ledger.categories_with_budgets()
     }
 
+    /// Provides detailed category budget summaries for the supplied window.
+    pub fn category_budget_summaries(
+        ledger: &Ledger,
+        window: DateWindow,
+        scope: BudgetScope,
+    ) -> Vec<CategoryBudgetSummary> {
+        BudgetService::category_budget_summaries(
+            ledger,
+            window,
+            scope,
+            CategoryBudgetSummaryKind::Actual,
+        )
+    }
+
     /// Summarizes the impact of a simulation in a specific window and scope.
     pub fn summarize_simulation(
         ledger: &Ledger,
@@ -74,7 +89,7 @@ impl SummaryService {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::core::services::{CategoryBudgetSummaryKind, SummaryService};
     use crate::domain::{
         account::{Account, AccountKind},
         category::{Category, CategoryKind},
@@ -84,7 +99,7 @@ mod tests {
     };
     use crate::ledger::time_interval::{TimeInterval, TimeUnit};
     use crate::ledger::{Ledger, Transaction};
-    use chrono::{NaiveDate, Utc};
+    use chrono::{Duration, NaiveDate, Utc};
     use uuid::Uuid;
 
     fn ledger_with_transaction() -> Ledger {
@@ -174,6 +189,65 @@ mod tests {
         assert!(
             !statuses.is_empty(),
             "expected at least one budgeted category in the current window"
+        );
+    }
+
+    #[test]
+    fn category_budget_summaries_expose_utilization() {
+        let reference = NaiveDate::from_ymd_opt(2024, 1, 10).unwrap();
+        let (ledger, _) = ledger_with_category_budget(reference);
+        let window = ledger.budget_window_for(reference);
+        let scope = window.scope(reference);
+        let summaries = SummaryService::category_budget_summaries(&ledger, window, scope);
+        assert_eq!(summaries.len(), 1);
+        let entry = &summaries[0];
+        assert_eq!(entry.kind, CategoryBudgetSummaryKind::Actual);
+        assert!((entry.spent_amount - 70.0).abs() < f64::EPSILON);
+        assert!(entry.utilization_percent.unwrap() > 20.0);
+    }
+
+    #[test]
+    fn forecast_includes_category_budget_summaries() {
+        let reference = NaiveDate::from_ymd_opt(2024, 1, 10).unwrap();
+        let (ledger, _) = ledger_with_category_budget(reference);
+        let window = DateWindow::new(reference, reference + Duration::days(30)).unwrap();
+        let report = SummaryService::forecast_window(&ledger, window, reference, None).unwrap();
+        assert!(
+            !report.category_budgets.is_empty(),
+            "expected projected category budgets"
+        );
+        assert_eq!(
+            report.category_budgets[0].kind,
+            CategoryBudgetSummaryKind::Projected
+        );
+    }
+
+    #[test]
+    fn simulation_impact_includes_category_budgets() {
+        let reference = NaiveDate::from_ymd_opt(2024, 1, 10).unwrap();
+        let (mut ledger, category_id) = ledger_with_category_budget(reference);
+        let sim_name = "Plan";
+        ledger.create_simulation(sim_name, None).unwrap();
+        let from = ledger.accounts[0].id;
+        let to = ledger.accounts[1].id;
+        let mut extra = Transaction::new(from, to, Some(category_id), reference, 30.0);
+        extra.actual_amount = Some(25.0);
+        extra.actual_date = Some(reference);
+        ledger
+            .add_simulation_transaction(sim_name, extra)
+            .expect("simulation mutation");
+        let window = ledger.budget_window_for(reference);
+        let scope = window.scope(reference);
+        let impact = ledger
+            .summarize_simulation_in_window(sim_name, window, scope)
+            .expect("simulate");
+        assert!(
+            !impact.category_budgets_base.is_empty()
+                && !impact.category_budgets_simulated.is_empty()
+        );
+        assert_eq!(
+            impact.category_budgets_simulated[0].kind,
+            CategoryBudgetSummaryKind::Simulated
         );
     }
 }

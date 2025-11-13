@@ -5,7 +5,10 @@ pub mod summary_service;
 pub mod transaction_service;
 
 pub use account_service::AccountService;
-pub use budget_service::{BudgetService, CategoryBudgetAssignment, CategoryBudgetStatus};
+pub use budget_service::{
+    BudgetService, CategoryBudgetAssignment, CategoryBudgetStatus, CategoryBudgetSummary,
+    CategoryBudgetSummaryKind,
+};
 pub use category_service::CategoryService;
 pub use summary_service::SummaryService;
 pub use transaction_service::TransactionService;

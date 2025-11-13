@@ -6,6 +6,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::core::services::CategoryBudgetSummary;
 use crate::ledger::{transaction::Transaction, BudgetSummary, BudgetTotalsDelta};
 
 fn default_simulation_id() -> Uuid {
@@ -19,6 +20,10 @@ pub struct SimulationBudgetImpact {
     pub base: BudgetSummary,
     pub simulated: BudgetSummary,
     pub delta: BudgetTotalsDelta,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub category_budgets_base: Vec<CategoryBudgetSummary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub category_budgets_simulated: Vec<CategoryBudgetSummary>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

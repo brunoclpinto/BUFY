@@ -12,6 +12,7 @@ pub struct ForecastReport {
     pub scope: BudgetScope,
     pub forecast: ForecastResult,
     pub summary: BudgetSummary,
+    pub category_budgets: Vec<CategoryBudgetSummary>,
 }
 use super::{
     account::Account,
@@ -26,7 +27,10 @@ use super::{
 use crate::{
     core::{
         errors::BudgetError,
-        services::{BudgetService, CategoryBudgetAssignment, CategoryBudgetStatus},
+        services::{
+            BudgetService, CategoryBudgetAssignment, CategoryBudgetStatus, CategoryBudgetSummary,
+            CategoryBudgetSummaryKind,
+        },
         simulation::{
             engine::SimulationEngine,
             types::{
@@ -442,10 +446,18 @@ impl Ledger {
                 .map(|item| item.transaction.clone()),
         );
         let summary = self.summarize_window(window, scope, Some(&overlay));
+        let category_budgets = BudgetService::category_budget_summaries_with_transactions(
+            self,
+            window,
+            scope,
+            Some(&overlay),
+            CategoryBudgetSummaryKind::Projected,
+        );
         Ok(ForecastReport {
             scope,
             forecast,
             summary,
+            category_budgets,
         })
     }
 
@@ -607,11 +619,25 @@ impl Ledger {
             remaining: simulated.totals.remaining - base.totals.remaining,
             variance: simulated.totals.variance - base.totals.variance,
         };
+        let base_category_budgets = BudgetService::category_budget_summaries(
+            self,
+            window,
+            scope,
+            CategoryBudgetSummaryKind::Actual,
+        );
+        let simulated_category_budgets = BudgetService::category_budget_summaries(
+            &simulated_ledger,
+            window,
+            scope,
+            CategoryBudgetSummaryKind::Simulated,
+        );
         Ok(SimulationBudgetImpact {
             simulation_name: simulation.name.clone(),
             base,
             simulated,
             delta,
+            category_budgets_base: base_category_budgets,
+            category_budgets_simulated: simulated_category_budgets,
         })
     }
 
