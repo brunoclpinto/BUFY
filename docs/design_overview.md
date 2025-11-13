@@ -45,11 +45,11 @@ Design trade-offs:
 
 Phase 3 introduces an interactive `rustyline`-powered shell that wraps the ledger APIs with contextual menus and command dispatch. Highlights:
 
-- **Ledger workflows** – `new-ledger`, `save`, `load`, and their named counterparts (`save-ledger`, `load-ledger`) keep the working set obvious. The prompt reflects the active ledger, and auto-complete/history improve ergonomics.
+- **Ledger workflows** – `ledger new`, `ledger save`, `ledger load`, and their named counterparts (`ledger save-ledger`, `ledger load-ledger`) keep the working set obvious. The prompt reflects the active ledger, and auto-complete/history improve ergonomics.
 - **Data entry** – guided prompts for accounts, categories, and transactions with validation, plus script-mode (`BUDGET_CORE_CLI_SCRIPT=1`) automation for tests and CI. Transaction listings annotate recurrence hints (`[recurring]`, `[instance]`). The `transaction` command family (`transaction add/edit/remove/show/complete`) now fronts the ledger workflow: add/edit launch the Phase 14 form engine, while remove/show/complete fall back to the shared selection manager when the user omits an index.
-- **Simulation & backup selectors** – `simulation apply/discard/enter/show`, `restore-ledger`, `config restore`, and their list counterparts render the same two-space numbered menu. When identifiers are missing, the selector prints “Type cancel or press Esc to abort.”, accepts arrow keys or number shortcuts, and returns the exact item name on success. Empty domains (no simulations/backups) surface domain-specific warnings instead of generic “No items available.” alerts.
+- **Simulation & backup selectors** – `simulation apply/discard/enter/show`, `ledger restore`, `config restore`, and their list counterparts render the same two-space numbered menu. When identifiers are missing, the selector prints “Type cancel or press Esc to abort.”, accepts arrow keys or number shortcuts, and returns the exact item name on success. Empty domains (no simulations/backups) surface domain-specific warnings instead of generic “No items available.” alerts.
 - **Config system (Phase 18)** – `config show/set/backup/restore` manages the global preferences file (`config/config.json`) independently of any ledger. Snapshots land in `config/backups/config_<timestamp>.json`, and restores immediately update the live config so future sessions inherit locale/currency/theme defaults and the last-opened ledger name.
-- **Recurrence tooling** – `recurring list/edit/clear/pause/resume/skip/sync` and `complete <idx>` manage schedules without leaving the shell.
+- **Recurrence tooling** – `transaction recurring list/edit/clear/pause/resume/skip/sync` and `transaction complete <idx>` manage schedules without leaving the shell.
 - **Forecasting & simulations** – `forecast`, `summary <simulation>`, and `simulation add/modify/exclude` expose future-looking views side-by-side with base results.
 - **Persistence integration** – the CLI auto-loads the last ledger, exposes backup/restore commands, and surfaces migration warnings emitted by the `LedgerManager` + `JsonStorage` persistence layer.
 
@@ -61,7 +61,7 @@ Simulations are persisted, name-addressable overlays that store only the delta r
 - `ModifyTransaction` — partial patches against existing transactions.
 - `ExcludeTransaction` — temporarily ignore a real transaction.
 
-Ledger JSON now includes a `simulations` array so scenarios survive reloads and version bumps. The ledger exposes APIs to create, list, summarize, apply, and discard simulations, and budget summaries can optionally include a simulation overlay to show base/simulated totals plus deltas. The CLI surfaces this lifecycle via commands such as `create-simulation`, `enter-simulation`, `simulation add/modify/exclude`, `list-simulations`, `summary <simulation>`, `apply-simulation`, and `discard-simulation` while the prompt indicates when the user is editing a simulation.
+Ledger JSON now includes a `simulations` array so scenarios survive reloads and version bumps. The ledger exposes APIs to create, list, summarize, apply, and discard simulations, and budget summaries can optionally include a simulation overlay to show base/simulated totals plus deltas. The CLI surfaces this lifecycle via commands such as `simulation create`, `simulation enter`, `simulation add/modify/exclude`, `simulation list`, `summary <simulation>`, `simulation apply`, and `simulation discard` while the prompt indicates when the user is editing a simulation.
 
 ### Recurrence & Forecasting (Phase 6)
 
@@ -114,10 +114,10 @@ Error handling:
    - `LedgerManager::load` (or `load_from_path`) reads JSON, deserializes into a `Ledger`, runs migrations, refreshes recurrence metadata, validates references (issues are surfaced as CLI warnings), and stores the current ledger in memory.
    - The CLI records the ledger name/path, resets active simulations, and updates the global config’s `last_opened_ledger`.
 3. **Backup / Restore**
-   - `backup-ledger` is an alias for `LedgerManager::backup`, giving the user an explicit restore point with slugged filenames.
-   - `restore-ledger` copies the selected snapshot into place (also backing up the current file for safety) and immediately reloads it so the user sees the resulting warnings/migrations.
+   - `ledger backup` is a thin wrapper over `LedgerManager::backup`, giving the user an explicit restore point with slugged filenames.
+   - `ledger restore` copies the selected snapshot into place (also backing up the current file for safety) and immediately reloads it so the user sees the resulting warnings/migrations.
 4. **Script mode**
-   - Scripted flows (tests or automation) often chain commands such as `new-ledger Demo monthly` / `save-ledger demo`. Because script mode runs non-interactively, all prompts fall back to defaults or require explicit arguments.
+   - Scripted flows (tests or automation) often chain commands such as `ledger new Demo monthly` / `ledger save-ledger demo`. Because script mode runs non-interactively, all prompts fall back to defaults or require explicit arguments.
 
 The combination of atomic writes, JSON readability, migration hooks, and CLI feedback ensures we can evolve the schema without breaking older ledgers or requiring manual interventions.
 
@@ -252,11 +252,11 @@ and dialoguer prompts in interactive sessions.
 | Workflow | Interactive Mode | Script Mode |
 | --- | --- | --- |
 | Start session | `cargo run --bin budget_core_cli` (auto-load last ledger). | `BUDGET_CORE_CLI_SCRIPT=1 cargo run --bin budget_core_cli -- < commands.txt` |
-| Create ledger | `new-ledger Demo monthly` (prompts for name/period if omitted). | `new-ledger Demo every 2 weeks` |
+| Create ledger | `ledger new Demo monthly` (prompts for name/period if omitted). | `ledger new Demo every 2 weeks` |
 | Work with recurrences | `recurring edit 3`, `recurring list overdue`, `complete 5 2025-02-01 1200`. | scripted commands: `recurring sync 2025-03-01` etc. |
 | Manage accounts/categories | `account add/edit/list`, `category add/edit/list` (wizard prompts + selection fallback). | `account add <name> <kind>`, `category add <name> <kind>`; `account edit <index> ...` remains interactive-only. |
-| Save/backup | `save-ledger household`, `backup-ledger`. | `save-ledger household` (no prompts). |
-| Restore | CLI asks for confirmation and reloads automatically. | `restore-ledger 0 household` (non-interactive; assumes the reference is either index or substring). |
+| Save/backup | `ledger save-ledger household`, `ledger backup`. | `ledger save-ledger household` (no prompts). |
+| Restore | CLI asks for confirmation and reloads automatically. | `ledger restore 0 household` (non-interactive; assumes the reference is either index or substring). |
 
 Script mode is deterministic: prompts are disabled, so each command must provide all required arguments. This keeps CI fixtures repeatable (see `tests/cli_script.rs`).
 

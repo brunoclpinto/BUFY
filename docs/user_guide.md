@@ -9,7 +9,7 @@ ledger new Household monthly
 account add
 category add
 transaction add
-save-ledger household
+ledger save-ledger household
 ```
 
 Interactive mode prompts for any missing arguments; script mode (`BUDGET_CORE_CLI_SCRIPT=1`) requires you to provide every parameter explicitly.
@@ -23,10 +23,10 @@ ledger new Household monthly
 account add
 category add
 transaction add
-save-ledger household
+ledger save-ledger household
 ```
 
-Use `save <path>` for ad-hoc JSON exports or `save-ledger <name>` to store it under `~/.budget_core/ledgers/<name>.json`.
+Use `ledger save <path>` for ad-hoc JSON exports or `ledger save-ledger <name>` to store it under `~/.budget_core/ledgers/<name>.json`.
 
 ### Add Accounts & Categories
 
@@ -53,7 +53,7 @@ When an index is omitted in interactive mode, the CLI displays a numbered picker
 
 ```text
 forecast 3 months
-create-simulation paycut
+simulation create paycut
 simulation add paycut
 forecast paycut custom 2025-03-01 2025-05-31
 ```
@@ -74,9 +74,9 @@ All settings apply immediately; run `config show` to confirm their status. Combi
 ## Backup & Restore
 
 ```
-backup-ledger
-list-backups
-restore-ledger <idx>
+ledger backup
+ledger list-backups
+ledger restore <idx>
 
 config backup "before sync"
 config backups
@@ -95,7 +95,7 @@ config restore
 
 ## Troubleshooting
 
-- `ledger list-backups <name>` followed by `restore-ledger` recovers accidentally deleted data.
+- `ledger list-backups <name>` followed by `ledger restore` recovers accidentally deleted data.
 - `config show` highlights accessibility settings that might be forcing plain output.
 - `config theme default` re-enables colour/emoji formatting if required by demos or screenshots.
 - Run `cargo run --bin budget_core_cli --features debug_logs` to enable verbose tracing (see `docs/development.md` for more details).

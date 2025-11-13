@@ -86,13 +86,13 @@ transaction edit
 
 | Area | Commands | Notes |
 | --- | --- | --- |
-| Ledger lifecycle | `new-ledger`, `load [path]`, `save [path]`, `load-ledger <name>`, `save-ledger [name]` | Named saves use the managed store; path-based commands operate on arbitrary JSON files. |
+| Ledger lifecycle | `ledger new`, `ledger load [path]`, `ledger save [path]`, `ledger load-ledger <name>`, `ledger save-ledger [name]` | Named saves use the managed store; path-based commands operate on arbitrary JSON files. |
 | Persistence tooling | `backup-ledger [name]`, `list-backups [name]`, `restore-ledger <idx|pattern> [name]` | Snapshots live under `~/.budget_core/backups/<slug>/<slug>_YYYYMMDD_HHMM[_note].json`. |
 | Config management | `config show`, `config set <locale|currency|theme|last_opened_ledger> <value>`, `config audio-feedback <on|off>`, `config backup [note]`, `config backups`, `config restore [name]` | Preferences live in `~/.budget_core/config/config.json` with backups under `config/backups/`. |
 | Data entry | `transaction add/edit/remove/show/complete`, `account add/edit/list`, `category add/edit/list`, `list [accounts|categories|transactions]` | List commands now render consistent tables respecting locale/currency. |
 | Recurrence | `recurring list/edit/clear/pause/resume/skip/sync`, `complete <idx>` | Schedules track start/end dates, exceptions, and automatically materialize overdue instances. |
 | Forecasting | `forecast [simulation] [<n> <unit> | custom <start> <end>]` | Produces future inflow/outflow projections plus window-specific budget summaries. |
-| Simulations | `create-simulation`, `enter-simulation`, `simulation add/modify/exclude`, `list-simulations`, `summary <simulation>`, `apply-simulation`, `discard-simulation` | Enables what-if comparisons against the base ledger. |
+| Simulations | `simulation create`, `simulation enter`, `simulation add/modify/exclude`, `simulation list`, `summary <simulation>`, `simulation apply`, `simulation discard` | Enables what-if comparisons against the base ledger. |
 | Summaries | `summary [past|future <n> | custom <start> <end>]` | Default view shows the active budget period; optional simulation overlay highlights deltas. |
 | Meta | `version` | Prints build metadata (crate version, git hash, target, rustc, FFI version when available). |
 
@@ -107,7 +107,7 @@ transaction edit
 ## Config, Simulation, & Forecast Capabilities
 
 - **Config** – `config show` prints locale/currency/theme/last-ledger information plus ledger-format details when a ledger is loaded. `config set`, `config screen-reader`, `config high-contrast`, and `config audio-feedback` update preferences live. Backups are versioned and restorable via `config backup|restore`.
-- **Simulations** – `create-simulation`, `enter-simulation`, `simulation add/modify/exclude`, `apply-simulation`, and `discard-simulation` make modelling scenarios trivial. `summary <name>` and `forecast <name>` overlay simulation deltas on the base ledger.
+- **Simulations** – `simulation create`, `simulation enter`, `simulation add/modify/exclude`, `simulation apply`, and `simulation discard` make modelling scenarios trivial. `summary <name>` and `forecast <name>` overlay simulation deltas on the base ledger.
 - **Forecasts** – `forecast [simulation] [<n> <unit> | custom <start> <end>]` renders inflow/outflow projections in the same table style. Summaries and forecasts honour locale, base currency, and valuation policy.
 
 See `docs/user_guide.md` for step-by-step workflows and `docs/development.md` for extending the CLI/service layers.

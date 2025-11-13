@@ -45,13 +45,13 @@ isolated in `utils::persistence`, ensuring atomic save/restore semantics.
 | Command | Handler | Category | Notes |
 | --- | --- | --- | --- |
 | `help`, `version`, `exit` | `cmd_help`, `cmd_version`, `cmd_exit` | Meta | Help reflects live registry contents; `version` prints CLI/build/schema metadata. |
-| `new-ledger`, `load`, `save`, `load-ledger`, `save-ledger` | Ledger lifecycle | Persistence | Named saves use the managed store; unnamed paths support ad-hoc JSON files. |
-| `backup-ledger`, `list-backups`, `restore-ledger` | Backup control | Persistence | Backups are rotated by retention policy and surfaced through selection lists when no ID is supplied. |
+| `ledger new/load/save/load-ledger/save-ledger` | Ledger lifecycle | Persistence | Named saves use the managed store; unnamed paths support ad-hoc JSON files. |
+| `ledger backup/list-backups/restore` | Backup control | Persistence | Backups are rotated by retention policy and surfaced through selection lists when no ID is supplied. |
 | `config` family | `cmd_config` | Configuration | `show`, `base-currency`, `locale`, `negative-style`, `screen-reader`, `high-contrast`, `valuation`, `backup`, `backups`, `restore`. |
 | `add`, `list`, `transaction`, `account`, `category` | CRUD | Wizards/selection | Add/edit commands launch the wizard engine; list commands now share the standardized output helpers. |
 | `recurring` | `cmd_recurring` | Recurrence | Supports `list`, `edit`, `clear`, `pause`, `resume`, `skip`, `sync`. |
 | `summary`, `forecast` | Reporting | Ledger summaries | Accept optional simulation names and custom windows. |
-| `simulation` family, `create-simulation`, `enter-simulation`, `leave-simulation`, `apply-simulation`, `discard-simulation` | Simulation lifecycle | Simulations | Selection prompts appear whenever the identifier is omitted. |
+| `simulation` family (`simulation create/enter/leave/apply/discard`) | Simulation lifecycle | Simulations | Selection prompts appear whenever the identifier is omitted. |
 
 Adding a new command requires registering a `CommandEntry` via
 `commands::register_all` (or calling `CommandRegistry::register` directly); the
@@ -87,7 +87,7 @@ return `None`, ensuring callers decide whether to abort or continue.
 - **State file**: `~/.budget_core/state.json` remembers the last opened ledger
   so the CLI can auto-load it in interactive mode.
 
-All writes use atomic temp-file swaps. Restore operations (`restore-ledger`,
+All writes use atomic temp-file swaps. Restore operations (`ledger restore`,
 `config restore`) validate the schema version before mutating active state.
 
 ## Error Handling Policy

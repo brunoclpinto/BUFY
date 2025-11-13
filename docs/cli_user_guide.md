@@ -30,13 +30,13 @@ experience accessible on any terminal.
 
 | Task | Command | Notes |
 | --- | --- | --- |
-| Create a ledger | `new-ledger Household monthly` | Omitting arguments triggers interactive prompts. |
-| Save / load | `save-ledger household`, `load-ledger household` | Named ledgers live under `~/.budget_core/<name>.json`. |
+| Create a ledger | `ledger new Household monthly` | Omitting arguments triggers interactive prompts. |
+| Save / load | `ledger save-ledger household`, `ledger load-ledger household` | Named ledgers live under `~/.budget_core/<name>.json`. |
 | Accounts & categories | `account add`, `category add`, `list accounts`, `list categories` | Add/edit commands launch wizards with validation and confirmation steps. |
 | Transactions | `transaction add`, `transaction edit`, `transaction show`, `transaction remove`, `transaction complete` | When an ID is omitted, you are shown a selection list. |
-| Recurring schedules | `recurring list`, `recurring edit`, `recurring pause`, `recurring resume`, `recurring skip`, `recurring sync` | `recurring list overdue` filters to overdue items. |
+| Recurring schedules | `transaction recurring list`, `transaction recurring edit`, `transaction recurring pause`, `transaction recurring resume`, `transaction recurring skip`, `transaction recurring sync` | `transaction recurring list overdue` filters to overdue items. |
 | Forecasting & summaries | `forecast 90 days`, `forecast Budget-Plan`, `summary current`, `summary custom 2025-01-01 2025-03-31` | Forecast accepts a simulation name as the first argument. |
-| Simulations | `create-simulation Vacation`, `enter-simulation Vacation`, `simulation add`, `apply-simulation Vacation`, `discard-simulation Vacation` | `enter-simulation` changes the prompt to include `[sim:name]`. |
+| Simulations | `simulation create Vacation`, `simulation enter Vacation`, `simulation add`, `simulation apply Vacation`, `simulation discard Vacation` | `simulation enter` changes the prompt to include `[sim:name]`. |
 | Configuration | `config show`, `config base-currency EUR`, `config locale en-GB`, `config screen-reader on`, `config high-contrast on` | Preferences persist with the ledger and influence output formatting. |
 
 ## Interactive Wizards & Selections
@@ -60,7 +60,7 @@ experience accessible on any terminal.
   and enumerate them via `config backups` (files live under
   `~/.budget_core/config/backups/`).
 - **Restore workflows**:
-  - `restore-ledger` and `config restore` accept either a reference (index or
+  - `ledger restore` and `config restore` accept either a reference (index or
     substring) or launch a selection list when no argument is provided.
   - Restores validate schema versions and confirm the target before writing.
 - **Atomic saves** ensure interrupted writes never corrupt the active file. If a
@@ -82,9 +82,9 @@ experience accessible on any terminal.
 
 | Symptom | Suggested Action |
 | --- | --- |
-| `ERROR: [x] Ledger not loaded` | Run `new-ledger <name> <period>` or `load-ledger <name>` first. |
+| `ERROR: [x] Ledger not loaded` | Run `ledger new <name> <period>` or `ledger load-ledger <name>` first. |
 | Validation errors during wizard | Follow the inline guidance (e.g. "Enter a numeric value"); you can type `cancel` to abort without changes. |
-| `WARNING: [!] Backup not found` when restoring | Check `list-backups`/`config backups` for the correct reference. |
+| `WARNING: [!] Backup not found` when restoring | Check `ledger list-backups`/`config backups` for the correct reference. |
 | Restoring fails with schema mismatch | Upgrade the CLI to the latest version; older backups cannot be loaded by newer schema versions without migration. |
 | Disk full / permission denied | The CLI reports the failure and leaves your previous file untouched. Free space or adjust permissions, then retry `save`/`config backup`. |
 | Unexpected crash | The top-level handler catches panics and prints `ERROR: [x] Unexpected error`. Restart the CLI; no ledger changes are committed unless `save`/`apply` succeeded. |
