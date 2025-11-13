@@ -38,7 +38,7 @@ fn run_simulation_menu(context: &mut ShellContext) -> CommandResult {
     let Some(action) = selection else {
         return Ok(());
     };
-    dispatch_simulation_action(context, action, &[])
+    dispatch_simulation_action(context, action.as_str(), &[])
 }
 
 fn dispatch_simulation_action(

@@ -34,6 +34,10 @@ pub fn set_preferences(prefs: OutputPreferences) {
     }
 }
 
+pub fn current_preferences() -> OutputPreferences {
+    preferences()
+}
+
 fn preferences() -> OutputPreferences {
     PREFERENCES
         .get_or_init(|| RwLock::new(OutputPreferences::default()))

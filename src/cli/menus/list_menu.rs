@@ -1,14 +1,20 @@
-use super::main_menu::MenuError;
-use super::sub_menu::{SubMenu, SubMenuItem};
+use crate::cli::ui::menu_renderer::{MenuRenderer, MenuUI, MenuUIItem};
 
-pub fn show() -> Result<Option<&'static str>, MenuError> {
-    let items = vec![
-        SubMenuItem::new("accounts", "accounts", "List accounts"),
-        SubMenuItem::new("categories", "categories", "List categories"),
-        SubMenuItem::new("transactions", "transactions", "List transactions"),
-        SubMenuItem::new("simulations", "simulations", "List simulations"),
-        SubMenuItem::new("ledgers", "ledgers", "List ledgers"),
-        SubMenuItem::new("backups", "backups", "List ledger backups"),
-    ];
-    SubMenu::new("list", items).show()
+use super::MenuError;
+
+pub fn show() -> Result<Option<String>, MenuError> {
+    let renderer = MenuRenderer::new();
+    let menu = MenuUI::new("list menu", menu_items());
+    renderer.show(&menu)
+}
+
+fn menu_items() -> Vec<MenuUIItem> {
+    vec![
+        MenuUIItem::new("accounts", "accounts", "List accounts"),
+        MenuUIItem::new("categories", "categories", "List categories"),
+        MenuUIItem::new("transactions", "transactions", "List transactions"),
+        MenuUIItem::new("simulations", "simulations", "List simulations"),
+        MenuUIItem::new("ledgers", "ledgers", "List ledgers"),
+        MenuUIItem::new("backups", "backups", "List ledger backups"),
+    ]
 }

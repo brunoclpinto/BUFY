@@ -10,5 +10,6 @@ pub mod selection;
 pub mod selectors;
 pub mod shell;
 pub mod shell_context;
+pub mod ui;
 
 pub use shell::run_cli;

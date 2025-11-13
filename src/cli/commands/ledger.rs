@@ -83,7 +83,7 @@ fn run_ledger_menu(context: &mut ShellContext) -> CommandResult {
     let Some(action) = selection else {
         return Ok(());
     };
-    match action {
+    match action.as_str() {
         "new" => cmd_new_ledger(context, &[]),
         "load" => cmd_load(context, &[]),
         "save" => cmd_save(context, &[]),
@@ -206,7 +206,7 @@ fn run_list_menu(context: &mut ShellContext) -> CommandResult {
     let Some(target) = selection else {
         return Ok(());
     };
-    execute_list_action(context, target)
+    execute_list_action(context, target.as_str())
 }
 
 fn execute_list_action(context: &mut ShellContext, target: &str) -> CommandResult {

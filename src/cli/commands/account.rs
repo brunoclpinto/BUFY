@@ -31,7 +31,7 @@ fn run_account_menu(context: &mut ShellContext) -> CommandResult {
     let Some(action) = selection else {
         return Ok(());
     };
-    dispatch_account_action(context, action, &[])
+    dispatch_account_action(context, action.as_str(), &[])
 }
 
 fn dispatch_account_action(

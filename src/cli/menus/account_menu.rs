@@ -1,13 +1,19 @@
-use super::main_menu::MenuError;
-use super::sub_menu::{SubMenu, SubMenuItem};
+use crate::cli::ui::menu_renderer::{MenuRenderer, MenuUI, MenuUIItem};
 
-pub fn show() -> Result<Option<&'static str>, MenuError> {
-    let items = vec![
-        SubMenuItem::new("add", "add", "Add an account"),
-        SubMenuItem::new("edit", "edit", "Edit an account"),
-        SubMenuItem::new("remove", "remove", "Remove an account"),
-        SubMenuItem::new("list", "list", "List accounts"),
-        SubMenuItem::new("show", "show", "Show account details"),
-    ];
-    SubMenu::new("account", items).show()
+use super::MenuError;
+
+pub fn show() -> Result<Option<String>, MenuError> {
+    let renderer = MenuRenderer::new();
+    let menu = MenuUI::new("account menu", menu_items());
+    renderer.show(&menu)
+}
+
+fn menu_items() -> Vec<MenuUIItem> {
+    vec![
+        MenuUIItem::new("add", "add", "Add an account"),
+        MenuUIItem::new("edit", "edit", "Edit an account"),
+        MenuUIItem::new("remove", "remove", "Remove an account"),
+        MenuUIItem::new("list", "list", "List accounts"),
+        MenuUIItem::new("show", "show", "Show account details"),
+    ]
 }

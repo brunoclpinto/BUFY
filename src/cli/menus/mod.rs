@@ -4,12 +4,10 @@ pub mod ledger_menu;
 pub mod list_menu;
 pub mod main_menu;
 pub mod simulation_menu;
-pub mod sub_menu;
 pub mod transaction_menu;
 
 use crate::cli::core::CommandError;
-
-pub use main_menu::MenuError;
+pub use crate::cli::ui::menu_renderer::MenuRenderError as MenuError;
 
 pub fn menu_error_to_command_error(err: MenuError) -> CommandError {
     match err {

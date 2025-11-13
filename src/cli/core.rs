@@ -1197,12 +1197,6 @@ impl ShellContext {
         self.registry.get(name)
     }
 
-    pub(crate) fn command_names(&self) -> Vec<&'static str> {
-        let mut names: Vec<_> = self.registry.names().collect();
-        names.sort_unstable();
-        names
-    }
-
     pub(crate) fn run_new_ledger_interactive(&mut self) -> CommandResult {
         let name: String = Input::with_theme(&self.theme)
             .with_prompt("Ledger name")

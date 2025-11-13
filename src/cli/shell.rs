@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::cli::core::{CliError, CliMode, CommandError, LoopControl, ShellContext};
-use crate::cli::menus::main_menu::{MainMenu, MenuError};
+use crate::cli::menus::{main_menu, MenuError};
 use crate::cli::output::info as output_info;
 
 pub fn run_cli() -> Result<(), CliError> {
@@ -24,15 +24,12 @@ pub fn run_cli() -> Result<(), CliError> {
 }
 
 fn run_interactive(context: &mut ShellContext) -> Result<(), CliError> {
-    let mut menu = MainMenu::new();
-    let command_catalog = context.command_names();
-
     loop {
         if !context.running {
             break;
         }
         let prompt = context.prompt();
-        match menu.show(prompt.trim_end(), &command_catalog) {
+        match main_menu::show(prompt.trim_end()) {
             Ok(Some(line)) => {
                 let trimmed = line.trim();
                 if trimmed.is_empty() {

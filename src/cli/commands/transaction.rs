@@ -32,7 +32,7 @@ fn run_transaction_menu(context: &mut ShellContext) -> CommandResult {
     let Some(action) = selection else {
         return Ok(());
     };
-    dispatch_transaction_action(context, action, &[])
+    dispatch_transaction_action(context, action.as_str(), &[])
 }
 
 fn dispatch_transaction_action(
