@@ -9,10 +9,12 @@ use crossterm::{
 };
 
 use crate::cli::output::{current_preferences, OutputPreferences};
+use crate::cli::ui::formatting::Formatter;
 
 #[derive(Clone, Debug)]
 pub struct MenuUI {
     pub title: String,
+    pub context: Option<String>,
     pub items: Vec<MenuUIItem>,
 }
 
@@ -20,8 +22,14 @@ impl MenuUI {
     pub fn new(title: impl Into<String>, items: Vec<MenuUIItem>) -> Self {
         Self {
             title: title.into(),
+            context: None,
             items,
         }
+    }
+
+    pub fn with_context(mut self, context: impl Into<String>) -> Self {
+        self.context = Some(context.into());
+        self
     }
 }
 
@@ -154,7 +162,12 @@ impl MenuRenderer {
         max_label_len: usize,
     ) -> Result<(), io::Error> {
         self.clear_screen(stdout)?;
-        writeln!(stdout, "{}", menu.title)?;
+        let formatter = Formatter::new();
+        if let Some(context) = &menu.context {
+            writeln!(stdout, "{}", formatter.detail_text(context))?;
+            writeln!(stdout)?;
+        }
+        writeln!(stdout, "{}", formatter.header_text(&menu.title))?;
         writeln!(stdout)?;
 
         for (index, item) in menu.items.iter().enumerate() {
@@ -168,29 +181,21 @@ impl MenuRenderer {
             } else {
                 " "
             };
+            let row =
+                formatter.format_two_column_row(&item.label, &item.description, max_label_len);
             if is_selected {
                 stdout.execute(SetAttribute(Attribute::Reverse))?;
             } else {
                 stdout.execute(SetAttribute(Attribute::Reset))?;
             }
-            write!(
-                stdout,
-                " {pointer} {:<width$}",
-                item.label,
-                width = max_label_len + 2
-            )?;
+            write!(stdout, " {pointer} {}", row)?;
             stdout.execute(SetAttribute(Attribute::Reset))?;
-            if item.description.is_empty() {
-                writeln!(stdout)?;
-            } else {
-                writeln!(stdout, "{}", item.description)?;
-            }
+            writeln!(stdout)?;
         }
 
-        writeln!(
-            stdout,
-            "\n(Use arrow keys to navigate, Enter to select, ESC to go back)"
-        )?;
+        let hint = formatter.navigation_hint();
+        writeln!(stdout)?;
+        writeln!(stdout, "{}", formatter.detail_text(hint))?;
         stdout.flush()?;
         Ok(())
     }

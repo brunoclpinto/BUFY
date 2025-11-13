@@ -4,7 +4,7 @@ use super::MenuError;
 
 pub fn show(context_banner: &str) -> Result<Option<String>, MenuError> {
     let renderer = MenuRenderer::new();
-    let menu = MenuUI::new(format!("{context_banner}\n\nmain menu"), main_menu_items());
+    let menu = MenuUI::new("Main menu", main_menu_items()).with_context(context_banner);
     renderer.show(&menu)
 }
 

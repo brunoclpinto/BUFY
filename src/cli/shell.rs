@@ -6,7 +6,7 @@ use std::{
 
 use crate::cli::core::{CliError, CliMode, CommandError, LoopControl, ShellContext};
 use crate::cli::menus::{main_menu, MenuError};
-use crate::cli::output::info as output_info;
+use crate::cli::ui::formatting::Formatter;
 
 pub fn run_cli() -> Result<(), CliError> {
     let mode = if std::env::var_os("BUDGET_CORE_CLI_SCRIPT").is_some() {
@@ -29,7 +29,7 @@ fn run_interactive(context: &mut ShellContext) -> Result<(), CliError> {
             break;
         }
         let prompt = context.prompt();
-        match main_menu::show(prompt.trim_end()) {
+        match main_menu::show(prompt.as_str()) {
             Ok(Some(line)) => {
                 let trimmed = line.trim();
                 if trimmed.is_empty() {
@@ -49,7 +49,7 @@ fn run_interactive(context: &mut ShellContext) -> Result<(), CliError> {
                 }
             }
             Err(MenuError::EndOfInput) => {
-                output_info("Exiting shell.");
+                Formatter::new().print_detail("Exiting shell.");
                 break;
             }
             Err(MenuError::Io(err)) => return Err(err.into()),

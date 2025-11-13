@@ -51,14 +51,12 @@ pub use crate::core::errors::CliError;
 
 use super::commands;
 use super::io as cli_io;
-use super::output::{
-    error as output_error, hint as output_hint, info as output_info, render_table as output_table,
-    section as output_section, success as output_success, warning as output_warning,
-};
+use super::output::render_table as output_table;
 use super::registry::{CommandEntry, CommandRegistry};
 #[cfg(test)]
 use crate::cli::shell_context::SelectionOverride;
 pub use crate::cli::shell_context::{CliMode, ShellContext};
+use crate::cli::ui::formatting::Formatter;
 
 const PROMPT_ARROW: &str = "⮞";
 
@@ -91,7 +89,7 @@ impl ShellContext {
             self.ledger_path = Some(path);
             self.clear_active_simulation();
             self.report_load(&report.warnings, &report.migrations);
-            output_success(format!("Automatically loaded last ledger `{}`.", name));
+            cli_io::print_success(format!("Automatically loaded last ledger `{}`.", name));
         }
         Ok(())
     }
@@ -275,22 +273,22 @@ impl ShellContext {
 
     pub(crate) fn show_config(&self) -> CommandResult {
         let config = self.config_read();
-        output_section("Configuration");
-        output_info(format!("  Locale: {}", config.locale));
-        output_info(format!("  Currency: {}", config.currency));
-        output_info(format!(
+        Formatter::new().print_header("Configuration");
+        cli_io::print_info(format!("  Locale: {}", config.locale));
+        cli_io::print_info(format!("  Currency: {}", config.currency));
+        cli_io::print_info(format!(
             "  Theme: {}",
             config.theme.as_deref().unwrap_or("default")
         ));
-        output_info(format!(
+        cli_io::print_info(format!(
             "  Last opened ledger: {}",
             config.last_opened_ledger.as_deref().unwrap_or("(none)")
         ));
-        output_info(format!(
+        cli_io::print_info(format!(
             "  Default budget period: {}",
             config.default_budget_period
         ));
-        output_info(format!(
+        cli_io::print_info(format!(
             "  Currency precision override: {}",
             config
                 .default_currency_precision
@@ -298,17 +296,17 @@ impl ShellContext {
                 .unwrap_or_else(|| "auto".into())
         ));
         let _ = self.with_ledger(|ledger| {
-            output_section("Ledger Format");
-            output_info(format!(
+            Formatter::new().print_header("Ledger Format");
+            cli_io::print_info(format!(
                 "  Base currency: {}",
                 ledger.base_currency.as_str()
             ));
-            output_info(format!("  Locale: {}", ledger.locale.language_tag));
-            output_info(format!(
+            cli_io::print_info(format!("  Locale: {}", ledger.locale.language_tag));
+            cli_io::print_info(format!(
                 "  Negative style: {:?}",
                 ledger.format.negative_style
             ));
-            output_info(format!(
+            cli_io::print_info(format!(
                 "  Screen reader mode: {}",
                 if ledger.format.screen_reader_mode {
                     "on"
@@ -316,7 +314,7 @@ impl ShellContext {
                     "off"
                 }
             ));
-            output_info(format!(
+            cli_io::print_info(format!(
                 "  High contrast mode: {}",
                 if ledger.format.high_contrast_mode {
                     "on"
@@ -324,7 +322,7 @@ impl ShellContext {
                     "off"
                 }
             ));
-            output_info(format!("  Valuation policy: {:?}", ledger.valuation_policy));
+            cli_io::print_info(format!("  Valuation policy: {:?}", ledger.valuation_policy));
             Ok(())
         });
         Ok(())
@@ -382,7 +380,7 @@ impl ShellContext {
         self.persist_config()?;
         let config = self.config_read();
         cli_io::apply_config(&config);
-        output_success("Configuration updated.");
+        cli_io::print_success("Configuration updated.");
         Ok(())
     }
 
@@ -399,32 +397,27 @@ impl ShellContext {
     }
 
     pub(crate) fn prompt(&self) -> String {
-        let context = {
+        let ledger_segment = {
             let manager = self.manager();
             manager
                 .current_name()
-                .map(|name| format!("ledger({})", name))
+                .map(|name| format!("ledger: {}", name))
                 .unwrap_or_else(|| "no-ledger".to_string())
         };
 
         let sim_segment = self
             .active_simulation_name()
-            .map(|name| format!(" [sim:{}]", name))
+            .map(|name| format!(" (simulation: {})", name))
             .unwrap_or_default();
-        format!(
-            "{context}{sim_segment} {arrow} ",
-            context = context,
-            sim_segment = sim_segment,
-            arrow = PROMPT_ARROW
-        )
+        format!("{ledger_segment}{sim_segment} {PROMPT_ARROW}")
     }
 
     fn report_load(&self, warnings: &[String], migrations: &[String]) {
         for note in migrations {
-            output_info(format!("Migration: {}", note));
+            cli_io::print_info(format!("Migration: {}", note));
         }
         for warning in warnings {
-            output_warning(warning);
+            cli_io::print_warning(warning);
         }
     }
 
@@ -466,7 +459,7 @@ impl ShellContext {
     }
 
     pub(crate) fn suggest_command(&self, input: &str) {
-        output_warning(format!(
+        cli_io::print_warning(format!(
             "Unknown command `{}`. Type `help` to see available commands.",
             input
         ));
@@ -480,7 +473,7 @@ impl ShellContext {
 
         if let Some((distance, best)) = suggestions.first() {
             if *distance <= 3 {
-                output_info(format!("Suggestion: `{}`?", best));
+                cli_io::print_info(format!("Suggestion: `{}`?", best));
             }
         }
     }
@@ -513,15 +506,15 @@ impl ShellContext {
     }
 
     pub(crate) fn print_error(&self, message: &str) {
-        output_error(message);
+        cli_io::print_error(message);
     }
 
     pub(crate) fn print_warning(&self, message: &str) {
-        output_warning(message);
+        cli_io::print_warning(message);
     }
 
     pub(crate) fn print_hint(&self, message: &str) {
-        output_hint(message);
+        cli_io::print_hint(message);
     }
 
     pub(crate) fn with_ledger<T>(
@@ -783,7 +776,7 @@ impl ShellContext {
                     changes.opening_balance = data.opening_balance;
                     changes.notes = data.notes.clone();
                     AccountService::edit(ledger, id, changes)?;
-                    output_success(format!("Account `{}` updated.", data.name));
+                    cli_io::print_success(format!("Account `{}` updated.", data.name));
                 }
                 None => {
                     let mut account = Account::new(data.name.clone(), data.kind);
@@ -791,7 +784,7 @@ impl ShellContext {
                     account.opening_balance = data.opening_balance;
                     account.notes = data.notes.clone();
                     AccountService::add(ledger, account)?;
-                    output_success(format!("Account `{}` added.", data.name));
+                    cli_io::print_success(format!("Account `{}` added.", data.name));
                 }
             }
             Ok(())
@@ -809,7 +802,7 @@ impl ShellContext {
                     changes.is_custom = data.is_custom;
                     changes.notes = data.notes.clone();
                     CategoryService::edit(ledger, id, changes)?;
-                    output_success(format!("Category `{}` updated.", data.name));
+                    cli_io::print_success(format!("Category `{}` updated.", data.name));
                 }
                 None => {
                     let mut category = Category::new(data.name.clone(), data.kind);
@@ -817,7 +810,7 @@ impl ShellContext {
                     category.is_custom = data.is_custom;
                     category.notes = data.notes.clone();
                     CategoryService::add(ledger, category)?;
-                    output_success(format!("Category `{}` added.", data.name));
+                    cli_io::print_success(format!("Category `{}` added.", data.name));
                 }
             }
             Ok(())
@@ -884,7 +877,7 @@ impl ShellContext {
                     .add_simulation_transaction(name, transaction)
                     .map_err(CommandError::from_core)
             })?;
-            output_success(format!(
+            cli_io::print_success(format!(
                 "Transaction saved to simulation `{}`: {}",
                 name, summary
             ));
@@ -898,7 +891,7 @@ impl ShellContext {
                     .expect("transaction just added should exist");
                 Ok(self.transaction_summary_line(ledger, txn))
             })?;
-            output_success(format!("Transaction saved: {}", summary));
+            cli_io::print_success(format!("Transaction saved: {}", summary));
         }
         Ok(())
     }
@@ -919,7 +912,7 @@ impl ShellContext {
                 .expect("transaction should exist after update");
             Ok(self.transaction_summary_line(ledger, txn))
         })?;
-        output_success(format!("Transaction updated: {}", summary));
+        cli_io::print_success(format!("Transaction updated: {}", summary));
         Ok(())
     }
 
@@ -934,7 +927,7 @@ impl ShellContext {
         self.with_ledger_mut(|ledger| {
             TransactionService::remove(ledger, transaction_id).map_err(CommandError::from)
         })?;
-        output_success(format!("Transaction removed: {}", summary));
+        cli_io::print_success(format!("Transaction removed: {}", summary));
         Ok(())
     }
 
@@ -944,15 +937,15 @@ impl ShellContext {
                 CommandError::InvalidArguments("transaction index out of range".into())
             })?;
 
-            output_info(format!("Transaction [{}]", index));
+            cli_io::print_info(format!("Transaction [{}]", index));
             let route = self.describe_transaction_route(ledger, txn);
-            output_info(format!("Route: {}", route));
+            cli_io::print_info(format!("Route: {}", route));
             let category = txn
                 .category_id
                 .and_then(|id| self.lookup_category_name(ledger, id))
                 .unwrap_or_else(|| "Uncategorized".into());
-            output_info(format!("Category: {}", category));
-            output_info(format!(
+            cli_io::print_info(format!("Category: {}", category));
+            cli_io::print_info(format!(
                 "Scheduled: {}",
                 self.format_date(ledger, txn.scheduled_date)
             ));
@@ -962,7 +955,7 @@ impl ShellContext {
                 &ledger.locale,
                 &ledger.format,
             );
-            output_info(format!("Budgeted: {}", budget));
+            cli_io::print_info(format!("Budgeted: {}", budget));
             if txn.actual_amount.is_some() || txn.actual_date.is_some() {
                 let amount_label = txn
                     .actual_amount
@@ -979,17 +972,17 @@ impl ShellContext {
                     .actual_date
                     .map(|date| self.format_date(ledger, date))
                     .unwrap_or_else(|| "-".into());
-                output_info(format!("Actual: {} on {}", amount_label, date_label));
+                cli_io::print_info(format!("Actual: {} on {}", amount_label, date_label));
             }
-            output_info(format!("Status: {:?}", txn.status));
+            cli_io::print_info(format!("Status: {:?}", txn.status));
             if let Some(hint) = self.transaction_recurrence_hint(txn) {
-                output_info(format!("Recurrence: {}", hint));
+                cli_io::print_info(format!("Recurrence: {}", hint));
             } else if txn.recurrence.is_some() || txn.recurrence_series_id.is_some() {
-                output_info("Recurrence: linked instance");
+                cli_io::print_info("Recurrence: linked instance");
             }
             if let Some(notes) = &txn.notes {
                 if !notes.trim().is_empty() {
-                    output_info(format!("Notes: {}", notes));
+                    cli_io::print_info(format!("Notes: {}", notes));
                 }
             }
             Ok(())
@@ -1014,7 +1007,7 @@ impl ShellContext {
         let mut interaction = DialoguerInteraction::new(&self.theme);
         match FormEngine::new(&wizard).run(&mut interaction).unwrap() {
             FormResult::Cancelled => {
-                output_info("Account creation cancelled.");
+                cli_io::print_info("Account creation cancelled.");
                 Ok(())
             }
             FormResult::Completed(data) => self.apply_account_form(data),
@@ -1053,7 +1046,7 @@ impl ShellContext {
         let mut interaction = DialoguerInteraction::new(&self.theme);
         match FormEngine::new(&wizard).run(&mut interaction).unwrap() {
             FormResult::Cancelled => {
-                output_info("Account update cancelled.");
+                cli_io::print_info("Account update cancelled.");
                 Ok(())
             }
             FormResult::Completed(data) => self.apply_account_form(data),
@@ -1078,7 +1071,7 @@ impl ShellContext {
         let mut interaction = DialoguerInteraction::new(&self.theme);
         match FormEngine::new(&wizard).run(&mut interaction).unwrap() {
             FormResult::Cancelled => {
-                output_info("Category creation cancelled.");
+                cli_io::print_info("Category creation cancelled.");
                 Ok(())
             }
             FormResult::Completed(data) => self.apply_category_form(data),
@@ -1126,7 +1119,9 @@ impl ShellContext {
             })?;
 
         if !allow_kind_change || !allow_custom_change {
-            output_info("Note: predefined categories cannot change their type or custom flag.");
+            cli_io::print_info(
+                "Note: predefined categories cannot change their type or custom flag.",
+            );
         }
 
         let wizard = CategoryWizard::new_edit(
@@ -1139,7 +1134,7 @@ impl ShellContext {
         let mut interaction = DialoguerInteraction::new(&self.theme);
         match FormEngine::new(&wizard).run(&mut interaction).unwrap() {
             FormResult::Cancelled => {
-                output_info("Category update cancelled.");
+                cli_io::print_info("Category update cancelled.");
                 Ok(())
             }
             FormResult::Completed(data) => self.apply_category_form(data),
@@ -1211,7 +1206,7 @@ impl ShellContext {
         let period = self.prompt_budget_period()?;
         let ledger = Ledger::new(name.clone(), period);
         self.set_ledger(ledger, None, Some(name));
-        output_success("New ledger created.");
+        cli_io::print_success("New ledger created.");
         Ok(())
     }
 
@@ -1388,7 +1383,7 @@ impl ShellContext {
         let period = parse_period(&period_str)?;
         let ledger = Ledger::new(name.clone(), period);
         self.set_ledger(ledger, None, Some(name));
-        output_success("New ledger created.");
+        cli_io::print_success("New ledger created.");
         Ok(())
     }
 
@@ -1399,7 +1394,7 @@ impl ShellContext {
             .map_err(CommandError::from_core)?;
         self.ledger_path = Some(path.to_path_buf());
         self.clear_active_simulation();
-        output_success(format!("Ledger loaded from {}.", path.display()));
+        cli_io::print_success(format!("Ledger loaded from {}.", path.display()));
         self.report_load(&report.warnings, &report.migrations);
         self.update_last_opened(None)?;
         Ok(())
@@ -1413,7 +1408,7 @@ impl ShellContext {
         })?;
         self.ledger_path = Some(path.to_path_buf());
         self.manager_mut().clear_name();
-        output_success(format!("Ledger saved to {}.", path.display()));
+        cli_io::print_success(format!("Ledger saved to {}.", path.display()));
         self.update_last_opened(None)?;
         Ok(())
     }
@@ -1427,7 +1422,7 @@ impl ShellContext {
         let path = self.storage.ledger_path(name);
         self.ledger_path = Some(path.clone());
         self.clear_active_simulation();
-        output_success(format!("Ledger `{}` loaded from {}.", name, path.display()));
+        cli_io::print_success(format!("Ledger `{}` loaded from {}.", name, path.display()));
         self.report_load(&report.warnings, &report.migrations);
         self.update_last_opened(Some(name))?;
         Ok(())
@@ -1440,7 +1435,7 @@ impl ShellContext {
         }
         let path = self.storage.ledger_path(name);
         self.ledger_path = Some(path.clone());
-        output_success(format!("Ledger `{}` saved to {}.", name, path.display()));
+        cli_io::print_success(format!("Ledger `{}` saved to {}.", name, path.display()));
         self.update_last_opened(Some(name))?;
         Ok(())
     }
@@ -1456,7 +1451,7 @@ impl ShellContext {
         self.manager()
             .backup(None)
             .map_err(CommandError::from_core)?;
-        output_success("Backup created.");
+        cli_io::print_success("Backup created.");
         Ok(())
     }
 
@@ -1466,13 +1461,13 @@ impl ShellContext {
             .list_backups(name)
             .map_err(CommandError::from_core)?;
         if backups.is_empty() {
-            output_warning("No backups available.");
+            cli_io::print_warning("No backups available.");
             return Ok(());
         }
-        output_info("Available backups:");
+        cli_io::print_info("Available backups:");
         for (idx, backup_name) in backups.iter().enumerate() {
             let description = format_backup_label(backup_name);
-            output_info(format!("  {:>2}. {}", idx + 1, description));
+            cli_io::print_info(format!("  {:>2}. {}", idx + 1, description));
         }
         Ok(())
     }
@@ -1532,7 +1527,7 @@ impl ShellContext {
             true
         };
         if !confirm {
-            output_info("Operation cancelled.");
+            cli_io::print_info("Operation cancelled.");
             return Ok(());
         }
         let report = self
@@ -1543,7 +1538,7 @@ impl ShellContext {
         self.ledger_path = Some(path.clone());
         self.clear_active_simulation();
         self.report_load(&report.warnings, &report.migrations);
-        output_success(format!(
+        cli_io::print_success(format!(
             "Ledger `{}` loaded from backup `{}`.",
             name, backup_name
         ));
@@ -1557,7 +1552,7 @@ impl ShellContext {
         let file_name = manager
             .backup(&config, note.as_deref())
             .map_err(CommandError::from_core)?;
-        output_success(format!("Configuration backup saved: {}", file_name));
+        cli_io::print_success(format!("Configuration backup saved: {}", file_name));
         Ok(())
     }
 
@@ -1565,12 +1560,12 @@ impl ShellContext {
         let manager = self.config_manager();
         let backups = manager.list_backups().map_err(CommandError::from_core)?;
         if backups.is_empty() {
-            output_warning("No configuration backups found.");
+            cli_io::print_warning("No configuration backups found.");
             return Ok(());
         }
-        output_info("Available configuration backups:");
+        cli_io::print_info("Available configuration backups:");
         for (idx, name) in backups.iter().enumerate() {
-            output_info(format!("  {:>2}. {}", idx + 1, format_backup_label(name)));
+            cli_io::print_info(format!("  {:>2}. {}", idx + 1, format_backup_label(name)));
         }
         Ok(())
     }
@@ -1626,7 +1621,7 @@ impl ShellContext {
             cli_io::apply_config(&config);
         }
         self.persist_config()?;
-        output_success(format!("Configuration restored from {}.", backup_name));
+        cli_io::print_success(format!("Configuration restored from {}.", backup_name));
         Ok(())
     }
 
@@ -1649,7 +1644,7 @@ impl ShellContext {
             ledger.add_account(account);
             Ok(())
         })?;
-        output_success("Account added.");
+        cli_io::print_success("Account added.");
         Ok(())
     }
 
@@ -1672,7 +1667,7 @@ impl ShellContext {
             ledger.add_category(category);
             Ok(())
         })?;
-        output_success("Category added.");
+        cli_io::print_success("Category added.");
         Ok(())
     }
 
@@ -1706,7 +1701,7 @@ impl ShellContext {
             "Select a category to assign a budget to:",
         )?;
         let Some((category_id, category_name)) = target else {
-            output_info("Budget assignment cancelled.");
+            cli_io::print_info("Budget assignment cancelled.");
             return Ok(());
         };
 
@@ -1757,7 +1752,7 @@ impl ShellContext {
                 self.describe_budget_period_label(ledger, &period, None),
             ))
         })?;
-        output_success(format!(
+        cli_io::print_success(format!(
             "Budget for `{}` set to {} ({})",
             category_name, budget_label.0, budget_label.1
         ));
@@ -1782,7 +1777,7 @@ impl ShellContext {
             "Select a category to clear:",
         )?;
         let Some((category_id, category_name)) = target else {
-            output_info("Budget removal cancelled.");
+            cli_io::print_info("Budget removal cancelled.");
             return Ok(());
         };
 
@@ -1801,9 +1796,9 @@ impl ShellContext {
         })?;
 
         if removed {
-            output_success(format!("Budget cleared for `{}`.", category_name));
+            cli_io::print_success(format!("Budget cleared for `{}`.", category_name));
         } else {
-            output_info(format!(
+            cli_io::print_info(format!(
                 "Category `{}` has no budget assigned.",
                 category_name
             ));
@@ -1863,9 +1858,9 @@ impl ShellContext {
         })?;
 
         match data {
-            None => output_warning("No category budgets configured."),
+            None => cli_io::print_warning("No category budgets configured."),
             Some((heading, rows)) => {
-                output_section(heading);
+                Formatter::new().print_header(heading);
                 output_table(
                     &[
                         "Category",
@@ -1933,7 +1928,7 @@ impl ShellContext {
                     .add_simulation_transaction(&sim_name, transaction)
                     .map_err(CommandError::from_core)
             })?;
-            output_success(format!(
+            cli_io::print_success(format!(
                 "Transaction saved to simulation `{}`: {}",
                 sim_name, summary
             ));
@@ -1947,7 +1942,7 @@ impl ShellContext {
                     .expect("transaction just added should exist");
                 Ok(self.transaction_summary_line(ledger, txn))
             })?;
-            output_success(format!("Transaction saved: {}", summary));
+            cli_io::print_success(format!("Transaction saved: {}", summary));
         }
         Ok(())
     }
@@ -1975,7 +1970,7 @@ impl ShellContext {
         let mut interaction = DialoguerInteraction::new(&self.theme);
         match FormEngine::new(&wizard).run(&mut interaction).unwrap() {
             FormResult::Cancelled => {
-                output_info("Transaction creation cancelled.");
+                cli_io::print_info("Transaction creation cancelled.");
                 Ok(())
             }
             FormResult::Completed(data) => self.apply_transaction_creation(data, simulation),
@@ -2020,7 +2015,7 @@ impl ShellContext {
         let mut interaction = DialoguerInteraction::new(&self.theme);
         match FormEngine::new(&wizard).run(&mut interaction).unwrap() {
             FormResult::Cancelled => {
-                output_info("Transaction update cancelled.");
+                cli_io::print_info("Transaction update cancelled.");
                 Ok(())
             }
             FormResult::Completed(data) => self.apply_transaction_update(data),
@@ -2045,7 +2040,7 @@ impl ShellContext {
 
     pub(crate) fn transaction_edit(&mut self, args: &[&str]) -> CommandResult {
         if self.with_ledger(|ledger| Ok(ledger.transactions.is_empty()))? {
-            output_warning("No transactions available.");
+            cli_io::print_warning("No transactions available.");
             return Ok(());
         }
         if args.len() > 1 {
@@ -2065,7 +2060,7 @@ impl ShellContext {
     pub(crate) fn transaction_remove(&mut self, args: &[&str]) -> CommandResult {
         self.ensure_base_mode("Transaction removal")?;
         if self.with_ledger(|ledger| Ok(ledger.transactions.is_empty()))? {
-            output_warning("No transactions available.");
+            cli_io::print_warning("No transactions available.");
             return Ok(());
         }
         if args.len() > 1 {
@@ -2084,7 +2079,7 @@ impl ShellContext {
 
     pub(crate) fn transaction_show(&mut self, args: &[&str]) -> CommandResult {
         if self.with_ledger(|ledger| Ok(ledger.transactions.is_empty()))? {
-            output_warning("No transactions available.");
+            cli_io::print_warning("No transactions available.");
             return Ok(());
         }
         if args.len() > 1 {
@@ -2109,7 +2104,7 @@ impl ShellContext {
     ) -> CommandResult {
         self.ensure_base_mode("Completion")?;
         if self.with_ledger(|ledger| Ok(ledger.transactions.is_empty()))? {
-            output_warning("No transactions available.");
+            cli_io::print_warning("No transactions available.");
             return Ok(());
         }
         let selection = self.transaction_index_from_arg(args.first().copied(), usage, prompt)?;
@@ -2172,7 +2167,7 @@ impl ShellContext {
             })
             .map_err(CommandError::from)
         })?;
-        output_success(format!("Transaction {} marked completed", idx));
+        cli_io::print_success(format!("Transaction {} marked completed", idx));
         Ok(())
     }
 
@@ -2310,10 +2305,10 @@ impl ShellContext {
 
         match rows {
             Some(rows) => {
-                output_section("Accounts");
+                Formatter::new().print_header("Accounts");
                 output_table(&["Name", "Kind", "Category", "Notes"], &rows);
             }
-            None => output_warning("No accounts defined."),
+            None => cli_io::print_warning("No accounts defined."),
         }
         Ok(())
     }
@@ -2361,10 +2356,10 @@ impl ShellContext {
 
         match rows {
             Some(rows) => {
-                output_section("Categories");
+                Formatter::new().print_header("Categories");
                 output_table(&["Name", "Kind", "Parent", "Budget", "Notes"], &rows);
             }
-            None => output_warning("No categories defined."),
+            None => cli_io::print_warning("No categories defined."),
         }
         Ok(())
     }
@@ -2399,10 +2394,10 @@ impl ShellContext {
 
         match rows {
             Some(rows) => {
-                output_section("Transactions");
+                Formatter::new().print_header("Transactions");
                 output_table(&["Date", "From", "To", "Amount"], &rows);
             }
-            None => output_warning("No transactions recorded."),
+            None => cli_io::print_warning("No transactions recorded."),
         }
         Ok(())
     }
@@ -2529,14 +2524,14 @@ impl ShellContext {
             .end
             .checked_sub_signed(Duration::days(1))
             .unwrap_or(summary.window.end);
-        output_section(format!(
+        Formatter::new().print_header(format!(
             "{:?} {} → {}",
             summary.scope,
             self.format_date(ledger, summary.window.start),
             self.format_date(ledger, end_display)
         ));
 
-        output_info(format!(
+        cli_io::print_info(format!(
             "Budgeted: {} | Real: {} | Remaining: {} | Variance: {}",
             self.format_amount(ledger, summary.totals.budgeted),
             self.format_amount(ledger, summary.totals.real),
@@ -2545,31 +2540,31 @@ impl ShellContext {
         ));
 
         if let Some(percent) = summary.totals.percent_used {
-            output_info(format!("Usage: {:.1}%", percent));
+            cli_io::print_info(format!("Usage: {:.1}%", percent));
         }
 
-        output_info(format!("Status: {:?}", summary.totals.status));
+        cli_io::print_info(format!("Status: {:?}", summary.totals.status));
 
         if summary.incomplete_transactions > 0 {
-            output_warning(format!(
+            cli_io::print_warning(format!(
                 "{} incomplete transactions",
                 summary.incomplete_transactions
             ));
         }
 
         if summary.orphaned_transactions > 0 {
-            output_warning(format!(
+            cli_io::print_warning(format!(
                 "{} transactions reference unknown accounts or categories",
                 summary.orphaned_transactions
             ));
         }
 
         if summary.per_category.is_empty() {
-            output_info("No category data for this window.");
+            cli_io::print_info("No category data for this window.");
         } else {
-            output_info("Categories:");
+            cli_io::print_info("Categories:");
             for cat in summary.per_category.iter().take(5) {
-                output_info(format!(
+                cli_io::print_info(format!(
                     "  {:<20} {} budgeted / {} real ({:?})",
                     cat.name,
                     self.format_amount(ledger, cat.totals.budgeted),
@@ -2578,7 +2573,7 @@ impl ShellContext {
                 ));
             }
             if summary.per_category.len() > 5 {
-                output_info(format!(
+                cli_io::print_info(format!(
                     "  ... {} more categories",
                     summary.per_category.len() - 5
                 ));
@@ -2586,9 +2581,9 @@ impl ShellContext {
         }
 
         if !summary.per_account.is_empty() {
-            output_info("Accounts:");
+            cli_io::print_info("Accounts:");
             for acct in summary.per_account.iter().take(5) {
-                output_info(format!(
+                cli_io::print_info(format!(
                     "  {:<20} {} budgeted / {} real ({:?})",
                     acct.name,
                     self.format_amount(ledger, acct.totals.budgeted),
@@ -2597,7 +2592,7 @@ impl ShellContext {
                 ));
             }
             if summary.per_account.len() > 5 {
-                output_info(format!(
+                cli_io::print_info(format!(
                     "  ... {} more accounts",
                     summary.per_account.len() - 5
                 ));
@@ -2605,9 +2600,9 @@ impl ShellContext {
         }
 
         if !summary.disclosures.is_empty() {
-            output_info("Disclosures:");
+            cli_io::print_info("Disclosures:");
             for note in &summary.disclosures {
-                output_info(format!("  - {}", note));
+                cli_io::print_info(format!("  - {}", note));
             }
         }
 
@@ -2621,17 +2616,17 @@ impl ShellContext {
         budgets: &[CategoryBudgetSummary],
     ) {
         if budgets.is_empty() {
-            output_info(format!("{heading}: no category budgets configured."));
+            cli_io::print_info(format!("{heading}: no category budgets configured."));
             return;
         }
-        output_info(heading);
+        cli_io::print_info(heading);
         for summary in budgets.iter().take(8) {
             let icon = self.category_budget_status_icon(&summary.status);
             let utilization = summary
                 .utilization_percent
                 .map(|value| format!("{value:.0}%"))
                 .unwrap_or_else(|| "-".into());
-            output_info(format!(
+            cli_io::print_info(format!(
                 "  {icon} {:<20} Budget {} | Spent {} | Remaining {} | Used {} | {}",
                 summary.name,
                 self.format_amount(ledger, summary.budget_amount),
@@ -2642,7 +2637,7 @@ impl ShellContext {
             ));
         }
         if budgets.len() > 8 {
-            output_info(format!("  ... {} more categories", budgets.len() - 8));
+            cli_io::print_info(format!("  ... {} more categories", budgets.len() - 8));
         }
     }
 
@@ -2656,25 +2651,25 @@ impl ShellContext {
     }
 
     fn print_simulation_impact(&self, ledger: &Ledger, impact: &SimulationBudgetImpact) {
-        output_section(format!("Simulation `{}`", impact.simulation_name));
-        output_info("Base totals:");
-        output_info(format!(
+        Formatter::new().print_header(format!("Simulation `{}`", impact.simulation_name));
+        cli_io::print_info("Base totals:");
+        cli_io::print_info(format!(
             "  Budgeted: {} | Real: {} | Remaining: {} | Variance: {}",
             self.format_amount(ledger, impact.base.totals.budgeted),
             self.format_amount(ledger, impact.base.totals.real),
             self.format_amount(ledger, impact.base.totals.remaining),
             self.format_amount(ledger, impact.base.totals.variance)
         ));
-        output_info("Simulated totals:");
-        output_info(format!(
+        cli_io::print_info("Simulated totals:");
+        cli_io::print_info(format!(
             "  Budgeted: {} | Real: {} | Remaining: {} | Variance: {}",
             self.format_amount(ledger, impact.simulated.totals.budgeted),
             self.format_amount(ledger, impact.simulated.totals.real),
             self.format_amount(ledger, impact.simulated.totals.remaining),
             self.format_amount(ledger, impact.simulated.totals.variance)
         ));
-        output_info("Delta:");
-        output_info(format!(
+        cli_io::print_info("Delta:");
+        cli_io::print_info(format!(
             "  Budgeted: {} | Real: {} | Remaining: {} | Variance: {}",
             self.format_amount(ledger, impact.delta.budgeted),
             self.format_amount(ledger, impact.delta.real),
@@ -2707,7 +2702,7 @@ impl ShellContext {
             .end
             .checked_sub_signed(Duration::days(1))
             .unwrap_or(window.end);
-        output_section(format!(
+        Formatter::new().print_header(format!(
             "{header} {} → {}",
             self.format_date(ledger, window.start),
             self.format_date(ledger, end_display)
@@ -2735,19 +2730,19 @@ impl ShellContext {
             .iter()
             .filter(|inst| matches!(inst.status, ScheduledStatus::Future))
             .count();
-        output_info(format!(
+        cli_io::print_info(format!(
             "Occurrences: {instance_count} total | {existing_count} already scheduled | {generated_count} projected"
         ));
-        output_info(format!(
+        cli_io::print_info(format!(
             "Status mix: {overdue} overdue | {pending} pending | {future} future"
         ));
-        output_info(format!(
+        cli_io::print_info(format!(
             "Projected totals: Inflow {} | Outflow {} | Net {}",
             self.format_amount(ledger, totals.projected_inflow),
             self.format_amount(ledger, totals.projected_outflow),
             self.format_amount(ledger, totals.net)
         ));
-        output_info(format!(
+        cli_io::print_info(format!(
             "Budget impact: Budgeted {} | Real {} | Remaining {} | Variance {}",
             self.format_amount(ledger, report.summary.totals.budgeted),
             self.format_amount(ledger, report.summary.totals.real),
@@ -2760,18 +2755,18 @@ impl ShellContext {
             &report.category_budgets,
         );
         if !report.summary.disclosures.is_empty() {
-            output_info("Disclosures:");
+            cli_io::print_info("Disclosures:");
             for note in &report.summary.disclosures {
-                output_info(format!("  - {}", note));
+                cli_io::print_info(format!("  - {}", note));
             }
         }
 
         if report.forecast.transactions.is_empty() {
-            output_info("No additional projections required within this window.");
+            cli_io::print_info("No additional projections required within this window.");
             return;
         }
 
-        output_info("Upcoming projections:");
+        cli_io::print_info("Upcoming projections:");
         for item in report.forecast.transactions.iter().take(8) {
             let status = self.scheduled_status_label(item.status);
             let route = self.describe_transaction_route(ledger, &item.transaction);
@@ -2787,7 +2782,7 @@ impl ShellContext {
                 &ledger.locale,
                 &ledger.format,
             );
-            output_info(format!(
+            cli_io::print_info(format!(
                 "  {date} | {amount} | {status:<8} | {route} ({category})",
                 date = self.format_date(ledger, item.transaction.scheduled_date),
                 amount = amount,
@@ -2797,7 +2792,7 @@ impl ShellContext {
             ));
         }
         if report.forecast.transactions.len() > 8 {
-            output_info(format!(
+            cli_io::print_info(format!(
                 "  ... {} additional projections",
                 report.forecast.transactions.len() - 8
             ));
@@ -2877,7 +2872,7 @@ impl ShellContext {
                 .map(|snap| (snap.series_id, snap))
                 .collect();
             if snapshot_map.is_empty() {
-                output_warning("No recurring schedules defined.");
+                cli_io::print_warning("No recurring schedules defined.");
                 return Ok(());
             }
             let mut entries: Vec<(usize, &Transaction, &RecurrenceSnapshot)> = ledger
@@ -2899,7 +2894,7 @@ impl ShellContext {
                 (None, None) => Ordering::Equal,
             });
 
-            output_section("Recurring schedules");
+            Formatter::new().print_header("Recurring schedules");
             let mut shown = 0;
             for (index, txn, snapshot) in entries {
                 if !filter.matches(snapshot) {
@@ -2909,7 +2904,7 @@ impl ShellContext {
                 self.print_recurrence_entry(ledger, index, txn, snapshot);
             }
             if shown == 0 {
-                output_info("No recurring entries match the requested filter.");
+                cli_io::print_info("No recurring entries match the requested filter.");
             }
             Ok(())
         })
@@ -2932,7 +2927,7 @@ impl ShellContext {
             .map(|d| d.to_string())
             .unwrap_or_else(|| "None".into());
         let status = self.recurrence_status_label(&snapshot.status);
-        output_info(format!(
+        cli_io::print_info(format!(
             "[{idx:>3}] {route} | {cat} | every {freq} | next {next} | overdue {overdue} | pending {pending}",
             idx = index,
             route = route,
@@ -2942,7 +2937,7 @@ impl ShellContext {
             overdue = snapshot.overdue,
             pending = snapshot.pending
         ));
-        output_info(format!(
+        cli_io::print_info(format!(
             "      amount {:.2} | status {status} | since {}",
             txn.budgeted_amount, snapshot.start_date
         ));
@@ -2974,7 +2969,7 @@ impl ShellContext {
             ledger.touch();
             Ok(())
         })?;
-        output_success(format!("Recurrence updated for transaction {}.", index));
+        cli_io::print_success(format!("Recurrence updated for transaction {}.", index));
         Ok(())
     }
 
@@ -2986,7 +2981,7 @@ impl ShellContext {
                 CommandError::InvalidArguments("transaction index out of range".into())
             })?;
             if txn.recurrence.is_none() {
-                output_warning("Transaction has no recurrence defined.");
+                cli_io::print_warning("Transaction has no recurrence defined.");
                 return Ok(());
             }
             removed = true;
@@ -2999,7 +2994,7 @@ impl ShellContext {
         if !removed {
             return Ok(());
         }
-        output_success(format!("Recurrence removed from transaction {}.", index));
+        cli_io::print_success(format!("Recurrence removed from transaction {}.", index));
         Ok(())
     }
 
@@ -3021,7 +3016,7 @@ impl ShellContext {
             ledger.touch();
             Ok(())
         })?;
-        output_success(format!(
+        cli_io::print_success(format!(
             "Recurrence status set to {:?} for transaction {}.",
             status, index
         ));
@@ -3039,7 +3034,7 @@ impl ShellContext {
                 CommandError::InvalidArguments("transaction has no recurrence".into())
             })?;
             if recurrence.exceptions.contains(&date) {
-                output_info(format!(
+                cli_io::print_info(format!(
                     "Date {} already marked as skipped for this recurrence.",
                     date
                 ));
@@ -3055,7 +3050,7 @@ impl ShellContext {
         if !skipped {
             return Ok(());
         }
-        output_success(format!(
+        cli_io::print_success(format!(
             "Added skip date {} for transaction {}.",
             date, index
         ));
@@ -3067,9 +3062,9 @@ impl ShellContext {
         let created =
             self.with_ledger_mut(|ledger| Ok(ledger.materialize_due_recurrences(reference)))?;
         if created == 0 {
-            output_info("All due recurring instances already exist.");
+            cli_io::print_info("All due recurring instances already exist.");
         } else {
-            output_success(format!(
+            cli_io::print_success(format!(
                 "Created {} pending transactions from schedules.",
                 created
             ));
@@ -3141,27 +3136,32 @@ impl ShellContext {
             let sim = ledger.simulation(sim_name).ok_or_else(|| {
                 CommandError::InvalidArguments(format!("simulation `{}` not found", sim_name))
             })?;
-            output_info(format!("Simulation `{}` ({:?})", sim.name, sim.status));
+            cli_io::print_info(format!("Simulation `{}` ({:?})", sim.name, sim.status));
             if sim.changes.is_empty() {
-                output_info("No pending changes.");
+                cli_io::print_info("No pending changes.");
             } else {
                 for (idx, change) in sim.changes.iter().enumerate() {
                     match change {
-                        SimulationChange::AddTransaction { transaction } => output_info(format!(
-                            "  [{:>2}] Add transaction {} -> {} on {} (budgeted {:.2})",
-                            idx,
-                            transaction.from_account,
-                            transaction.to_account,
-                            transaction.scheduled_date,
-                            transaction.budgeted_amount
-                        )),
-                        SimulationChange::ModifyTransaction(patch) => output_info(format!(
+                        SimulationChange::AddTransaction { transaction } => {
+                            cli_io::print_info(format!(
+                                "  [{:>2}] Add transaction {} -> {} on {} (budgeted {:.2})",
+                                idx,
+                                transaction.from_account,
+                                transaction.to_account,
+                                transaction.scheduled_date,
+                                transaction.budgeted_amount
+                            ))
+                        }
+                        SimulationChange::ModifyTransaction(patch) => cli_io::print_info(format!(
                             "  [{:>2}] Modify transaction {}",
                             idx, patch.transaction_id
                         )),
-                        SimulationChange::ExcludeTransaction { transaction_id } => output_info(
-                            format!("  [{:>2}] Exclude transaction {}", idx, transaction_id),
-                        ),
+                        SimulationChange::ExcludeTransaction { transaction_id } => {
+                            cli_io::print_info(format!(
+                                "  [{:>2}] Exclude transaction {}",
+                                idx, transaction_id
+                            ))
+                        }
                     }
                 }
             }
@@ -3180,7 +3180,7 @@ impl ShellContext {
                 .exclude_transaction_in_simulation(sim_name, txn_id)
                 .map_err(CommandError::from_core)
         })?;
-        output_success(format!("Transaction {} excluded in `{}`", txn_id, sim_name));
+        cli_io::print_success(format!("Transaction {} excluded in `{}`", txn_id, sim_name));
         Ok(())
     }
 
@@ -3219,7 +3219,7 @@ impl ShellContext {
                 .modify_transaction_in_simulation(sim_name, patch)
                 .map_err(CommandError::from_core)
         })?;
-        output_success(format!("Transaction {} modified in `{}`", txn_id, sim_name));
+        cli_io::print_success(format!("Transaction {} modified in `{}`", txn_id, sim_name));
         Ok(())
     }
 

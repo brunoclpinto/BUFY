@@ -12,6 +12,7 @@ use dialoguer::{
 use crate::{
     cli::core::CliError,
     cli::output::{self, OutputPreferences},
+    cli::ui::formatting::Formatter,
     config::Config,
 };
 
@@ -122,11 +123,11 @@ pub fn confirm_action(label: &str) -> Result<bool, CliError> {
 }
 
 pub fn print_info(message: impl Display) {
-    output::info(message);
+    Formatter::new().print_info(message);
 }
 
 pub fn print_warn(message: impl Display) {
-    output::warning(message);
+    Formatter::new().print_warning(message);
 }
 
 pub fn print_warning(message: impl Display) {
@@ -134,15 +135,15 @@ pub fn print_warning(message: impl Display) {
 }
 
 pub fn print_error(message: impl Display) {
-    output::error(message);
+    Formatter::new().print_error(message);
 }
 
 pub fn print_success(message: impl Display) {
-    output::success(message);
+    Formatter::new().print_success(message);
 }
 
 pub fn print_hint(message: impl Display) {
-    output::hint(message);
+    Formatter::new().print_detail(message);
 }
 
 pub fn print_error_with_hint(error: impl Display, hint: impl Display) {

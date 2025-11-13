@@ -14,7 +14,7 @@ use chrono::{NaiveDate, NaiveTime};
 use dialoguer::{theme::ColorfulTheme, Input};
 use uuid::Uuid;
 
-use crate::cli::output;
+use crate::cli::io;
 use crate::ledger::{
     AccountKind, CategoryKind, Recurrence, RecurrenceMode, TimeInterval, TimeUnit,
     TransactionStatus,
@@ -1605,7 +1605,7 @@ impl<'a> FormInteraction for DialoguerInteraction<'a> {
                 "n" | "no" | "cancel" => return ConfirmationResponse::Cancel,
                 "back" => return ConfirmationResponse::Back,
                 _ => {
-                    output::warning("Enter yes, no, back, or cancel.");
+                    io::print_warning("Enter yes, no, back, or cancel.");
                 }
             }
         }
@@ -1677,15 +1677,15 @@ impl<'a> FormSession<'a> {
                     self.index -= 1;
                     Ok(FormSessionEvent::Moved)
                 } else {
-                    output::warning("Already at the first field.");
+                    io::print_warning("Already at the first field.");
                     Ok(FormSessionEvent::Repeat)
                 }
             }
             PromptResponse::Help => {
                 if let Some(help) = field.help {
-                    output::info(help);
+                    io::print_info(help);
                 } else {
-                    output::info("No additional information available for this field.");
+                    io::print_info("No additional information available for this field.");
                 }
                 Ok(FormSessionEvent::Repeat)
             }
@@ -1695,7 +1695,7 @@ impl<'a> FormSession<'a> {
                     self.index += 1;
                     Ok(FormSessionEvent::Moved)
                 } else if field.required {
-                    output::warning("This field is required.");
+                    io::print_warning("This field is required.");
                     Ok(FormSessionEvent::Repeat)
                 } else {
                     self.values.remove(field.key);
@@ -1710,7 +1710,7 @@ impl<'a> FormSession<'a> {
                     Ok(FormSessionEvent::Moved)
                 }
                 Err(err) => {
-                    output::warning(&err.message);
+                    io::print_warning(&err.message);
                     Err(err)
                 }
             },
@@ -1895,24 +1895,24 @@ impl<'a, F: FormFlow> FormEngine<'a, F> {
 
 fn render_prompt(descriptor: &FieldDescriptor, default: Option<&str>) {
     match default {
-        Some(default_value) => output::info(format!("{} [{}]:", descriptor.label, default_value)),
-        None => output::info(format!("{}:", descriptor.label)),
+        Some(default_value) => io::print_info(format!("{} [{}]:", descriptor.label, default_value)),
+        None => io::print_info(format!("{}:", descriptor.label)),
     }
 
     if let FieldKind::Choice(options) = &descriptor.kind {
-        output::info("Options:");
+        io::print_info("Options:");
         for option in options {
-            output::info(format!("  {}", option));
+            io::print_info(format!("  {}", option));
         }
     }
 }
 
 fn render_summary(summary: &FormSummary) {
-    output::info("Review your entries:");
+    io::print_info("Review your entries:");
     for (key, value) in &summary.entries {
-        output::info(format!("  {}: {}", key, value));
+        io::print_info(format!("  {}: {}", key, value));
     }
-    output::info("Confirm to apply changes, or type back/cancel to modify.");
+    io::print_info("Confirm to apply changes, or type back/cancel to modify.");
 }
 
 fn build_summary(descriptor: &FormDescriptor, values: &BTreeMap<String, String>) -> FormSummary {

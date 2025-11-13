@@ -1,5 +1,5 @@
-use crate::cli::output::{info, warning};
 use crate::cli::selectors::{SelectionItem, SelectionOutcome, SelectionProvider};
+use crate::cli::ui::formatting::Formatter;
 use dialoguer::{theme::ColorfulTheme, Select};
 
 #[derive(Debug)]
@@ -31,12 +31,13 @@ where
         F: FnMut(&str, &[String]) -> Result<Option<usize>, dialoguer::Error>,
     {
         let items = self.provider.items().map_err(SelectionError::Provider)?;
+        let formatter = Formatter::new();
         if items.is_empty() {
-            warning(empty_message);
+            formatter.print_warning(empty_message);
             return Ok(SelectionOutcome::Cancelled);
         }
 
-        info(prompt);
+        formatter.print_info(prompt);
         let labels: Vec<String> = items.iter().map(render_label).collect();
         let display_rows: Vec<String> = labels
             .iter()
@@ -45,9 +46,9 @@ where
             .collect();
 
         for row in &display_rows {
-            info(row);
+            formatter.print_info(row);
         }
-        info("  Type cancel or press Esc to abort.");
+        formatter.print_detail("  Type cancel or press Esc to abort.");
 
         let selection = selector(prompt, &display_rows).map_err(SelectionError::Interaction)?;
 

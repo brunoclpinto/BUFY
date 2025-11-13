@@ -2,7 +2,7 @@ use chrono::Local;
 
 use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
 use crate::cli::io;
-use crate::cli::output::section as output_section;
+use crate::cli::ui::formatting::Formatter;
 use crate::ledger::SimulationStatus;
 
 pub fn list_simulations(context: &mut ShellContext) -> CommandResult {
@@ -12,7 +12,7 @@ pub fn list_simulations(context: &mut ShellContext) -> CommandResult {
             io::print_warning("No simulations defined.");
             return Ok(());
         }
-        output_section("Simulations");
+        Formatter::new().print_header("Simulations");
         for sim in sims {
             io::print_info(format!(
                 "  {:<20} {:<10} changes:{:>2} updated:{}",
