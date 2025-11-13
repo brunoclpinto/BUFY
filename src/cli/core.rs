@@ -456,6 +456,8 @@ impl ShellContext {
             }
         };
 
+        let tokens = crate::cli::shell::translate_legacy_command(tokens);
+
         if tokens.is_empty() {
             return Ok(LoopControl::Continue);
         }
@@ -1636,10 +1638,6 @@ impl ShellContext {
         Ok(())
     }
 
-    pub(crate) fn add_account_interactive(&mut self) -> CommandResult {
-        self.run_account_add_wizard()
-    }
-
     pub(crate) fn add_account_script(&mut self, args: &[&str]) -> CommandResult {
         if self.active_simulation_name().is_some() {
             return Err(CommandError::InvalidArguments(
@@ -1661,10 +1659,6 @@ impl ShellContext {
         })?;
         output_success("Account added.");
         Ok(())
-    }
-
-    pub(crate) fn add_category_interactive(&mut self) -> CommandResult {
-        self.run_category_add_wizard()
     }
 
     pub(crate) fn add_category_script(&mut self, args: &[&str]) -> CommandResult {
@@ -1899,17 +1893,6 @@ impl ShellContext {
             );
         }
         Ok(())
-    }
-
-    pub(crate) fn add_transaction_interactive(&mut self) -> CommandResult {
-        if self.mode != CliMode::Interactive {
-            return Err(CommandError::InvalidArguments(
-                "usage: add transaction <from_account_index> <to_account_index> <YYYY-MM-DD> <amount>"
-                    .into(),
-            ));
-        }
-        let sim = self.active_simulation_name().map(|s| s.to_string());
-        self.run_transaction_add_wizard(sim.as_deref())
     }
 
     pub(crate) fn add_transaction_script(&mut self, args: &[&str]) -> CommandResult {
@@ -2205,14 +2188,6 @@ impl ShellContext {
         self.transaction_complete_internal(
             args,
             "usage: transaction complete <transaction_index> <YYYY-MM-DD> <amount>",
-            "Select a transaction to complete:",
-        )
-    }
-
-    pub(crate) fn legacy_complete(&mut self, args: &[&str]) -> CommandResult {
-        self.transaction_complete_internal(
-            args,
-            "usage: complete <transaction_index> <YYYY-MM-DD> <amount>",
             "Select a transaction to complete:",
         )
     }

@@ -4,26 +4,12 @@ use crate::cli::core::{CliMode, CommandError, CommandResult, RecurrenceListFilte
 use crate::cli::io;
 use crate::cli::registry::CommandEntry;
 pub(crate) fn definitions() -> Vec<CommandEntry> {
-    vec![
-        CommandEntry::new(
-            "transaction",
-            "Manage transactions via wizard flows",
-            "transaction <add|edit|remove|show|complete>",
-            cmd_transaction,
-        ),
-        CommandEntry::new(
-            "complete",
-            "Mark a transaction as completed",
-            "complete <transaction_index> <YYYY-MM-DD> <amount>",
-            cmd_complete,
-        ),
-        CommandEntry::new(
-            "recurring",
-            "Manage recurring schedules",
-            "recurring [list|edit|clear|pause|resume|skip|sync] ...",
-            cmd_recurring,
-        ),
-    ]
+    vec![CommandEntry::new(
+        "transaction",
+        "Manage transactions via wizard flows",
+        "transaction <add|edit|remove|show|complete|recurring>",
+        cmd_transaction,
+    )]
 }
 
 fn cmd_transaction(context: &mut ShellContext, args: &[&str]) -> CommandResult {
@@ -34,6 +20,7 @@ fn cmd_transaction(context: &mut ShellContext, args: &[&str]) -> CommandResult {
             "remove" => context.transaction_remove(rest),
             "show" => context.transaction_show(rest),
             "complete" => context.transaction_complete(rest),
+            "recurring" => cmd_recurring(context, rest),
             other => Err(CommandError::InvalidArguments(format!(
                 "unknown transaction subcommand `{}`",
                 other
@@ -41,13 +28,9 @@ fn cmd_transaction(context: &mut ShellContext, args: &[&str]) -> CommandResult {
         }
     } else {
         Err(CommandError::InvalidArguments(
-            "usage: transaction <add|edit|remove|show|complete>".into(),
+            "usage: transaction <add|edit|remove|show|complete|recurring>".into(),
         ))
     }
-}
-
-fn cmd_complete(context: &mut ShellContext, args: &[&str]) -> CommandResult {
-    context.legacy_complete(args)
 }
 
 fn cmd_recurring(context: &mut ShellContext, args: &[&str]) -> CommandResult {

@@ -12,7 +12,7 @@ use crate::currency::{
 pub(crate) fn definitions() -> Vec<CommandEntry> {
     vec![CommandEntry::new(
         "config",
-        "View and manage global CLI preferences",
+        "Global CLI preferences",
         "config [show|set <key> <value>|backup [note]|backups|restore [name]]",
         cmd_config,
     )]

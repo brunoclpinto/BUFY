@@ -48,11 +48,11 @@ impl MainMenu {
         let entries = vec![
             MenuEntry {
                 command: "ledger",
-                description: "Ledger operations",
+                description: "Ledger operations (new, load, save, backup, restore...)",
             },
             MenuEntry {
                 command: "account",
-                description: "Manage accounts",
+                description: "Manage accounts via wizard flows",
             },
             MenuEntry {
                 command: "category",
@@ -60,39 +60,39 @@ impl MainMenu {
             },
             MenuEntry {
                 command: "transaction",
-                description: "Manage transactions",
+                description: "Manage transactions via wizard flows",
             },
             MenuEntry {
                 command: "simulation",
-                description: "Manage simulations",
+                description: "Manage simulations and what-if scenarios",
+            },
+            MenuEntry {
+                command: "list",
+                description: "List accounts, categories, transactions, simulations...",
+            },
+            MenuEntry {
+                command: "summary",
+                description: "Show ledger summary",
             },
             MenuEntry {
                 command: "forecast",
                 description: "Forecast upcoming activity",
             },
             MenuEntry {
-                command: "summary",
-                description: "Show summary",
-            },
-            MenuEntry {
-                command: "list",
-                description: "List entities",
-            },
-            MenuEntry {
                 command: "config",
-                description: "Preferences",
+                description: "Global CLI preferences",
             },
             MenuEntry {
                 command: "help",
-                description: "Help information",
+                description: "Show available commands",
             },
             MenuEntry {
                 command: "version",
-                description: "Version info",
+                description: "Show build metadata",
             },
             MenuEntry {
                 command: "exit",
-                description: "Quit BUFY",
+                description: "Exit the shell",
             },
         ];
 

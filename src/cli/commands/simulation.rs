@@ -9,53 +9,39 @@ use crate::cli::registry::CommandEntry;
 use crate::ledger::SimulationStatus;
 
 pub(crate) fn definitions() -> Vec<CommandEntry> {
-    vec![
-        CommandEntry::new(
-            "list-simulations",
-            "List saved simulations",
-            "list-simulations",
-            cmd_list_simulations,
-        ),
-        CommandEntry::new(
-            "create-simulation",
-            "Create a new named simulation",
-            "create-simulation [name]",
-            cmd_create_simulation,
-        ),
-        CommandEntry::new(
-            "enter-simulation",
-            "Activate a simulation for editing",
-            "enter-simulation <name>",
-            cmd_enter_simulation,
-        ),
-        CommandEntry::new(
-            "leave-simulation",
-            "Leave the active simulation",
-            "leave-simulation",
-            cmd_leave_simulation,
-        ),
-        CommandEntry::new(
-            "apply-simulation",
-            "Apply a simulation to the ledger",
-            "apply-simulation <name>",
-            cmd_apply_simulation,
-        ),
-        CommandEntry::new(
-            "discard-simulation",
-            "Discard a simulation permanently",
-            "discard-simulation <name>",
-            cmd_discard_simulation,
-        ),
-        CommandEntry::new(
-            "simulation",
-            "Manage pending simulation changes",
-            "simulation <changes|add|modify|exclude> [simulation_name]",
-            cmd_simulation,
-        ),
-    ]
+    vec![CommandEntry::new(
+        "simulation",
+        "Manage simulations and what-if scenarios",
+        "simulation <list|create|enter|leave|apply|discard|changes|add|modify|exclude>",
+        cmd_simulation_root,
+    )]
 }
 
-fn cmd_list_simulations(context: &mut ShellContext, _args: &[&str]) -> CommandResult {
+fn cmd_simulation_root(context: &mut ShellContext, args: &[&str]) -> CommandResult {
+    if args.is_empty() {
+        io::print_info(
+            "Simulation menu coming soon. Try `simulation list` or `simulation changes`.",
+        );
+        return Ok(());
+    }
+
+    let (subcommand, rest) = args.split_first().expect("non-empty args");
+    match subcommand.to_ascii_lowercase().as_str() {
+        "list" | "ls" => list_simulations(context),
+        "create" | "new" => cmd_create_simulation(context, rest),
+        "enter" => cmd_enter_simulation(context, rest),
+        "leave" => cmd_leave_simulation(context, rest),
+        "apply" => cmd_apply_simulation(context, rest),
+        "discard" => cmd_discard_simulation(context, rest),
+        "changes" | "add" | "modify" | "exclude" | "show" => cmd_simulation(context, args),
+        other => Err(CommandError::InvalidArguments(format!(
+            "unknown simulation subcommand `{}`. Available: list, create, enter, leave, apply, discard, changes, add, modify, exclude",
+            other
+        ))),
+    }
+}
+
+pub(crate) fn list_simulations(context: &mut ShellContext) -> CommandResult {
     context.with_ledger(|ledger| {
         let sims = ledger.simulations();
         if sims.is_empty() {
@@ -116,7 +102,7 @@ fn cmd_enter_simulation(context: &mut ShellContext, args: &[&str]) -> CommandRes
         args.first().copied(),
         "Select a simulation to enter:",
         false,
-        "usage: enter-simulation <name>",
+        "usage: simulation enter <name>",
     )? {
         Some(name) => name,
         None => {
@@ -162,7 +148,7 @@ fn cmd_apply_simulation(context: &mut ShellContext, args: &[&str]) -> CommandRes
         args.first().copied(),
         "Select a simulation to apply:",
         false,
-        "usage: apply-simulation <name>",
+        "usage: simulation apply <name>",
     )? {
         Some(name) => name,
         None => {
@@ -204,7 +190,7 @@ fn cmd_discard_simulation(context: &mut ShellContext, args: &[&str]) -> CommandR
         args.first().copied(),
         "Select a simulation to discard:",
         false,
-        "usage: discard-simulation <name>",
+        "usage: simulation discard <name>",
     )? {
         Some(name) => name,
         None => {

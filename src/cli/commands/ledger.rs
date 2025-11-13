@@ -4,6 +4,8 @@ use std::path::PathBuf;
 
 use chrono::Utc;
 
+use super::simulation;
+
 use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
 use crate::cli::io;
 use crate::cli::registry::CommandEntry;
@@ -11,19 +13,54 @@ use crate::core::services::SummaryService;
 
 pub(crate) fn definitions() -> Vec<CommandEntry> {
     vec![
-        CommandEntry::new("new-ledger", "Create a new ledger", "new-ledger [name] [period]", cmd_new_ledger),
-        CommandEntry::new("load", "Load a ledger from JSON", "load [path]", cmd_load),
-        CommandEntry::new("load-ledger", "Load a ledger by name from the persistence store", "load-ledger <name>", cmd_load_named),
-        CommandEntry::new("save", "Save current ledger", "save [path]", cmd_save),
-        CommandEntry::new("save-ledger", "Save current ledger by name in the persistence store", "save-ledger [name]", cmd_save_named),
-        CommandEntry::new("backup-ledger", "Create a snapshot of the current ledger", "backup-ledger [name]", cmd_backup_ledger),
-        CommandEntry::new("list-backups", "List available snapshots for the current ledger", "list-backups [name]", cmd_list_backups),
-        CommandEntry::new("restore-ledger", "Restore a ledger from a snapshot", "restore-ledger <backup_index|pattern> [name]", cmd_restore_ledger),
-        CommandEntry::new("add", "Add an account, category, or transaction", "add [account|category|transaction]", cmd_add),
-        CommandEntry::new("list", "List accounts, categories, or transactions", "list [accounts|categories|transactions]", cmd_list),
-        CommandEntry::new("summary", "Show ledger summary", "summary [simulation_name] [past|future <n>] | summary custom <start YYYY-MM-DD> <end YYYY-MM-DD>", cmd_summary),
-        CommandEntry::new("forecast", "Forecast recurring activity", "forecast [simulation_name] [<number> <unit> | custom <start YYYY-MM-DD> <end YYYY-MM-DD>]", cmd_forecast),
+        CommandEntry::new(
+            "ledger",
+            "Ledger operations (new, load, save, backup, restore...)",
+            "ledger <new|load|load-ledger|save|save-ledger|backup|list-backups|restore>",
+            cmd_ledger,
+        ),
+        CommandEntry::new(
+            "list",
+            "List accounts, categories, transactions, simulations, ledgers...",
+            "list <accounts|categories|transactions|simulations>",
+            cmd_list,
+        ),
+        CommandEntry::new(
+            "summary",
+            "Show ledger summary",
+            "summary [simulation_name] [past|future <n>] | summary custom <start YYYY-MM-DD> <end YYYY-MM-DD>",
+            cmd_summary,
+        ),
+        CommandEntry::new(
+            "forecast",
+            "Forecast upcoming activity",
+            "forecast [simulation_name] [<number> <unit> | custom <start YYYY-MM-DD> <end YYYY-MM-DD>]",
+            cmd_forecast,
+        ),
     ]
+}
+
+fn cmd_ledger(context: &mut ShellContext, args: &[&str]) -> CommandResult {
+    if args.is_empty() {
+        io::print_info("Ledger menu coming soon. Try `ledger new`, `ledger load`, `ledger save`, `ledger backup`, or `ledger restore`.");
+        return Ok(());
+    }
+
+    let (subcommand, rest) = args.split_first().expect("non-empty args");
+    match subcommand.to_ascii_lowercase().as_str() {
+        "new" => cmd_new_ledger(context, rest),
+        "load" => cmd_load(context, rest),
+        "load-ledger" | "load-named" => cmd_load_named(context, rest),
+        "save" => cmd_save(context, rest),
+        "save-ledger" | "save-named" => cmd_save_named(context, rest),
+        "backup" | "backup-ledger" => cmd_backup_ledger(context, rest),
+        "list-backups" | "backups" => cmd_list_backups(context, rest),
+        "restore" | "restore-ledger" => cmd_restore_ledger(context, rest),
+        other => Err(CommandError::InvalidArguments(format!(
+            "unknown ledger subcommand `{}`. Available: new, load, load-ledger, save, save-ledger, backup, list-backups, restore",
+            other
+        ))),
+    }
 }
 
 fn cmd_new_ledger(context: &mut ShellContext, args: &[&str]) -> CommandResult {
@@ -41,7 +78,9 @@ fn cmd_load(context: &mut ShellContext, args: &[&str]) -> CommandResult {
         let response = io::prompt_text("Path to ledger JSON", None).map_err(CommandError::from)?;
         context.load_ledger(&PathBuf::from(response.trim()))
     } else {
-        Err(CommandError::InvalidArguments("usage: load <path>".into()))
+        Err(CommandError::InvalidArguments(
+            "usage: ledger load <path>".into(),
+        ))
     }
 }
 
@@ -71,7 +110,9 @@ fn cmd_save(context: &mut ShellContext, args: &[&str]) -> CommandResult {
             context.save_to_path(&PathBuf::from(path.trim()))
         }
     } else {
-        Err(CommandError::InvalidArguments("usage: save <path>".into()))
+        Err(CommandError::InvalidArguments(
+            "usage: ledger save <path>".into(),
+        ))
     }
 }
 
@@ -84,7 +125,7 @@ fn cmd_save_named(context: &mut ShellContext, args: &[&str]) -> CommandResult {
         io::prompt_text("Ledger name", None).map_err(CommandError::from)?
     } else {
         return Err(CommandError::InvalidArguments(
-            "usage: save-ledger <name>".into(),
+            "usage: ledger save-ledger <name>".into(),
         ));
     };
     let name = name.trim().to_string();
@@ -98,7 +139,7 @@ fn cmd_load_named(context: &mut ShellContext, args: &[&str]) -> CommandResult {
         io::prompt_text("Ledger name to load", None).map_err(CommandError::from)?
     } else {
         return Err(CommandError::InvalidArguments(
-            "usage: load-ledger <name>".into(),
+            "usage: ledger load-ledger <name>".into(),
         ));
     };
     let name = name.trim().to_string();
@@ -120,22 +161,24 @@ fn cmd_list(context: &mut ShellContext, args: &[&str]) -> CommandResult {
             "accounts" => context.list_accounts(),
             "categories" => context.list_categories(),
             "transactions" => context.list_transactions(),
+            "simulations" => simulation::list_simulations(context),
             other => Err(CommandError::InvalidArguments(format!(
                 "unknown list target `{}`",
                 other
             ))),
         }
     } else if context.mode() == CliMode::Interactive {
-        let options = ["Accounts", "Categories", "Transactions"];
+        let options = ["Accounts", "Categories", "Transactions", "Simulations"];
         let choice = io::prompt_select_index("List items", &options).map_err(CommandError::from)?;
         match choice {
             0 => context.list_accounts(),
             1 => context.list_categories(),
-            _ => context.list_transactions(),
+            2 => context.list_transactions(),
+            _ => simulation::list_simulations(context),
         }
     } else {
         Err(CommandError::InvalidArguments(
-            "usage: list <accounts|categories|transactions>".into(),
+            "usage: list <accounts|categories|transactions|simulations>".into(),
         ))
     }
 }
@@ -145,7 +188,7 @@ fn cmd_restore_ledger(context: &mut ShellContext, args: &[&str]) -> CommandResul
         0 => {
             if !context.can_prompt() {
                 return Err(CommandError::InvalidArguments(
-                    "usage: restore-ledger <backup_reference> [name]".into(),
+                    "usage: ledger restore <backup_reference> [name]".into(),
                 ));
             }
             let name = {
@@ -170,35 +213,8 @@ fn cmd_restore_ledger(context: &mut ShellContext, args: &[&str]) -> CommandResul
             context.restore_backup(&name, reference)
         }
         _ => Err(CommandError::InvalidArguments(
-            "usage: restore-ledger <backup_reference> [name]".into(),
+            "usage: ledger restore <backup_reference> [name]".into(),
         )),
-    }
-}
-
-fn cmd_add(context: &mut ShellContext, args: &[&str]) -> CommandResult {
-    if let Some(target) = args.first() {
-        match target.to_lowercase().as_str() {
-            "account" => context.add_account_script(&args[1..]),
-            "category" => context.add_category_script(&args[1..]),
-            "transaction" => context.add_transaction_script(&args[1..]),
-            other => Err(CommandError::InvalidArguments(format!(
-                "unknown add target `{}`",
-                other
-            ))),
-        }
-    } else if context.mode() == CliMode::Interactive {
-        let options = ["Account", "Category", "Transaction"];
-        let choice =
-            io::prompt_select_index("Add which item?", &options).map_err(CommandError::from)?;
-        match choice {
-            0 => context.add_account_interactive(),
-            1 => context.add_category_interactive(),
-            _ => context.add_transaction_interactive(),
-        }
-    } else {
-        Err(CommandError::InvalidArguments(
-            "usage: add <account|category|transaction>".into(),
-        ))
     }
 }
 
