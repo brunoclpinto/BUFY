@@ -1,10 +1,16 @@
 pub mod account;
+pub mod account_handlers;
 pub mod category;
+pub mod category_handlers;
 pub mod config;
 pub mod ledger;
+pub mod ledger_handlers;
+pub mod list_handlers;
 pub mod simulation;
+pub mod simulation_handlers;
 pub mod system;
 pub mod transaction;
+pub mod transaction_handlers;
 
 use crate::cli::registry::{CommandEntry, CommandRegistry};
 

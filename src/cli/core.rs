@@ -456,8 +456,6 @@ impl ShellContext {
             }
         };
 
-        let tokens = crate::cli::shell::translate_legacy_command(tokens);
-
         if tokens.is_empty() {
             return Ok(LoopControl::Continue);
         }
@@ -503,8 +501,8 @@ impl ShellContext {
                 Ok(())
             }
             CommandError::LedgerNotLoaded => {
-                self.print_error("Ledger not loaded. Use `new-ledger` or `load` first.");
-                self.print_hint("Try `new-ledger Demo monthly` to get started.");
+                self.print_error("Ledger not loaded. Use `ledger new` or `ledger load` first.");
+                self.print_hint("Try `ledger new Demo monthly` to get started.");
                 Ok(())
             }
             other => {
@@ -1377,7 +1375,7 @@ impl ShellContext {
     pub(crate) fn run_new_ledger_script(&mut self, args: &[&str]) -> CommandResult {
         if args.is_empty() {
             return Err(CommandError::InvalidArguments(
-                "usage: new-ledger <name> <period>".into(),
+                "usage: ledger new <name> <period>".into(),
             ));
         }
 
@@ -3668,7 +3666,7 @@ fn short_id(id: Uuid) -> String {
 
 #[derive(Debug, thiserror::Error)]
 pub enum CommandError {
-    #[error("Ledger not loaded. Use `new-ledger` or `load` first.")]
+    #[error("Ledger not loaded. Use `ledger new` or `ledger load` first.")]
     LedgerNotLoaded,
     #[error("{0}")]
     InvalidArguments(String),
@@ -3766,13 +3764,13 @@ mod tests {
     #[test]
     fn parse_line_handles_quotes() {
         let tokens =
-            crate::cli::shell::parse_command_line("new-ledger \"Demo Ledger\" monthly").unwrap();
-        assert_eq!(tokens, vec!["new-ledger", "Demo Ledger", "monthly"]);
+            crate::cli::shell::parse_command_line("ledger new \"Demo Ledger\" monthly").unwrap();
+        assert_eq!(tokens, vec!["ledger", "new", "Demo Ledger", "monthly"]);
     }
 
     #[test]
     fn script_runner_creates_ledger() {
-        let context = process_script(&["new-ledger Demo 3 months", "exit"]).unwrap();
+        let context = process_script(&["ledger new Demo 3 months", "exit"]).unwrap();
         context
             .with_ledger(|ledger| {
                 assert_eq!(ledger.name, "Demo");
@@ -3789,8 +3787,8 @@ mod tests {
         let path = tmp.path().to_path_buf();
 
         let setup_cmds: Vec<String> = vec![
-            "new-ledger Testing every 2 weeks".into(),
-            format!("save {}", path.display()),
+            "ledger new Testing every 2 weeks".into(),
+            format!("ledger save {}", path.display()),
             "exit".into(),
         ];
         let setup_refs: Vec<&str> = setup_cmds.iter().map(String::as_str).collect();
@@ -3800,7 +3798,7 @@ mod tests {
         assert!(json.contains("\"Testing\""));
 
         let load_cmds: Vec<String> = vec![
-            format!("load {}", path.display()),
+            format!("ledger load {}", path.display()),
             "summary".into(),
             "exit".into(),
         ];

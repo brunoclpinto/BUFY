@@ -16,7 +16,7 @@ fn script_mode_runs_basic_flow() {
     let home = tempfile::tempdir().unwrap();
     let tmp = NamedTempFile::new().unwrap();
     let input = format!(
-        "new-ledger Demo every 6 weeks\nsave {}\nexit\n",
+        "ledger new Demo every 6 weeks\nledger save {}\nexit\n",
         tmp.path().display()
     );
 
@@ -59,7 +59,10 @@ fn forecast_command_outputs_projection() {
     std::fs::create_dir_all(&parent).unwrap();
     save_ledger_to_path(&ledger, tmp.path()).unwrap();
 
-    let script = format!("load {}\nforecast 90 days\nexit\n", tmp.path().display());
+    let script = format!(
+        "ledger load {}\nforecast 90 days\nexit\n",
+        tmp.path().display()
+    );
 
     let mut cmd = Command::cargo_bin("budget_core_cli").unwrap();
     cmd.env("BUDGET_CORE_CLI_SCRIPT", "1")
@@ -74,11 +77,11 @@ fn forecast_command_outputs_projection() {
 fn cli_named_persistence_and_backups() {
     let home = tempfile::tempdir().unwrap();
     let script = "\
-new-ledger Demo monthly
-save-ledger demo
-save-ledger demo
-list-backups demo
-restore-ledger 0 demo
+ledger new Demo monthly
+ledger save-ledger demo
+ledger save-ledger demo
+ledger list-backups demo
+ledger restore 0 demo
 exit
 ";
 
@@ -100,8 +103,8 @@ fn category_budget_cli_flow() {
     let home = tempfile::tempdir().unwrap();
     let script = "\
 config set default_budget_period weekly
-new-ledger Demo monthly
-add category Groceries expense
+ledger new Demo monthly
+category add Groceries expense
 category budget set Groceries 400
 category budget show Groceries
 category budget set Groceries 600 --period monthly

@@ -84,8 +84,6 @@ fn handle_line(context: &mut ShellContext, line: &str) -> Result<LoopControl, Co
         }
     };
 
-    let tokens = translate_legacy_command(tokens);
-
     if tokens.is_empty() {
         return Ok(LoopControl::Continue);
     }
@@ -103,106 +101,6 @@ fn handle_line(context: &mut ShellContext, line: &str) -> Result<LoopControl, Co
         }
         other => other,
     }
-}
-
-pub(crate) fn translate_legacy_command(mut tokens: Vec<String>) -> Vec<String> {
-    if tokens.is_empty() {
-        return tokens;
-    }
-
-    let first_lower = tokens[0].to_ascii_lowercase();
-    match first_lower.as_str() {
-        "new-ledger" => {
-            tokens[0] = "ledger".into();
-            tokens.insert(1, "new".into());
-        }
-        "load" => {
-            tokens[0] = "ledger".into();
-            tokens.insert(1, "load".into());
-        }
-        "load-ledger" => {
-            tokens[0] = "ledger".into();
-            tokens.insert(1, "load-ledger".into());
-        }
-        "save" => {
-            tokens[0] = "ledger".into();
-            tokens.insert(1, "save".into());
-        }
-        "save-ledger" => {
-            tokens[0] = "ledger".into();
-            tokens.insert(1, "save-ledger".into());
-        }
-        "backup-ledger" => {
-            tokens[0] = "ledger".into();
-            tokens.insert(1, "backup".into());
-        }
-        "list-backups" => {
-            tokens[0] = "ledger".into();
-            tokens.insert(1, "list-backups".into());
-        }
-        "restore-ledger" => {
-            tokens[0] = "ledger".into();
-            tokens.insert(1, "restore".into());
-        }
-        "complete" => {
-            tokens[0] = "transaction".into();
-            tokens.insert(1, "complete".into());
-        }
-        "recurring" => {
-            tokens[0] = "transaction".into();
-            tokens.insert(1, "recurring".into());
-        }
-        "list-simulations" => {
-            tokens[0] = "simulation".into();
-            tokens.insert(1, "list".into());
-        }
-        "create-simulation" => {
-            tokens[0] = "simulation".into();
-            tokens.insert(1, "create".into());
-        }
-        "enter-simulation" => {
-            tokens[0] = "simulation".into();
-            tokens.insert(1, "enter".into());
-        }
-        "leave-simulation" => {
-            tokens[0] = "simulation".into();
-            tokens.insert(1, "leave".into());
-        }
-        "apply-simulation" => {
-            tokens[0] = "simulation".into();
-            tokens.insert(1, "apply".into());
-        }
-        "discard-simulation" => {
-            tokens[0] = "simulation".into();
-            tokens.insert(1, "discard".into());
-        }
-        "add" => {
-            if tokens.len() > 1 {
-                let target = tokens[1].to_ascii_lowercase();
-                match target.as_str() {
-                    "account" | "accounts" => {
-                        tokens.remove(1);
-                        tokens[0] = "account".into();
-                        tokens.insert(1, "add".into());
-                    }
-                    "category" | "categories" => {
-                        tokens.remove(1);
-                        tokens[0] = "category".into();
-                        tokens.insert(1, "add".into());
-                    }
-                    "transaction" | "transactions" => {
-                        tokens.remove(1);
-                        tokens[0] = "transaction".into();
-                        tokens.insert(1, "add".into());
-                    }
-                    _ => {}
-                }
-            }
-        }
-        _ => {}
-    }
-
-    tokens
 }
 
 pub(crate) fn parse_command_line(input: &str) -> Result<Vec<String>, ParseError> {

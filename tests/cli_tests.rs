@@ -6,7 +6,7 @@ use std::error::Error;
 fn script_mode_creates_and_lists_accounts() -> Result<(), Box<dyn Error>> {
     let mut cmd = Command::cargo_bin("budget_core_cli")?;
     cmd.env("BUDGET_CORE_CLI_SCRIPT", "1")
-        .write_stdin("new-ledger Demo monthly\nlist accounts\nexit\n")
+        .write_stdin("ledger new Demo monthly\nlist accounts\nexit\n")
         .assert()
         .success()
         .stdout(
