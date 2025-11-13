@@ -3,6 +3,7 @@ pub mod core;
 pub mod forms;
 pub mod help;
 pub mod io;
+pub mod menus;
 pub mod output;
 pub mod registry;
 pub mod selection;

@@ -10,7 +10,6 @@ use std::{
 
 use chrono::{DateTime, Duration, Local, NaiveDate, NaiveDateTime, Utc};
 use dialoguer::{theme::ColorfulTheme, Input, Select};
-use rustyline::error::ReadlineError;
 use strsim::levenshtein;
 use uuid::Uuid;
 
@@ -19,8 +18,8 @@ use crate::{
     core::errors::BudgetError,
     core::ledger_manager::LedgerManager,
     core::services::{
-        AccountService, CategoryBudgetStatus, CategoryBudgetSummary, CategoryService,
-        ServiceError, SummaryService, TransactionService,
+        AccountService, CategoryBudgetStatus, CategoryBudgetSummary, CategoryService, ServiceError,
+        SummaryService, TransactionService,
     },
     currency::{format_currency_value, format_currency_value_with_precision, format_date},
     domain::BudgetPeriod as CategoryBudgetPeriod,
@@ -3755,12 +3754,6 @@ impl From<CliError> for CommandError {
 
 impl From<CommandError> for CliError {
     fn from(err: CommandError) -> Self {
-        CliError::Command(err.to_string())
-    }
-}
-
-impl From<ReadlineError> for CliError {
-    fn from(err: ReadlineError) -> Self {
         CliError::Command(err.to_string())
     }
 }
