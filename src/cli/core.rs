@@ -35,8 +35,8 @@ use crate::{
 
 use crate::cli::forms::{
     AccountFormData, AccountInitialData, AccountWizard, CategoryFormData, CategoryInitialData,
-    CategoryWizard, DialoguerInteraction, FormEngine, FormResult, TransactionFormData,
-    TransactionInitialData, TransactionRecurrenceAction, TransactionWizard,
+    CategoryWizard, FormEngine, FormResult, TransactionFormData, TransactionInitialData,
+    TransactionRecurrenceAction, TransactionWizard, WizardInteraction,
 };
 use crate::cli::selection::{
     providers::{
@@ -1004,7 +1004,7 @@ impl ShellContext {
         })?;
 
         let wizard = AccountWizard::new_create(existing_names, category_options);
-        let mut interaction = DialoguerInteraction::new(&self.theme);
+        let mut interaction = WizardInteraction::new();
         match FormEngine::new(&wizard).run(&mut interaction).unwrap() {
             FormResult::Cancelled => {
                 cli_io::print_info("Account creation cancelled.");
@@ -1043,7 +1043,7 @@ impl ShellContext {
         })?;
 
         let wizard = AccountWizard::new_edit(existing_names, initial, category_options);
-        let mut interaction = DialoguerInteraction::new(&self.theme);
+        let mut interaction = WizardInteraction::new();
         match FormEngine::new(&wizard).run(&mut interaction).unwrap() {
             FormResult::Cancelled => {
                 cli_io::print_info("Account update cancelled.");
@@ -1068,7 +1068,7 @@ impl ShellContext {
         })?;
 
         let wizard = CategoryWizard::new_create(existing_names, parent_options);
-        let mut interaction = DialoguerInteraction::new(&self.theme);
+        let mut interaction = WizardInteraction::new();
         match FormEngine::new(&wizard).run(&mut interaction).unwrap() {
             FormResult::Cancelled => {
                 cli_io::print_info("Category creation cancelled.");
@@ -1131,7 +1131,7 @@ impl ShellContext {
             allow_kind_change,
             allow_custom_change,
         );
-        let mut interaction = DialoguerInteraction::new(&self.theme);
+        let mut interaction = WizardInteraction::new();
         match FormEngine::new(&wizard).run(&mut interaction).unwrap() {
             FormResult::Cancelled => {
                 cli_io::print_info("Category update cancelled.");
@@ -1967,7 +1967,7 @@ impl ShellContext {
         };
         let wizard =
             TransactionWizard::new_create(accounts, categories, today, min_date, default_status);
-        let mut interaction = DialoguerInteraction::new(&self.theme);
+        let mut interaction = WizardInteraction::new();
         match FormEngine::new(&wizard).run(&mut interaction).unwrap() {
             FormResult::Cancelled => {
                 cli_io::print_info("Transaction creation cancelled.");
@@ -2012,7 +2012,7 @@ impl ShellContext {
         let today = Utc::now().date_naive();
         let min_date = created_at.date_naive();
         let wizard = TransactionWizard::new_edit(accounts, categories, today, min_date, initial);
-        let mut interaction = DialoguerInteraction::new(&self.theme);
+        let mut interaction = WizardInteraction::new();
         match FormEngine::new(&wizard).run(&mut interaction).unwrap() {
             FormResult::Cancelled => {
                 cli_io::print_info("Transaction update cancelled.");

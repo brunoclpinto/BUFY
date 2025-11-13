@@ -16,6 +16,7 @@ pub struct MenuUI {
     pub title: String,
     pub context: Option<String>,
     pub items: Vec<MenuUIItem>,
+    pub initial_index: Option<usize>,
 }
 
 impl MenuUI {
@@ -24,11 +25,17 @@ impl MenuUI {
             title: title.into(),
             context: None,
             items,
+            initial_index: None,
         }
     }
 
     pub fn with_context(mut self, context: impl Into<String>) -> Self {
         self.context = Some(context.into());
+        self
+    }
+
+    pub fn with_initial_index(mut self, index: usize) -> Self {
+        self.initial_index = Some(index);
         self
     }
 }
@@ -87,7 +94,10 @@ impl MenuRenderer {
         terminal::enable_raw_mode()?;
         stdout.execute(cursor::Hide)?;
 
-        let mut selected_index = 0usize;
+        let mut selected_index = menu.initial_index.unwrap_or(0);
+        if selected_index >= menu.items.len() {
+            selected_index = menu.items.len() - 1;
+        }
         let max_label_len = menu
             .items
             .iter()

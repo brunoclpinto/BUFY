@@ -11,10 +11,14 @@ use std::fmt;
 use std::sync::Arc;
 
 use chrono::{NaiveDate, NaiveTime};
-use dialoguer::{theme::ColorfulTheme, Input};
 use uuid::Uuid;
 
 use crate::cli::io;
+use crate::cli::ui::formatting::Formatter;
+use crate::cli::ui::prompts::{
+    choice_menu, confirm_menu, text_input, ChoicePromptResult, ConfirmationPromptResult,
+    TextPromptResult,
+};
 use crate::ledger::{
     AccountKind, CategoryKind, Recurrence, RecurrenceMode, TimeInterval, TimeUnit,
     TransactionStatus,
@@ -1531,83 +1535,147 @@ pub struct FormSummary {
 
 /// Interaction surface used by the form engine. The CLI will provide an
 /// implementation that leverages dialoguer and the shared output module.
+pub struct PromptContext<'a> {
+    pub descriptor: &'a FieldDescriptor,
+    pub default: Option<&'a str>,
+    pub index: usize,
+    pub total: usize,
+}
+
 pub trait FormInteraction {
-    fn prompt_field(
-        &mut self,
-        descriptor: &FieldDescriptor,
-        default: Option<&str>,
-    ) -> PromptResponse;
+    fn prompt_field(&mut self, context: &PromptContext<'_>) -> PromptResponse;
 
-    fn confirm(&mut self, summary: &FormSummary) -> ConfirmationResponse;
+    fn confirm(&mut self, summary: &FormSummary, lines: &[String]) -> ConfirmationResponse;
 }
 
-/// Default interactive implementation backed by `dialoguer`.
-pub struct DialoguerInteraction<'a> {
-    theme: &'a ColorfulTheme,
-}
+/// Interactive implementation that relies on the shared menu renderer and
+/// prompt components for consistent UX.
+pub struct WizardInteraction;
 
-impl<'a> DialoguerInteraction<'a> {
-    pub fn new(theme: &'a ColorfulTheme) -> Self {
-        Self { theme }
+impl WizardInteraction {
+    pub fn new() -> Self {
+        Self
     }
-}
 
-impl<'a> FormInteraction for DialoguerInteraction<'a> {
-    fn prompt_field(
-        &mut self,
-        _descriptor: &FieldDescriptor,
-        default: Option<&str>,
-    ) -> PromptResponse {
-        let mut input = Input::<String>::with_theme(self.theme);
-        if let Some(default_value) = default {
-            if !default_value.is_empty() {
-                input = input.with_initial_text(default_value);
-            }
+    fn prompt_text(&mut self, context: &PromptContext<'_>) -> PromptResponse {
+        match text_input(context.default) {
+            Ok(TextPromptResult::Value(value)) => PromptResponse::Value(value),
+            Ok(TextPromptResult::Keep) => PromptResponse::Keep,
+            Ok(TextPromptResult::Back) => PromptResponse::Back,
+            Ok(TextPromptResult::Help) => PromptResponse::Help,
+            Ok(TextPromptResult::Cancel) | Err(_) => PromptResponse::Cancel,
         }
-        input = input.allow_empty(true).with_prompt("> ");
-        let response = match input.interact_text() {
-            Ok(value) => value,
-            Err(_) => return PromptResponse::Cancel,
-        };
+    }
 
-        let trimmed = response.trim();
-        match trimmed.to_ascii_lowercase().as_str() {
-            "cancel" => PromptResponse::Cancel,
-            "back" => PromptResponse::Back,
-            "help" => PromptResponse::Help,
-            _ => {
-                if trimmed.is_empty() {
-                    if default.is_some() {
-                        PromptResponse::Keep
-                    } else {
-                        PromptResponse::Value(String::new())
-                    }
-                } else if default.map(|d| d == response).unwrap_or(false) {
+    fn prompt_choice(&mut self, context: &PromptContext<'_>, options: &[String]) -> PromptResponse {
+        let mut lines = self.choice_context_lines(context);
+        if let Some(help) = context.descriptor.help {
+            lines.push(help.to_string());
+        }
+        match choice_menu(
+            context.descriptor.label,
+            &lines,
+            options,
+            context.default,
+            context.index > 0,
+        ) {
+            Ok(ChoicePromptResult::Value(value)) => {
+                if context
+                    .default
+                    .map(|d| d.eq_ignore_ascii_case(&value))
+                    .unwrap_or(false)
+                {
                     PromptResponse::Keep
                 } else {
-                    PromptResponse::Value(response)
+                    PromptResponse::Value(value)
                 }
             }
+            Ok(ChoicePromptResult::Back) => PromptResponse::Back,
+            _ => PromptResponse::Cancel,
         }
     }
 
-    fn confirm(&mut self, _summary: &FormSummary) -> ConfirmationResponse {
-        loop {
-            let input = Input::<String>::with_theme(self.theme)
-                .with_prompt("Confirm? (yes/no/back/cancel)")
-                .allow_empty(true);
-            let response = match input.interact_text() {
-                Ok(value) => value,
-                Err(_) => return ConfirmationResponse::Cancel,
-            };
-            match response.trim().to_ascii_lowercase().as_str() {
-                "" | "y" | "yes" => return ConfirmationResponse::Confirm,
-                "n" | "no" | "cancel" => return ConfirmationResponse::Cancel,
-                "back" => return ConfirmationResponse::Back,
-                _ => {
-                    io::print_warning("Enter yes, no, back, or cancel.");
+    fn prompt_boolean(&mut self, context: &PromptContext<'_>) -> PromptResponse {
+        let options = vec!["Yes".to_string(), "No".to_string()];
+        let default_label = context.default.map(|value| {
+            if value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("yes") {
+                "Yes"
+            } else {
+                "No"
+            }
+        });
+        let mut lines = self.choice_context_lines(context);
+        if let Some(help) = context.descriptor.help {
+            lines.push(help.to_string());
+        }
+        match choice_menu(
+            context.descriptor.label,
+            &lines,
+            &options,
+            default_label,
+            context.index > 0,
+        ) {
+            Ok(ChoicePromptResult::Value(choice)) => {
+                let bool_value = if choice.eq_ignore_ascii_case("yes") {
+                    "true"
+                } else {
+                    "false"
+                };
+                if context
+                    .default
+                    .map(|d| d.eq_ignore_ascii_case(bool_value))
+                    .unwrap_or(false)
+                {
+                    PromptResponse::Keep
+                } else {
+                    PromptResponse::Value(bool_value.to_string())
                 }
             }
+            Ok(ChoicePromptResult::Back) => PromptResponse::Back,
+            _ => PromptResponse::Cancel,
+        }
+    }
+
+    fn choice_context_lines(&self, context: &PromptContext<'_>) -> Vec<String> {
+        let mut lines = vec![format!(
+            "Step {} of {} – {}",
+            context.index + 1,
+            context.total,
+            context.descriptor.label
+        )];
+        if let Some(default) = context.default {
+            lines.push(format!("Default: {}", default));
+        }
+        lines.push("Use arrow keys to highlight an option and Enter to select.".into());
+        lines.push("Press ESC to cancel.".into());
+        if context.index > 0 {
+            lines.push("Select ← Back to revisit the previous field.".into());
+        }
+        lines
+    }
+}
+
+impl FormInteraction for WizardInteraction {
+    fn prompt_field(&mut self, context: &PromptContext<'_>) -> PromptResponse {
+        match &context.descriptor.kind {
+            FieldKind::Choice(options) => self.prompt_choice(context, options),
+            FieldKind::Boolean => self.prompt_boolean(context),
+            _ => self.prompt_text(context),
+        }
+    }
+
+    fn confirm(&mut self, _summary: &FormSummary, lines: &[String]) -> ConfirmationResponse {
+        let mut context_lines = Vec::new();
+        context_lines.extend_from_slice(lines);
+        context_lines.push(String::new());
+        context_lines.push(
+            "Use the menu below to confirm, edit the previous field, or cancel. ESC cancels."
+                .into(),
+        );
+        match confirm_menu(&context_lines) {
+            Ok(ConfirmationPromptResult::Confirm) => ConfirmationResponse::Confirm,
+            Ok(ConfirmationPromptResult::Back) => ConfirmationResponse::Back,
+            _ => ConfirmationResponse::Cancel,
         }
     }
 }
@@ -1652,6 +1720,8 @@ impl<'a> FormSession<'a> {
                     .get(field.key)
                     .cloned()
                     .or_else(|| self.defaults.get(field.key).cloned()),
+                index: self.index,
+                total: self.descriptor.fields.len(),
             })
     }
 
@@ -1787,6 +1857,14 @@ pub enum FormSessionEvent {
 pub struct FormStep<'a> {
     pub descriptor: &'a FieldDescriptor,
     pub default: Option<String>,
+    pub index: usize,
+    pub total: usize,
+}
+
+impl<'a> FormStep<'a> {
+    pub fn default_value(&self) -> Option<&str> {
+        self.default.as_deref()
+    }
 }
 
 /// High-level form contract for entity-specific wizards.
@@ -1839,8 +1917,8 @@ impl<'a, F: FormFlow> FormEngine<'a, F> {
 
             if session.is_complete() {
                 let summary = build_summary(descriptor, session.values());
-                render_summary(&summary);
-                match interaction.confirm(&summary) {
+                let summary_lines = format_summary_lines(&summary);
+                match interaction.confirm(&summary, &summary_lines) {
                     ConfirmationResponse::Confirm => {
                         session.mark_complete();
                         let output = self.flow.commit(session.values().clone())?;
@@ -1869,8 +1947,18 @@ impl<'a, F: FormFlow> FormEngine<'a, F> {
                 continue;
             };
 
-            render_prompt(step.descriptor, step.default.as_deref());
-            let response = interaction.prompt_field(step.descriptor, step.default.as_deref());
+            let response = {
+                let context = PromptContext {
+                    descriptor: step.descriptor,
+                    default: step.default_value(),
+                    index: step.index,
+                    total: step.total,
+                };
+                if !matches!(context.descriptor.kind, FieldKind::Choice(_)) {
+                    render_prompt(&context);
+                }
+                interaction.prompt_field(&context)
+            };
             if let PromptResponse::Cancel = response {
                 session.mark_cancelled();
                 return Ok(FormResult::Cancelled);
@@ -1893,26 +1981,38 @@ impl<'a, F: FormFlow> FormEngine<'a, F> {
     }
 }
 
-fn render_prompt(descriptor: &FieldDescriptor, default: Option<&str>) {
-    match default {
-        Some(default_value) => io::print_info(format!("{} [{}]:", descriptor.label, default_value)),
-        None => io::print_info(format!("{}:", descriptor.label)),
+fn render_prompt(context: &PromptContext<'_>) {
+    let formatter = Formatter::new();
+    formatter.print_header(format!(
+        "Step {} of {} – {}",
+        context.index + 1,
+        context.total,
+        context.descriptor.label
+    ));
+    if let Some(default_value) = context.default {
+        formatter.print_detail(format!("Default: {}", default_value));
     }
-
-    if let FieldKind::Choice(options) = &descriptor.kind {
-        io::print_info("Options:");
-        for option in options {
-            io::print_info(format!("  {}", option));
-        }
+    if let Some(help) = context.descriptor.help {
+        formatter.print_detail(help);
     }
+    let mut instructions = vec![
+        "Type a value and press Enter to continue.",
+        "Press ESC to cancel the wizard.",
+        "Type :help for details or :clear to remove the current value.",
+    ];
+    if context.index > 0 {
+        instructions.push("Type :back to revisit the previous field.");
+    }
+    formatter.print_detail(instructions.join(" "));
 }
 
-fn render_summary(summary: &FormSummary) {
-    io::print_info("Review your entries:");
+fn format_summary_lines(summary: &FormSummary) -> Vec<String> {
+    let mut lines = Vec::new();
+    lines.push("Review your entries:".into());
     for (key, value) in &summary.entries {
-        io::print_info(format!("  {}: {}", key, value));
+        lines.push(format!("  {}: {}", key, value));
     }
-    io::print_info("Confirm to apply changes, or type back/cancel to modify.");
+    lines
 }
 
 fn build_summary(descriptor: &FormDescriptor, values: &BTreeMap<String, String>) -> FormSummary {
@@ -1955,26 +2055,18 @@ mod tests {
     }
 
     impl FormInteraction for MockInteraction {
-        fn prompt_field(
-            &mut self,
-            descriptor: &FieldDescriptor,
-            _default: Option<&str>,
-        ) -> PromptResponse {
+        fn prompt_field(&mut self, _context: &PromptContext<'_>) -> PromptResponse {
             let response = self
                 .prompts
                 .pop_front()
                 .unwrap_or(PromptResponse::Value("".into()));
             if matches!(response, PromptResponse::Help) {
                 self.help_hits += 1;
-                if descriptor.help.is_none() {
-                    // Ensure we don't stall; return keep afterwards.
-                    return PromptResponse::Keep;
-                }
             }
             response
         }
 
-        fn confirm(&mut self, _summary: &FormSummary) -> ConfirmationResponse {
+        fn confirm(&mut self, _summary: &FormSummary, _lines: &[String]) -> ConfirmationResponse {
             self.confirmations
                 .pop_front()
                 .unwrap_or(ConfirmationResponse::Confirm)
