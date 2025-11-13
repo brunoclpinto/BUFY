@@ -1,28 +1,50 @@
 use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
+use crate::cli::io;
+use crate::cli::menus::{category_menu, menu_error_to_command_error};
 use crate::cli::registry::CommandEntry;
 
 pub(crate) fn definitions() -> Vec<CommandEntry> {
     vec![CommandEntry::new(
         "category",
         "Manage categories and budgets",
-        "category <add|edit|list|budget>",
+        "category <add|edit|list|remove|show|budget>",
         cmd_category,
     )]
 }
 
 fn cmd_category(context: &mut ShellContext, args: &[&str]) -> CommandResult {
+    if context.mode() == CliMode::Interactive && args.is_empty() {
+        return run_category_menu(context);
+    }
+
     if args.is_empty() {
         return Err(CommandError::InvalidArguments(
-            "usage: category <add|edit|list>".into(),
+            "usage: category <add|edit|list|remove|show|budget>".into(),
         ));
     }
 
-    match args[0].to_lowercase().as_str() {
+    dispatch_category_action(context, args[0], &args[1..])
+}
+
+fn run_category_menu(context: &mut ShellContext) -> CommandResult {
+    let selection = category_menu::show().map_err(menu_error_to_command_error)?;
+    let Some(action) = selection else {
+        return Ok(());
+    };
+    dispatch_category_action(context, action, &[])
+}
+
+fn dispatch_category_action(
+    context: &mut ShellContext,
+    action: &str,
+    args: &[&str],
+) -> CommandResult {
+    match action.to_lowercase().as_str() {
         "add" => {
-            if context.mode() == CliMode::Interactive && args.len() == 1 {
+            if context.mode() == CliMode::Interactive && args.is_empty() {
                 context.run_category_add_wizard()
             } else {
-                context.add_category_script(&args[1..])
+                context.add_category_script(args)
             }
         }
         "edit" => {
@@ -31,8 +53,8 @@ fn cmd_category(context: &mut ShellContext, args: &[&str]) -> CommandResult {
                     "category edit is only available in interactive mode".into(),
                 ));
             }
-            let index = if args.len() > 1 {
-                args[1].parse::<usize>().map_err(|_| {
+            let index = if let Some(value) = args.first() {
+                value.parse::<usize>().map_err(|_| {
                     CommandError::InvalidArguments("category index must be numeric".into())
                 })?
             } else {
@@ -44,7 +66,12 @@ fn cmd_category(context: &mut ShellContext, args: &[&str]) -> CommandResult {
             context.run_category_edit_wizard(index)
         }
         "list" => context.list_categories(),
-        "budget" => cmd_category_budget(context, &args[1..]),
+        "show" => context.list_categories(),
+        "remove" => {
+            io::print_warning("Category removal is not available yet.");
+            Ok(())
+        }
+        "budget" => cmd_category_budget(context, args),
         other => Err(CommandError::InvalidArguments(format!(
             "unknown category subcommand `{}`",
             other

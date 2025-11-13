@@ -8,6 +8,7 @@ use super::simulation;
 
 use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
 use crate::cli::io;
+use crate::cli::menus::{ledger_menu, list_menu, menu_error_to_command_error};
 use crate::cli::registry::CommandEntry;
 use crate::core::services::SummaryService;
 
@@ -22,7 +23,7 @@ pub(crate) fn definitions() -> Vec<CommandEntry> {
         CommandEntry::new(
             "list",
             "List accounts, categories, transactions, simulations, ledgers...",
-            "list <accounts|categories|transactions|simulations>",
+            "list <accounts|categories|transactions|simulations|ledgers|backups>",
             cmd_list,
         ),
         CommandEntry::new(
@@ -41,25 +42,56 @@ pub(crate) fn definitions() -> Vec<CommandEntry> {
 }
 
 fn cmd_ledger(context: &mut ShellContext, args: &[&str]) -> CommandResult {
+    if context.mode() == CliMode::Interactive && args.is_empty() {
+        return run_ledger_menu(context);
+    }
+
     if args.is_empty() {
-        io::print_info("Ledger menu coming soon. Try `ledger new`, `ledger load`, `ledger save`, `ledger backup`, or `ledger restore`.");
-        return Ok(());
+        return Err(CommandError::InvalidArguments(
+            "usage: ledger <new|load|load-ledger|save|save-ledger|backup|list-backups|restore>"
+                .into(),
+        ));
     }
 
     let (subcommand, rest) = args.split_first().expect("non-empty args");
+    dispatch_ledger_action(context, subcommand, rest)
+}
+
+fn dispatch_ledger_action(
+    context: &mut ShellContext,
+    subcommand: &str,
+    args: &[&str],
+) -> CommandResult {
     match subcommand.to_ascii_lowercase().as_str() {
-        "new" => cmd_new_ledger(context, rest),
-        "load" => cmd_load(context, rest),
-        "load-ledger" | "load-named" => cmd_load_named(context, rest),
-        "save" => cmd_save(context, rest),
-        "save-ledger" | "save-named" => cmd_save_named(context, rest),
-        "backup" | "backup-ledger" => cmd_backup_ledger(context, rest),
-        "list-backups" | "backups" => cmd_list_backups(context, rest),
-        "restore" | "restore-ledger" => cmd_restore_ledger(context, rest),
+        "new" => cmd_new_ledger(context, args),
+        "load" => cmd_load(context, args),
+        "load-ledger" | "load-named" => cmd_load_named(context, args),
+        "save" => cmd_save(context, args),
+        "save-ledger" | "save-named" => cmd_save_named(context, args),
+        "backup" | "backup-ledger" => cmd_backup_ledger(context, args),
+        "list-backups" | "backups" => cmd_list_backups(context, args),
+        "restore" | "restore-ledger" => cmd_restore_ledger(context, args),
         other => Err(CommandError::InvalidArguments(format!(
             "unknown ledger subcommand `{}`. Available: new, load, load-ledger, save, save-ledger, backup, list-backups, restore",
             other
         ))),
+    }
+}
+
+fn run_ledger_menu(context: &mut ShellContext) -> CommandResult {
+    let selection = ledger_menu::show().map_err(menu_error_to_command_error)?;
+    let Some(action) = selection else {
+        return Ok(());
+    };
+    match action {
+        "new" => cmd_new_ledger(context, &[]),
+        "load" => cmd_load(context, &[]),
+        "save" => cmd_save(context, &[]),
+        "backup" => cmd_backup_ledger(context, &[]),
+        "restore" => cmd_restore_ledger(context, &[]),
+        "list" => cmd_ledger_overview(context),
+        "delete" => cmd_delete_ledger(context),
+        _ => Ok(()),
     }
 }
 
@@ -156,30 +188,39 @@ fn cmd_backup_ledger(context: &mut ShellContext, args: &[&str]) -> CommandResult
 }
 
 fn cmd_list(context: &mut ShellContext, args: &[&str]) -> CommandResult {
+    if context.mode() == CliMode::Interactive && args.is_empty() {
+        return run_list_menu(context);
+    }
+
     if let Some(target) = args.first() {
-        match target.to_lowercase().as_str() {
-            "accounts" => context.list_accounts(),
-            "categories" => context.list_categories(),
-            "transactions" => context.list_transactions(),
-            "simulations" => simulation::list_simulations(context),
-            other => Err(CommandError::InvalidArguments(format!(
-                "unknown list target `{}`",
-                other
-            ))),
-        }
-    } else if context.mode() == CliMode::Interactive {
-        let options = ["Accounts", "Categories", "Transactions", "Simulations"];
-        let choice = io::prompt_select_index("List items", &options).map_err(CommandError::from)?;
-        match choice {
-            0 => context.list_accounts(),
-            1 => context.list_categories(),
-            2 => context.list_transactions(),
-            _ => simulation::list_simulations(context),
-        }
+        execute_list_action(context, target)
     } else {
         Err(CommandError::InvalidArguments(
-            "usage: list <accounts|categories|transactions|simulations>".into(),
+            "usage: list <accounts|categories|transactions|simulations|ledgers|backups>".into(),
         ))
+    }
+}
+
+fn run_list_menu(context: &mut ShellContext) -> CommandResult {
+    let selection = list_menu::show().map_err(menu_error_to_command_error)?;
+    let Some(target) = selection else {
+        return Ok(());
+    };
+    execute_list_action(context, target)
+}
+
+fn execute_list_action(context: &mut ShellContext, target: &str) -> CommandResult {
+    match target.to_lowercase().as_str() {
+        "accounts" => context.list_accounts(),
+        "categories" => context.list_categories(),
+        "transactions" => context.list_transactions(),
+        "simulations" => simulation::list_simulations(context),
+        "ledgers" => cmd_ledger_overview(context),
+        "backups" => cmd_list_backups(context, &[]),
+        other => Err(CommandError::InvalidArguments(format!(
+            "unknown list target `{}`",
+            other
+        ))),
     }
 }
 
@@ -225,6 +266,22 @@ fn cmd_list_backups(context: &mut ShellContext, args: &[&str]) -> CommandResult 
         context.require_named_ledger()?
     };
     context.list_backups(&name)
+}
+
+fn cmd_ledger_overview(context: &mut ShellContext) -> CommandResult {
+    if let Some(name) = context.ledger_name() {
+        io::print_info(format!("Active ledger: {}", name));
+        io::print_info("Listing backups for the active ledger (if any)...");
+        cmd_list_backups(context, &[])
+    } else {
+        io::print_info("No ledger currently loaded. Load or create a ledger to view backups.");
+        Ok(())
+    }
+}
+
+fn cmd_delete_ledger(_context: &mut ShellContext) -> CommandResult {
+    io::print_warning("Ledger deletion workflow is not available yet.");
+    Ok(())
 }
 
 fn cmd_summary(context: &mut ShellContext, args: &[&str]) -> CommandResult {

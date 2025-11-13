@@ -4,6 +4,7 @@ use chrono::Local;
 
 use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
 use crate::cli::io;
+use crate::cli::menus::{menu_error_to_command_error, simulation_menu};
 use crate::cli::output::section as output_section;
 use crate::cli::registry::CommandEntry;
 use crate::ledger::SimulationStatus;
@@ -13,27 +14,55 @@ pub(crate) fn definitions() -> Vec<CommandEntry> {
         "simulation",
         "Manage simulations and what-if scenarios",
         "simulation <list|create|enter|leave|apply|discard|changes|add|modify|exclude>",
-        cmd_simulation_root,
+        cmd_simulation,
     )]
 }
 
-fn cmd_simulation_root(context: &mut ShellContext, args: &[&str]) -> CommandResult {
-    if args.is_empty() {
-        io::print_info(
-            "Simulation menu coming soon. Try `simulation list` or `simulation changes`.",
-        );
-        return Ok(());
+fn cmd_simulation(context: &mut ShellContext, args: &[&str]) -> CommandResult {
+    if context.mode() == CliMode::Interactive && args.is_empty() {
+        return run_simulation_menu(context);
     }
 
-    let (subcommand, rest) = args.split_first().expect("non-empty args");
-    match subcommand.to_ascii_lowercase().as_str() {
+    if let Some((subcommand, rest)) = args.split_first() {
+        dispatch_simulation_action(context, subcommand, rest)
+    } else {
+        Err(CommandError::InvalidArguments(
+            "usage: simulation <list|create|enter|leave|apply|discard|changes|add|modify|exclude>"
+                .into(),
+        ))
+    }
+}
+
+fn run_simulation_menu(context: &mut ShellContext) -> CommandResult {
+    let selection = simulation_menu::show().map_err(menu_error_to_command_error)?;
+    let Some(action) = selection else {
+        return Ok(());
+    };
+    dispatch_simulation_action(context, action, &[])
+}
+
+fn dispatch_simulation_action(
+    context: &mut ShellContext,
+    action: &str,
+    args: &[&str],
+) -> CommandResult {
+    match action.to_ascii_lowercase().as_str() {
         "list" | "ls" => list_simulations(context),
-        "create" | "new" => cmd_create_simulation(context, rest),
-        "enter" => cmd_enter_simulation(context, rest),
-        "leave" => cmd_leave_simulation(context, rest),
-        "apply" => cmd_apply_simulation(context, rest),
-        "discard" => cmd_discard_simulation(context, rest),
-        "changes" | "add" | "modify" | "exclude" | "show" => cmd_simulation(context, args),
+        "create" | "new" => cmd_create_simulation(context, args),
+        "enter" => cmd_enter_simulation(context, args),
+        "leave" => cmd_leave_simulation(context, args),
+        "apply" => cmd_apply_simulation(context, args),
+        "discard" => cmd_discard_simulation(context, args),
+        "show" => {
+            let delegated = ["changes"];
+            cmd_simulation_workflow(context, &delegated)
+        }
+        "changes" | "add" | "modify" | "exclude" => {
+            let mut forwarded: Vec<&str> = Vec::with_capacity(args.len() + 1);
+            forwarded.push(action);
+            forwarded.extend_from_slice(args);
+            cmd_simulation_workflow(context, &forwarded)
+        }
         other => Err(CommandError::InvalidArguments(format!(
             "unknown simulation subcommand `{}`. Available: list, create, enter, leave, apply, discard, changes, add, modify, exclude",
             other
@@ -240,7 +269,7 @@ fn cmd_discard_simulation(context: &mut ShellContext, args: &[&str]) -> CommandR
     Ok(())
 }
 
-fn cmd_simulation(context: &mut ShellContext, args: &[&str]) -> CommandResult {
+fn cmd_simulation_workflow(context: &mut ShellContext, args: &[&str]) -> CommandResult {
     if args.is_empty() {
         return Err(CommandError::InvalidArguments(
             "usage: simulation <changes|add|modify|exclude> [simulation_name]".into(),

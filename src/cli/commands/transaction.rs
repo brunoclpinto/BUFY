@@ -2,34 +2,56 @@ use chrono::Utc;
 
 use crate::cli::core::{CliMode, CommandError, CommandResult, RecurrenceListFilter, ShellContext};
 use crate::cli::io;
+use crate::cli::menus::{menu_error_to_command_error, transaction_menu};
 use crate::cli::registry::CommandEntry;
 pub(crate) fn definitions() -> Vec<CommandEntry> {
     vec![CommandEntry::new(
         "transaction",
         "Manage transactions via wizard flows",
-        "transaction <add|edit|remove|show|complete|recurring>",
+        "transaction <add|edit|remove|show|list|complete|recurring>",
         cmd_transaction,
     )]
 }
 
 fn cmd_transaction(context: &mut ShellContext, args: &[&str]) -> CommandResult {
+    if context.mode() == CliMode::Interactive && args.is_empty() {
+        return run_transaction_menu(context);
+    }
+
     if let Some((subcommand, rest)) = args.split_first() {
-        match subcommand.to_ascii_lowercase().as_str() {
-            "add" => context.transaction_add(rest),
-            "edit" => context.transaction_edit(rest),
-            "remove" => context.transaction_remove(rest),
-            "show" => context.transaction_show(rest),
-            "complete" => context.transaction_complete(rest),
-            "recurring" => cmd_recurring(context, rest),
-            other => Err(CommandError::InvalidArguments(format!(
-                "unknown transaction subcommand `{}`",
-                other
-            ))),
-        }
+        dispatch_transaction_action(context, subcommand, rest)
     } else {
         Err(CommandError::InvalidArguments(
-            "usage: transaction <add|edit|remove|show|complete|recurring>".into(),
+            "usage: transaction <add|edit|remove|show|list|complete|recurring>".into(),
         ))
+    }
+}
+
+fn run_transaction_menu(context: &mut ShellContext) -> CommandResult {
+    let selection = transaction_menu::show().map_err(menu_error_to_command_error)?;
+    let Some(action) = selection else {
+        return Ok(());
+    };
+    dispatch_transaction_action(context, action, &[])
+}
+
+fn dispatch_transaction_action(
+    context: &mut ShellContext,
+    subcommand: &str,
+    args: &[&str],
+) -> CommandResult {
+    match subcommand.to_ascii_lowercase().as_str() {
+        "add" => context.transaction_add(args),
+        "edit" => context.transaction_edit(args),
+        "remove" => context.transaction_remove(args),
+        "show" => context.transaction_show(args),
+        "list" => context.list_transactions(),
+        "complete" => context.transaction_complete(args),
+        "recurring" => cmd_recurring(context, args),
+        other => Err(CommandError::InvalidArguments(format!(
+            "unknown transaction subcommand `{}`",
+            other
+        ))),
     }
 }
 
