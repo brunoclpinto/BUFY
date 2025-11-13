@@ -68,7 +68,7 @@ fn dispatch_action(context: &mut ShellContext, subcommand: &str, args: &[&str]) 
 }
 
 fn run_ledger_menu(context: &mut ShellContext) -> CommandResult {
-    let selection = ledger_menu::show().map_err(menu_error_to_command_error)?;
+    let selection = ledger_menu::show(context).map_err(menu_error_to_command_error)?;
     if let Some(action) = selection {
         match action.as_str() {
             "new" => ledger_handlers::handle_new(context, &[]),
@@ -87,7 +87,7 @@ fn run_ledger_menu(context: &mut ShellContext) -> CommandResult {
 
 fn cmd_list(context: &mut ShellContext, args: &[&str]) -> CommandResult {
     if context.mode() == CliMode::Interactive && args.is_empty() {
-        let selection = list_menu::show().map_err(menu_error_to_command_error)?;
+        let selection = list_menu::show(context).map_err(menu_error_to_command_error)?;
         if let Some(action) = selection {
             list_handlers::dispatch(context, action.as_str())
         } else {

@@ -27,7 +27,7 @@ fn cmd_account(context: &mut ShellContext, args: &[&str]) -> CommandResult {
 }
 
 fn run_account_menu(context: &mut ShellContext) -> CommandResult {
-    let selection = account_menu::show().map_err(menu_error_to_command_error)?;
+    let selection = account_menu::show(context).map_err(menu_error_to_command_error)?;
     let Some(action) = selection else {
         return Ok(());
     };

@@ -14,7 +14,7 @@ pub(crate) fn definitions() -> Vec<CommandEntry> {
 
 fn cmd_simulation(context: &mut ShellContext, args: &[&str]) -> CommandResult {
     if context.mode() == CliMode::Interactive && args.is_empty() {
-        let selection = simulation_menu::show().map_err(menu_error_to_command_error)?;
+        let selection = simulation_menu::show(context).map_err(menu_error_to_command_error)?;
         if let Some(action) = selection {
             return dispatch_action(context, action.as_str(), &[]);
         }

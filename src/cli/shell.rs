@@ -28,8 +28,7 @@ fn run_interactive(context: &mut ShellContext) -> Result<(), CliError> {
         if !context.running {
             break;
         }
-        let prompt = context.prompt();
-        match main_menu::show(prompt.as_str()) {
+        match main_menu::show(context) {
             Ok(Some(line)) => {
                 let trimmed = line.trim();
                 if trimmed.is_empty() {

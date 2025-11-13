@@ -1,8 +1,11 @@
+use crate::cli::core::ShellContext;
+use crate::cli::ui::banner::Banner;
 use crate::cli::ui::menu_renderer::{MenuRenderer, MenuUI, MenuUIItem};
 
 use super::MenuError;
 
-pub fn show() -> Result<Option<String>, MenuError> {
+pub fn show(context: &ShellContext) -> Result<Option<String>, MenuError> {
+    Banner::render(context);
     let renderer = MenuRenderer::new();
     let menu = MenuUI::new("category menu", menu_items());
     renderer.show(&menu)

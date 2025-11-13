@@ -56,9 +56,8 @@ use super::registry::{CommandEntry, CommandRegistry};
 #[cfg(test)]
 use crate::cli::shell_context::SelectionOverride;
 pub use crate::cli::shell_context::{CliMode, ShellContext};
+use crate::cli::ui::banner::Banner;
 use crate::cli::ui::formatting::Formatter;
-
-const PROMPT_ARROW: &str = "⮞";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LoopControl {
@@ -394,22 +393,6 @@ impl ShellContext {
                     "No named ledger associated. Use `save-ledger <name>` once to bind it.".into(),
                 )
             })
-    }
-
-    pub(crate) fn prompt(&self) -> String {
-        let ledger_segment = {
-            let manager = self.manager();
-            manager
-                .current_name()
-                .map(|name| format!("ledger: {}", name))
-                .unwrap_or_else(|| "no-ledger".to_string())
-        };
-
-        let sim_segment = self
-            .active_simulation_name()
-            .map(|name| format!(" (simulation: {})", name))
-            .unwrap_or_default();
-        format!("{ledger_segment}{sim_segment} {PROMPT_ARROW}")
     }
 
     fn report_load(&self, warnings: &[String], migrations: &[String]) {
@@ -1004,6 +987,7 @@ impl ShellContext {
         })?;
 
         let wizard = AccountWizard::new_create(existing_names, category_options);
+        Banner::render(self);
         let mut interaction = WizardInteraction::new();
         match FormEngine::new(&wizard).run(&mut interaction).unwrap() {
             FormResult::Cancelled => {
@@ -1043,6 +1027,7 @@ impl ShellContext {
         })?;
 
         let wizard = AccountWizard::new_edit(existing_names, initial, category_options);
+        Banner::render(self);
         let mut interaction = WizardInteraction::new();
         match FormEngine::new(&wizard).run(&mut interaction).unwrap() {
             FormResult::Cancelled => {
@@ -1068,6 +1053,7 @@ impl ShellContext {
         })?;
 
         let wizard = CategoryWizard::new_create(existing_names, parent_options);
+        Banner::render(self);
         let mut interaction = WizardInteraction::new();
         match FormEngine::new(&wizard).run(&mut interaction).unwrap() {
             FormResult::Cancelled => {
@@ -1131,6 +1117,7 @@ impl ShellContext {
             allow_kind_change,
             allow_custom_change,
         );
+        Banner::render(self);
         let mut interaction = WizardInteraction::new();
         match FormEngine::new(&wizard).run(&mut interaction).unwrap() {
             FormResult::Cancelled => {
@@ -1967,6 +1954,7 @@ impl ShellContext {
         };
         let wizard =
             TransactionWizard::new_create(accounts, categories, today, min_date, default_status);
+        Banner::render(self);
         let mut interaction = WizardInteraction::new();
         match FormEngine::new(&wizard).run(&mut interaction).unwrap() {
             FormResult::Cancelled => {
@@ -2012,6 +2000,7 @@ impl ShellContext {
         let today = Utc::now().date_naive();
         let min_date = created_at.date_naive();
         let wizard = TransactionWizard::new_edit(accounts, categories, today, min_date, initial);
+        Banner::render(self);
         let mut interaction = WizardInteraction::new();
         match FormEngine::new(&wizard).run(&mut interaction).unwrap() {
             FormResult::Cancelled => {
