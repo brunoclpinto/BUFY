@@ -4,8 +4,7 @@ use crate::cli::ui::menu_renderer::{MenuRenderer, MenuUI, MenuUIItem};
 
 use super::MenuError;
 
-const MAIN_MENU_HINT: &str =
-    "(Use arrow keys to navigate, Enter to select, ESC to exit)";
+const MAIN_MENU_HINT: &str = "(Use arrow keys to navigate, Enter to select, ESC to exit)";
 
 pub fn show(context: &ShellContext) -> Result<Option<String>, MenuError> {
     let renderer = MenuRenderer::new();
@@ -35,13 +34,13 @@ fn main_menu_items() -> Vec<MenuUIItem> {
             "simulation",
             "Manage simulations and what-if scenarios",
         ),
+        MenuUIItem::new("forecast", "forecast", "Forecast upcoming activity"),
         MenuUIItem::new(
             "list",
             "list",
             "List accounts, categories, transactions, simulations...",
         ),
         MenuUIItem::new("summary", "summary", "Show ledger summary"),
-        MenuUIItem::new("forecast", "forecast", "Forecast upcoming activity"),
         MenuUIItem::new("config", "config", "Global CLI preferences"),
         MenuUIItem::new("help", "help", "Show available commands"),
         MenuUIItem::new("version", "version", "Show build metadata"),
