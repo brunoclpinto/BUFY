@@ -41,7 +41,10 @@ fn run_interactive(context: &mut ShellContext) -> Result<(), CliError> {
                     Err(err) => context.report_error(err)?,
                 }
             }
-            Ok(None) => continue,
+            Ok(None) => {
+                Formatter::new().print_detail("Exiting shell.");
+                break;
+            }
             Err(MenuError::Interrupted) => {
                 if context.confirm_exit()? {
                     break;

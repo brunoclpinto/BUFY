@@ -29,7 +29,7 @@ exit
 fn test_account_add_wizard_launches() {
     let harness = NavigationTestHarness::new();
     setup_basic_ledger(&harness, "WizardLedger");
-    let output = harness.run_interactive(&["DOWN,ENTER", "ENTER", "END,ENTER"], &["<ESC>"]);
+    let output = harness.run_interactive(&["DOWN,ENTER", "ENTER", "ESC"], &["<ESC>"]);
     assert_snapshot!("account_add_wizard_launches", output.stdout);
 }
 
@@ -37,7 +37,7 @@ fn test_account_add_wizard_launches() {
 fn test_account_add_wizard_cancel_esc() {
     let harness = NavigationTestHarness::new();
     setup_basic_ledger(&harness, "CancelLedger");
-    let output = harness.run_interactive(&["DOWN,ENTER", "ENTER", "END,ENTER"], &["<ESC>"]);
+    let output = harness.run_interactive(&["DOWN,ENTER", "ENTER", "ESC"], &["<ESC>"]);
     assert!(
         output.stdout.contains("Account creation cancelled."),
         "Expected cancellation notice\n{}",
@@ -49,7 +49,7 @@ fn test_account_add_wizard_cancel_esc() {
 fn test_wizard_does_not_modify_state_on_cancel() {
     let harness = NavigationTestHarness::new();
     setup_basic_ledger(&harness, "StateLedger");
-    let _ = harness.run_interactive(&["DOWN,ENTER", "ENTER", "END,ENTER"], &["<ESC>"]);
+    let _ = harness.run_interactive(&["DOWN,ENTER", "ENTER", "ESC"], &["<ESC>"]);
     let inspection = harness.run_script("account list\nexit\n");
     assert!(
         inspection.stdout.contains("No accounts defined."),
@@ -63,7 +63,7 @@ fn test_transaction_edit_wizard_launches() {
     let harness = NavigationTestHarness::new();
     setup_transaction_ledger(&harness, "TxnLedger");
     let output = harness.run_interactive_with_env(
-        &["DOWN,DOWN,DOWN,ENTER", "DOWN,ENTER", "ESC", "END,ENTER"],
+        &["DOWN,DOWN,DOWN,ENTER", "DOWN,ENTER", "ESC"],
         &["<ESC>"],
         &[("BUFY_TEST_SELECTIONS", "0")],
     );
@@ -74,7 +74,7 @@ fn test_transaction_edit_wizard_launches() {
 fn test_wizard_field_prompts_correct_order() {
     let harness = NavigationTestHarness::new();
     setup_basic_ledger(&harness, "OrderLedger");
-    let output = harness.run_interactive(&["DOWN,ENTER", "ENTER", "END,ENTER"], &["", "<ESC>"]);
+    let output = harness.run_interactive(&["DOWN,ENTER", "ENTER", "ESC"], &["", "<ESC>"]);
     assert!(
         output.stdout.contains("Step 1 of"),
         "Expected wizard prompt header\n{}",

@@ -3,48 +3,49 @@ source: tests/navigation_submenu_tests.rs
 expression: output.stdout
 ---
 no-ledger ⮞
-=== === Main menu === ===
+=== Main menu ===
 
-     ledger         Ledger operations (new, load, save, backup, restore...)
-     account        Manage accounts via wizard flows
-     category       Manage categories and budgets
-     transaction    Manage transactions via wizard flows
- ▸   simulation     Manage simulations and what-if scenarios
-     list           List accounts, categories, transactions, simulations...
-     summary        Show ledger summary
-     forecast       Forecast upcoming activity
-     config         Global CLI preferences
-     help           Show available commands
-     version        Show build metadata
-     exit           Exit the shell
+   ledger       Ledger operations (new, load, save, backup, restore...)
+   account      Manage accounts via wizard flows
+   category     Manage categories and budgets
+   transaction  Manage transactions via wizard flows
+▸  simulation   Manage simulations and what-if scenarios
+   list         List accounts, categories, transactions, simulations...
+   summary      Show ledger summary
+   forecast     Forecast upcoming activity
+   config       Global CLI preferences
+   help         Show available commands
+   version      Show build metadata
+   exit         Exit the shell
+
+(Use arrow keys to navigate, Enter to select, ESC to exit)
+no-ledger ⮞
+=== simulation menu ===
+
+▸  new      Create a simulation
+   enter    Enter a simulation
+   leave    Leave active simulation
+   apply    Apply simulation changes
+   discard  Discard a simulation
+   list     List simulations
+   show     Show simulation details
 
 (Use arrow keys to navigate, Enter to select, ESC to go back)
 no-ledger ⮞
-=== === simulation menu === ===
+=== Main menu ===
 
- ▸   new        Create a simulation
-     enter      Enter a simulation
-     leave      Leave active simulation
-     apply      Apply simulation changes
-     discard    Discard a simulation
-     list       List simulations
-     show       Show simulation details
+▸  ledger       Ledger operations (new, load, save, backup, restore...)
+   account      Manage accounts via wizard flows
+   category     Manage categories and budgets
+   transaction  Manage transactions via wizard flows
+   simulation   Manage simulations and what-if scenarios
+   list         List accounts, categories, transactions, simulations...
+   summary      Show ledger summary
+   forecast     Forecast upcoming activity
+   config       Global CLI preferences
+   help         Show available commands
+   version      Show build metadata
+   exit         Exit the shell
 
-(Use arrow keys to navigate, Enter to select, ESC to go back)
-no-ledger ⮞
-=== === Main menu === ===
-
-     ledger         Ledger operations (new, load, save, backup, restore...)
-     account        Manage accounts via wizard flows
-     category       Manage categories and budgets
-     transaction    Manage transactions via wizard flows
-     simulation     Manage simulations and what-if scenarios
-     list           List accounts, categories, transactions, simulations...
-     summary        Show ledger summary
-     forecast       Forecast upcoming activity
-     config         Global CLI preferences
-     help           Show available commands
-     version        Show build metadata
- ▸   exit           Exit the shell
-
-(Use arrow keys to navigate, Enter to select, ESC to go back)
+(Use arrow keys to navigate, Enter to select, ESC to exit)
+Exiting shell.

@@ -3,14 +3,14 @@ use std::io::{self, Stdout, Write};
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
-    style::{Attribute, SetAttribute},
     terminal::{self, ClearType},
     ExecutableCommand,
 };
 
 use crate::cli::output::{current_preferences, OutputPreferences};
-use crate::cli::ui::formatting::Formatter;
 use crate::cli::ui::test_mode::{self, MenuTestEvent};
+
+const DEFAULT_HINT: &str = "(Use arrow keys to navigate, Enter to select, ESC to go back)";
 
 #[derive(Clone, Debug)]
 pub struct MenuUI {
@@ -18,6 +18,7 @@ pub struct MenuUI {
     pub context: Option<String>,
     pub items: Vec<MenuUIItem>,
     pub initial_index: Option<usize>,
+    pub footer_hint: Option<String>,
 }
 
 impl MenuUI {
@@ -27,6 +28,7 @@ impl MenuUI {
             context: None,
             items,
             initial_index: None,
+            footer_hint: None,
         }
     }
 
@@ -37,6 +39,11 @@ impl MenuUI {
 
     pub fn with_initial_index(mut self, index: usize) -> Self {
         self.initial_index = Some(index);
+        self
+    }
+
+    pub fn with_footer_hint(mut self, hint: impl Into<String>) -> Self {
+        self.footer_hint = Some(hint.into());
         self
     }
 }
@@ -103,15 +110,10 @@ impl MenuRenderer {
         if selected_index >= menu.items.len() {
             selected_index = menu.items.len() - 1;
         }
-        let max_label_len = menu
-            .items
-            .iter()
-            .map(|item| item.label.len())
-            .max()
-            .unwrap_or(0);
+        let label_width = self.label_width(menu);
 
         let result = loop {
-            self.render(&mut stdout, menu, selected_index, max_label_len)?;
+            self.draw_frame(&mut stdout, menu, selected_index, label_width)?;
             let event = event::read()?;
             match event {
                 Event::Key(key) => {
@@ -191,7 +193,7 @@ impl MenuRenderer {
                     selected_index = (selected_index + 1) % len;
                 }
                 MenuTestEvent::Home => selected_index = 0,
-                MenuTestEvent::End => selected_index = len - 1,
+                MenuTestEvent::End => selected_index = len.saturating_sub(1),
                 MenuTestEvent::PageUp => {
                     selected_index = selected_index.saturating_sub(3);
                 }
@@ -200,8 +202,7 @@ impl MenuRenderer {
                 }
                 MenuTestEvent::Enter => {
                     self.print_snapshot(menu, selected_index);
-                    let key = menu.items[selected_index].key.clone();
-                    return Ok(Some(key));
+                    return Ok(Some(menu.items[selected_index].key.clone()));
                 }
                 MenuTestEvent::Esc => {
                     self.print_snapshot(menu, selected_index);
@@ -209,89 +210,75 @@ impl MenuRenderer {
                 }
             }
         }
-        self.print_snapshot(menu, selected_index);
         panic!(
             "Scripted menu events must end with ENTER or ESC for `{}`",
             menu.title
         );
     }
 
-    fn print_snapshot(&self, menu: &MenuUI, selected_index: usize) {
-        let formatter = Formatter::new();
-        if let Some(context) = &menu.context {
-            println!("{}", formatter.detail_text(context));
-            println!();
-        }
-        println!("{}", formatter.header_text(&menu.title));
-        println!();
-        let max_label_len = menu
-            .items
+    fn label_width(&self, menu: &MenuUI) -> usize {
+        menu.items
             .iter()
             .map(|item| item.label.len())
             .max()
-            .unwrap_or(0);
-        for (index, item) in menu.items.iter().enumerate() {
-            let pointer = if index == selected_index {
-                if self.prefs.plain_mode {
-                    ">"
-                } else {
-                    "▸"
-                }
-            } else {
-                " "
-            };
-            let row =
-                formatter.format_two_column_row(&item.label, &item.description, max_label_len);
-            println!(" {pointer} {}", row);
-        }
-        println!();
-        println!("{}", formatter.detail_text(formatter.navigation_hint()));
+            .unwrap_or(0)
     }
 
-    fn render(
+    fn draw_frame(
         &self,
         stdout: &mut Stdout,
         menu: &MenuUI,
         selected_index: usize,
-        max_label_len: usize,
+        label_width: usize,
     ) -> Result<(), io::Error> {
         self.clear_screen(stdout)?;
-        let formatter = Formatter::new();
+        self.write_layout(stdout, menu, selected_index, label_width)?;
+        stdout.flush()
+    }
+
+    fn write_layout(
+        &self,
+        writer: &mut dyn Write,
+        menu: &MenuUI,
+        selected_index: usize,
+        label_width: usize,
+    ) -> Result<(), io::Error> {
         if let Some(context) = &menu.context {
-            writeln!(stdout, "{}", formatter.detail_text(context))?;
-            writeln!(stdout)?;
+            writeln!(writer, "{context}")?;
         }
-        writeln!(stdout, "{}", formatter.header_text(&menu.title))?;
-        writeln!(stdout)?;
+        writeln!(writer, "=== {} ===", menu.title)?;
+        writeln!(writer)?;
 
         for (index, item) in menu.items.iter().enumerate() {
-            let is_selected = index == selected_index;
-            let pointer = if is_selected {
+            let marker = if index == selected_index {
                 if self.prefs.plain_mode {
-                    ">"
+                    '>'
                 } else {
-                    "▸"
+                    '▸'
                 }
             } else {
-                " "
+                ' '
             };
-            let row =
-                formatter.format_two_column_row(&item.label, &item.description, max_label_len);
-            if is_selected {
-                stdout.execute(SetAttribute(Attribute::Reverse))?;
-            } else {
-                stdout.execute(SetAttribute(Attribute::Reset))?;
-            }
-            write!(stdout, " {pointer} {}", row)?;
-            stdout.execute(SetAttribute(Attribute::Reset))?;
-            writeln!(stdout)?;
+            writeln!(
+                writer,
+                "{marker}  {:<width$}  {}",
+                item.label,
+                item.description,
+                width = label_width
+            )?;
         }
 
-        let hint = formatter.navigation_hint();
-        writeln!(stdout)?;
-        writeln!(stdout, "{}", formatter.detail_text(hint))?;
-        stdout.flush()?;
+        writeln!(writer)?;
+        let hint = menu.footer_hint.as_deref().unwrap_or(DEFAULT_HINT);
+        writeln!(writer, "{hint}")?;
         Ok(())
+    }
+
+    fn print_snapshot(&self, menu: &MenuUI, selected_index: usize) {
+        let label_width = self.label_width(menu);
+        let mut stdout = io::stdout();
+        self.write_layout(&mut stdout, menu, selected_index, label_width)
+            .expect("write snapshot layout");
     }
 
     fn clear_screen(&self, stdout: &mut Stdout) -> Result<(), io::Error> {

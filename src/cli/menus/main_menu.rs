@@ -7,7 +7,8 @@ use super::MenuError;
 pub fn show(context: &ShellContext) -> Result<Option<String>, MenuError> {
     Banner::render(context);
     let renderer = MenuRenderer::new();
-    let menu = MenuUI::new("Main menu", main_menu_items());
+    let menu = MenuUI::new("Main menu", main_menu_items())
+        .with_footer_hint("(Use arrow keys to navigate, Enter to select, ESC to exit)");
     renderer.show(&menu)
 }
 

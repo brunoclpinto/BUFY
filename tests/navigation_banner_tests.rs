@@ -52,7 +52,7 @@ exit
 fn test_banner_after_wizard_cancel() {
     let harness = NavigationTestHarness::new();
     harness.run_script("ledger new BannerW monthly\nledger save-ledger BannerW\nexit\n");
-    let output = harness.run_interactive(&["DOWN,ENTER", "ENTER", "END,ENTER"], &["<ESC>"]);
+    let output = harness.run_interactive(&["DOWN,ENTER", "ENTER", "ESC"], &["<ESC>"]);
     assert!(
         output.stdout.matches("ledger: BannerW").count() >= 2,
         "Expected ledger banner before and after wizard\n{}",
