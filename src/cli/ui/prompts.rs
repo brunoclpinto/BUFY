@@ -18,6 +18,7 @@ pub enum TextPromptResult {
     Back,
     Help,
     Cancel,
+    Escape,
 }
 
 pub enum ChoicePromptResult {
@@ -40,6 +41,7 @@ pub fn text_input(label: &str, default: Option<&str>) -> io::Result<TextPromptRe
             TextTestInput::Back => TextPromptResult::Back,
             TextTestInput::Help => TextPromptResult::Help,
             TextTestInput::Cancel => TextPromptResult::Cancel,
+            TextTestInput::Escape => TextPromptResult::Escape,
         });
     }
 
@@ -72,7 +74,7 @@ pub fn text_input(label: &str, default: Option<&str>) -> io::Result<TextPromptRe
                     KeyCode::Esc => {
                         guard.deactivate();
                         println!();
-                        return Ok(TextPromptResult::Cancel);
+                        return Ok(TextPromptResult::Escape);
                     }
                     KeyCode::Enter => {
                         guard.deactivate();

@@ -20,6 +20,7 @@ pub enum TextTestInput {
     Back,
     Help,
     Cancel,
+    Escape,
 }
 
 static MENU_EVENTS: Lazy<Option<Mutex<VecDeque<Vec<MenuTestEvent>>>>> = Lazy::new(|| {
@@ -104,7 +105,8 @@ fn parse_menu_event(token: &str) -> Option<MenuTestEvent> {
 
 fn parse_text_input(token: &str) -> TextTestInput {
     match token.to_ascii_uppercase().as_str() {
-        "<ESC>" | "ESC" => TextTestInput::Cancel,
+        "<ESC>" | "ESC" => TextTestInput::Escape,
+        "<CANCEL>" => TextTestInput::Cancel,
         "<BACK>" | "BACK" => TextTestInput::Back,
         "<HELP>" | "HELP" => TextTestInput::Help,
         "<KEEP>" | "KEEP" => TextTestInput::Keep,

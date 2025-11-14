@@ -4,7 +4,7 @@ expression: cleaned
 ---
 ✔ Automatically loaded last ledger `TxnLedger`.
 ledger: TxnLedger ⮞
-=== Main menu - Ledger: TxnLedger ===
+=== Main menu ===
 
   Ledger       Ledger operations (new, load, save, backup, restore...)
   Account      Manage accounts via wizard flows
@@ -47,7 +47,7 @@ Press ESC to cancel.
 (Use arrow keys to navigate, Enter to select, ESC to go back)
 Transaction update cancelled.
 ledger: TxnLedger ⮞
-=== Main menu - Ledger: TxnLedger ===
+=== Main menu ===
 
 > Ledger       Ledger operations (new, load, save, backup, restore...)
   Account      Manage accounts via wizard flows

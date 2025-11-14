@@ -1563,6 +1563,13 @@ impl WizardInteraction {
             Ok(TextPromptResult::Keep) => PromptResponse::Keep,
             Ok(TextPromptResult::Back) => PromptResponse::Back,
             Ok(TextPromptResult::Help) => PromptResponse::Help,
+            Ok(TextPromptResult::Escape) => {
+                if context.index == 0 {
+                    PromptResponse::Cancel
+                } else {
+                    PromptResponse::Back
+                }
+            }
             Ok(TextPromptResult::Cancel) | Err(_) => PromptResponse::Cancel,
         }
     }
@@ -1995,13 +2002,15 @@ fn render_prompt(context: &PromptContext<'_>) {
     if let Some(help) = context.descriptor.help {
         formatter.print_detail(help);
     }
-    let mut instructions = vec![
-        "Type a value and press Enter to continue.",
-        "Press ESC to cancel the wizard.",
-        "Type :help for details or :clear to remove the current value.",
-    ];
+    let mut instructions = vec!["Type a value and press Enter to continue.".to_string()];
+    if context.index == 0 {
+        instructions.push("Press ESC to cancel the wizard.".into());
+    } else {
+        instructions.push("Press ESC to return to the previous field.".into());
+    }
+    instructions.push("Type :help for details or :clear to remove the current value.".into());
     if context.index > 0 {
-        instructions.push("Type :back to revisit the previous field.");
+        instructions.push("Type :back to revisit the previous field.".into());
     }
     formatter.print_detail(instructions.join(" "));
 }

@@ -4,7 +4,7 @@ expression: output.stdout
 ---
 ✔ Automatically loaded last ledger `WizardLedger`.
 ledger: WizardLedger ⮞
-=== Main menu - Ledger: WizardLedger ===
+=== Main menu ===
 
   Ledger       Ledger operations (new, load, save, backup, restore...)
 > Account      Manage accounts via wizard flows
@@ -36,7 +36,7 @@ ledger: WizardLedger ⮞
 Type a value and press Enter to continue. Press ESC to cancel the wizard. Type :help for details or :clear to remove the current value.
 Account creation cancelled.
 ledger: WizardLedger ⮞
-=== Main menu - Ledger: WizardLedger ===
+=== Main menu ===
 
 > Ledger       Ledger operations (new, load, save, backup, restore...)
   Account      Manage accounts via wizard flows
