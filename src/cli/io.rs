@@ -6,13 +6,16 @@ use std::{
 
 use dialoguer::{
     theme::{ColorfulTheme, SimpleTheme, Theme},
-    Confirm, Input, Select,
+    Confirm, Select,
 };
 
 use crate::{
     cli::core::CliError,
     cli::output::{self, OutputPreferences},
-    cli::ui::formatting::Formatter,
+    cli::ui::{
+        formatting::Formatter,
+        prompts::{text_input, TextPromptResult},
+    },
     config::Config,
 };
 
@@ -72,16 +75,31 @@ fn guard_to_theme<'a>(
 }
 
 /// Prompt the user for free-form text input with an optional default.
-pub fn prompt_text(label: &str, default: Option<&str>) -> Result<String, CliError> {
-    let guard = theme_guard();
-    let theme = guard_to_theme(&guard);
-    let mut input = Input::<String>::with_theme(theme).with_prompt(label);
+/// Returns `Ok(None)` when the user cancels with ESC/back/cancel controls.
+pub fn prompt_text(label: &str, default: Option<&str>) -> Result<Option<String>, CliError> {
+    let formatter = Formatter::new();
+    formatter.print_detail(format!("{label}:"));
     if let Some(value) = default {
-        input = input.with_initial_text(value);
+        formatter.print_detail(format!("Default: {value}"));
     }
-    input
-        .interact_text()
-        .map_err(|err| CliError::Input(err.to_string()))
+    formatter.print_detail("Type a value and press Enter. Press ESC to cancel.");
+
+    loop {
+        match text_input(label, default) {
+            Ok(TextPromptResult::Value(value)) => return Ok(Some(value)),
+            Ok(TextPromptResult::Keep) => {
+                let fallback = default.unwrap_or_default();
+                return Ok(Some(fallback.to_string()));
+            }
+            Ok(TextPromptResult::Help) => {
+                formatter.print_detail("Type a value and press Enter. Press ESC to cancel.");
+            }
+            Ok(TextPromptResult::Back)
+            | Ok(TextPromptResult::Cancel)
+            | Ok(TextPromptResult::Escape) => return Ok(None),
+            Err(err) => return Err(CliError::Input(err.to_string())),
+        }
+    }
 }
 
 /// Prompt the user to choose a value from the provided options, returning the index.

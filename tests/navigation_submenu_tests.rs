@@ -64,3 +64,20 @@ fn test_submenu_invalid_input_handling() {
         output.stdout
     );
 }
+
+#[test]
+fn test_ledger_load_prompt_escape_cancels() {
+    let harness = NavigationTestHarness::new();
+    let output =
+        harness.run_interactive(&["ENTER", "DOWN,ENTER", "ESC", "ESC"], &["<ESC>"]);
+    assert!(
+        output.stdout.contains("Operation cancelled."),
+        "Expected ESC to cancel the load prompt\n{}",
+        output.stdout
+    );
+    assert!(
+        output.stdout.contains("Path to ledger JSON"),
+        "Prompt output should echo the label for context:\n{}",
+        output.stdout
+    );
+}

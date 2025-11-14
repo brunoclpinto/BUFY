@@ -1,9 +1,10 @@
 ---
 source: tests/navigation_submenu_tests.rs
+assertion_line: 17
 expression: output.stdout
 ---
 no-ledger ⮞
-=== Main menu - No Ledger ===
+=== Main menu ===
 
   Ledger       Ledger operations (new, load, save, backup, restore...)
 > Account      Manage accounts via wizard flows
@@ -30,7 +31,7 @@ no-ledger ⮞
 
 (Use arrow keys to navigate, Enter to select, ESC to go back)
 no-ledger ⮞
-=== Main menu - No Ledger ===
+=== Main menu ===
 
 > Ledger       Ledger operations (new, load, save, backup, restore...)
   Account      Manage accounts via wizard flows

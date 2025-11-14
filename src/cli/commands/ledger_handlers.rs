@@ -19,7 +19,11 @@ pub fn handle_load(context: &mut ShellContext, args: &[&str]) -> CommandResult {
         context.load_ledger(&path)
     } else if context.mode() == CliMode::Interactive {
         let response = io::prompt_text("Path to ledger JSON", None).map_err(CommandError::from)?;
-        context.load_ledger(&PathBuf::from(response.trim()))
+        let Some(text) = response else {
+            io::print_info("Operation cancelled.");
+            return Ok(());
+        };
+        context.load_ledger(&PathBuf::from(text.trim()))
     } else {
         Err(CommandError::InvalidArguments(
             "usage: ledger load <path>".into(),
@@ -31,7 +35,12 @@ pub fn handle_load_named(context: &mut ShellContext, args: &[&str]) -> CommandRe
     let name = if let Some(name) = args.first() {
         (*name).to_string()
     } else if context.mode() == CliMode::Interactive {
-        io::prompt_text("Ledger name to load", None).map_err(CommandError::from)?
+        let response = io::prompt_text("Ledger name to load", None).map_err(CommandError::from)?;
+        let Some(text) = response else {
+            io::print_info("Operation cancelled.");
+            return Ok(());
+        };
+        text
     } else {
         return Err(CommandError::InvalidArguments(
             "usage: ledger load-ledger <name>".into(),
@@ -59,11 +68,20 @@ pub fn handle_save(context: &mut ShellContext, args: &[&str]) -> CommandResult {
             io::prompt_select_index("Choose save method", &["Name in store", "Custom path"])
                 .map_err(CommandError::from)?;
         if choice == 0 {
-            let name = io::prompt_text("Ledger name", Some(suggested.as_str()))
+            let response = io::prompt_text("Ledger name", Some(suggested.as_str()))
                 .map_err(CommandError::from)?;
+            let Some(name) = response else {
+                io::print_info("Operation cancelled.");
+                return Ok(());
+            };
             context.save_named_ledger(&name)
         } else {
-            let path = io::prompt_text("Save ledger to path", None).map_err(CommandError::from)?;
+            let response =
+                io::prompt_text("Save ledger to path", None).map_err(CommandError::from)?;
+            let Some(path) = response else {
+                io::print_info("Operation cancelled.");
+                return Ok(());
+            };
             context.save_to_path(&PathBuf::from(path.trim()))
         }
     } else {
@@ -79,7 +97,12 @@ pub fn handle_save_named(context: &mut ShellContext, args: &[&str]) -> CommandRe
     } else if let Some(existing) = context.ledger_name().map(|s| s.to_string()) {
         existing
     } else if context.mode() == CliMode::Interactive {
-        io::prompt_text("Ledger name", None).map_err(CommandError::from)?
+        let response = io::prompt_text("Ledger name", None).map_err(CommandError::from)?;
+        let Some(name) = response else {
+            io::print_info("Operation cancelled.");
+            return Ok(());
+        };
+        name
     } else {
         return Err(CommandError::InvalidArguments(
             "usage: ledger save-ledger <name>".into(),

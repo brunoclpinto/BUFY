@@ -93,8 +93,12 @@ pub fn handle_recurring(context: &mut ShellContext, args: &[&str]) -> CommandRes
             let date = if args.len() > 2 {
                 crate::cli::core::parse_date(args[2])?
             } else if context.mode() == CliMode::Interactive {
-                let input = io::prompt_text("Date to skip (YYYY-MM-DD)", None)
+                let response = io::prompt_text("Date to skip (YYYY-MM-DD)", None)
                     .map_err(CommandError::from)?;
+                let Some(input) = response else {
+                    io::print_info("Operation cancelled.");
+                    return Ok(());
+                };
                 crate::cli::core::parse_date(input.trim())?
             } else {
                 return Err(CommandError::InvalidArguments(

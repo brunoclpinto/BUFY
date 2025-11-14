@@ -32,6 +32,10 @@ pub fn handle_create(context: &mut ShellContext, args: &[&str]) -> CommandResult
     } else {
         loop {
             let value = io::prompt_text("Simulation name", None).map_err(CommandError::from)?;
+            let Some(value) = value else {
+                io::print_info("Operation cancelled.");
+                return Ok(());
+            };
             let trimmed = value.trim();
             if trimmed.is_empty() {
                 io::print_error("Name cannot be empty.");
@@ -41,7 +45,11 @@ pub fn handle_create(context: &mut ShellContext, args: &[&str]) -> CommandResult
         }
     };
     let notes: Option<String> = if context.mode() == CliMode::Interactive {
-        let text = io::prompt_text("Notes (optional)", None).map_err(CommandError::from)?;
+        let response = io::prompt_text("Notes (optional)", None).map_err(CommandError::from)?;
+        let Some(text) = response else {
+            io::print_info("Operation cancelled.");
+            return Ok(());
+        };
         let trimmed = text.trim();
         if trimmed.is_empty() {
             None
