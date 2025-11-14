@@ -7,7 +7,6 @@ use crossterm::{
     ExecutableCommand,
 };
 
-use crate::cli::output::{current_preferences, OutputPreferences};
 use crate::cli::ui::test_mode::{self, MenuTestEvent};
 
 const DEFAULT_HINT: &str = "(Use arrow keys to navigate, Enter to select, ESC to go back)";
@@ -82,15 +81,11 @@ impl From<io::Error> for MenuRenderError {
     }
 }
 
-pub struct MenuRenderer {
-    prefs: OutputPreferences,
-}
+pub struct MenuRenderer;
 
 impl MenuRenderer {
     pub fn new() -> Self {
-        Self {
-            prefs: current_preferences(),
-        }
+        Self
     }
 
     pub fn show(&self, menu: &MenuUI) -> Result<Option<String>, MenuRenderError> {
@@ -250,15 +245,7 @@ impl MenuRenderer {
         writeln!(writer)?;
 
         for (index, item) in menu.items.iter().enumerate() {
-            let marker = if index == selected_index {
-                if self.prefs.plain_mode {
-                    '>'
-                } else {
-                    '▸'
-                }
-            } else {
-                ' '
-            };
+            let marker = if index == selected_index { '>' } else { '-' };
             writeln!(
                 writer,
                 "{marker}  {:<width$}  {}",
