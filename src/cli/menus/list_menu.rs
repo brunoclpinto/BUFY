@@ -6,8 +6,7 @@ use super::MenuError;
 
 pub fn show(context: &ShellContext) -> Result<Option<String>, MenuError> {
     let renderer = MenuRenderer::new();
-    let menu = MenuUI::new("list menu", menu_items())
-        .with_context(Banner::text(context));
+    let menu = MenuUI::new("list menu", menu_items()).with_context(Banner::text(context));
     renderer.show(&menu)
 }
 
