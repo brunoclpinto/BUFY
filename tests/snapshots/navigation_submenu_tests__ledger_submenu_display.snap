@@ -1,0 +1,50 @@
+---
+source: tests/navigation_submenu_tests.rs
+expression: output.stdout
+---
+no-ledger ⮞
+=== === Main menu === ===
+
+ ▸   ledger         Ledger operations (new, load, save, backup, restore...)
+     account        Manage accounts via wizard flows
+     category       Manage categories and budgets
+     transaction    Manage transactions via wizard flows
+     simulation     Manage simulations and what-if scenarios
+     list           List accounts, categories, transactions, simulations...
+     summary        Show ledger summary
+     forecast       Forecast upcoming activity
+     config         Global CLI preferences
+     help           Show available commands
+     version        Show build metadata
+     exit           Exit the shell
+
+(Use arrow keys to navigate, Enter to select, ESC to go back)
+no-ledger ⮞
+=== === ledger menu === ===
+
+ ▸   new        Create a new ledger
+     load       Load an existing ledger
+     save       Save current ledger
+     backup     Create a snapshot
+     restore    Restore from snapshot
+     list       List ledgers and backups
+     delete     Delete a ledger
+
+(Use arrow keys to navigate, Enter to select, ESC to go back)
+no-ledger ⮞
+=== === Main menu === ===
+
+     ledger         Ledger operations (new, load, save, backup, restore...)
+     account        Manage accounts via wizard flows
+     category       Manage categories and budgets
+     transaction    Manage transactions via wizard flows
+     simulation     Manage simulations and what-if scenarios
+     list           List accounts, categories, transactions, simulations...
+     summary        Show ledger summary
+     forecast       Forecast upcoming activity
+     config         Global CLI preferences
+     help           Show available commands
+     version        Show build metadata
+ ▸   exit           Exit the shell
+
+(Use arrow keys to navigate, Enter to select, ESC to go back)

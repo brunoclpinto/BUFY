@@ -1,0 +1,21 @@
+---
+source: tests/navigation_main_menu_tests.rs
+expression: output.stdout
+---
+no-ledger ⮞
+=== === Main menu === ===
+
+     ledger         Ledger operations (new, load, save, backup, restore...)
+     account        Manage accounts via wizard flows
+     category       Manage categories and budgets
+     transaction    Manage transactions via wizard flows
+     simulation     Manage simulations and what-if scenarios
+     list           List accounts, categories, transactions, simulations...
+     summary        Show ledger summary
+     forecast       Forecast upcoming activity
+     config         Global CLI preferences
+     help           Show available commands
+     version        Show build metadata
+ ▸   exit           Exit the shell
+
+(Use arrow keys to navigate, Enter to select, ESC to go back)

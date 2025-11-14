@@ -1558,7 +1558,7 @@ impl WizardInteraction {
     }
 
     fn prompt_text(&mut self, context: &PromptContext<'_>) -> PromptResponse {
-        match text_input(context.default) {
+        match text_input(context.descriptor.label, context.default) {
             Ok(TextPromptResult::Value(value)) => PromptResponse::Value(value),
             Ok(TextPromptResult::Keep) => PromptResponse::Keep,
             Ok(TextPromptResult::Back) => PromptResponse::Back,

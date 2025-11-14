@@ -1,0 +1,54 @@
+---
+source: tests/navigation_wizard_tests.rs
+expression: output.stdout
+---
+✔ Automatically loaded last ledger `WizardLedger`.
+ledger: WizardLedger ⮞
+=== === Main menu === ===
+
+     ledger         Ledger operations (new, load, save, backup, restore...)
+ ▸   account        Manage accounts via wizard flows
+     category       Manage categories and budgets
+     transaction    Manage transactions via wizard flows
+     simulation     Manage simulations and what-if scenarios
+     list           List accounts, categories, transactions, simulations...
+     summary        Show ledger summary
+     forecast       Forecast upcoming activity
+     config         Global CLI preferences
+     help           Show available commands
+     version        Show build metadata
+     exit           Exit the shell
+
+(Use arrow keys to navigate, Enter to select, ESC to go back)
+ledger: WizardLedger ⮞
+=== === account menu === ===
+
+ ▸   add       Add an account
+     edit      Edit an account
+     remove    Remove an account
+     list      List accounts
+     show      Show account details
+
+(Use arrow keys to navigate, Enter to select, ESC to go back)
+ledger: WizardLedger ⮞
+
+=== === Step 1 of 5 – Account name === ===
+Type a value and press Enter to continue. Press ESC to cancel the wizard. Type :help for details or :clear to remove the current value.
+Account creation cancelled.
+ledger: WizardLedger ⮞
+=== === Main menu === ===
+
+     ledger         Ledger operations (new, load, save, backup, restore...)
+     account        Manage accounts via wizard flows
+     category       Manage categories and budgets
+     transaction    Manage transactions via wizard flows
+     simulation     Manage simulations and what-if scenarios
+     list           List accounts, categories, transactions, simulations...
+     summary        Show ledger summary
+     forecast       Forecast upcoming activity
+     config         Global CLI preferences
+     help           Show available commands
+     version        Show build metadata
+ ▸   exit           Exit the shell
+
+(Use arrow keys to navigate, Enter to select, ESC to go back)

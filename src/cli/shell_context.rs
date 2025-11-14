@@ -30,7 +30,6 @@ pub struct SelectionOverride {
 }
 
 impl SelectionOverride {
-    #[cfg(test)]
     pub fn push(&self, choice: Option<usize>) {
         self.queue.borrow_mut().push_back(choice);
     }
@@ -43,7 +42,6 @@ impl SelectionOverride {
         !self.queue.borrow().is_empty()
     }
 
-    #[cfg(test)]
     pub fn clear(&self) {
         self.queue.borrow_mut().clear();
     }

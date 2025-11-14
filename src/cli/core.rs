@@ -3,7 +3,7 @@
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
-    io,
+    env, io,
     path::{Path, PathBuf},
     sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
 };
@@ -53,7 +53,6 @@ use super::commands;
 use super::io as cli_io;
 use super::output::render_table as output_table;
 use super::registry::{CommandEntry, CommandRegistry};
-#[cfg(test)]
 use crate::cli::shell_context::SelectionOverride;
 pub use crate::cli::shell_context::{CliMode, ShellContext};
 use crate::cli::ui::banner::Banner;
@@ -161,6 +160,10 @@ impl ShellContext {
             last_command: None,
             running: true,
         };
+
+        if let Some(selection_override) = selection_override_from_env() {
+            app.selection_override = Some(selection_override);
+        }
 
         app.auto_load_last()?;
         Ok(app)
@@ -3324,6 +3327,27 @@ impl ShellContext {
                 .map_err(|_| CommandError::InvalidArguments("Invalid date format".into()))
         }
     }
+}
+
+fn selection_override_from_env() -> Option<SelectionOverride> {
+    let raw = env::var("BUFY_TEST_SELECTIONS").ok()?;
+    let override_data = SelectionOverride::default();
+    for token in raw
+        .split('|')
+        .map(|segment| segment.trim())
+        .filter(|s| !s.is_empty())
+    {
+        let choice = match token.to_ascii_uppercase().as_str() {
+            "CANCEL" | "<ESC>" => None,
+            value => Some(
+                value
+                    .parse::<usize>()
+                    .unwrap_or_else(|_| panic!("Invalid BUFY selection token `{value}`")),
+            ),
+        };
+        override_data.push(choice);
+    }
+    Some(override_data)
 }
 
 fn parse_period(input: &str) -> Result<BudgetPeriod, CommandError> {

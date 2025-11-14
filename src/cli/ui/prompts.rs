@@ -8,6 +8,7 @@ use crossterm::{
 };
 
 use crate::cli::ui::menu_renderer::{MenuRenderer, MenuUI, MenuUIItem};
+use crate::cli::ui::test_mode::{self, TextTestInput};
 
 const BACK_KEY: &str = "__BACK";
 
@@ -31,7 +32,17 @@ pub enum ConfirmationPromptResult {
     Cancel,
 }
 
-pub fn text_input(default: Option<&str>) -> io::Result<TextPromptResult> {
+pub fn text_input(label: &str, default: Option<&str>) -> io::Result<TextPromptResult> {
+    if let Some(scripted) = test_mode::next_text_input(label) {
+        return Ok(match scripted {
+            TextTestInput::Value(value) => TextPromptResult::Value(value),
+            TextTestInput::Keep => TextPromptResult::Keep,
+            TextTestInput::Back => TextPromptResult::Back,
+            TextTestInput::Help => TextPromptResult::Help,
+            TextTestInput::Cancel => TextPromptResult::Cancel,
+        });
+    }
+
     let mut guard = RawModeGuard::activate()?;
     let mut stdout = io::stdout();
     redraw_input(&mut stdout, "")?;

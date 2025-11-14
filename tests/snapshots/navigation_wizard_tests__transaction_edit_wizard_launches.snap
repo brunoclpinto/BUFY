@@ -1,0 +1,67 @@
+---
+source: tests/navigation_wizard_tests.rs
+assertion_line: 70
+expression: output.stdout
+---
+✔ Automatically loaded last ledger `TxnLedger`.
+ledger: TxnLedger ⮞
+=== === Main menu === ===
+
+     ledger         Ledger operations (new, load, save, backup, restore...)
+     account        Manage accounts via wizard flows
+     category       Manage categories and budgets
+ ▸   transaction    Manage transactions via wizard flows
+     simulation     Manage simulations and what-if scenarios
+     list           List accounts, categories, transactions, simulations...
+     summary        Show ledger summary
+     forecast       Forecast upcoming activity
+     config         Global CLI preferences
+     help           Show available commands
+     version        Show build metadata
+     exit           Exit the shell
+
+(Use arrow keys to navigate, Enter to select, ESC to go back)
+ledger: TxnLedger ⮞
+=== === transaction menu === ===
+
+     add         Add a transaction
+ ▸   edit        Edit a transaction
+     remove      Remove a transaction
+     complete    Mark a transaction as completed
+     list        List transactions
+     show        Show transaction details
+
+(Use arrow keys to navigate, Enter to select, ESC to go back)
+Select a transaction to edit:
+   1. [  0] 2025-01-01 | Checking -> Rent | 42.00 | Uncategorized | Planned
+  Type cancel or press Esc to abort.
+ledger: TxnLedger ⮞
+Step 1 of 11 – From account
+Default: [1] Checking (Bank) [be79dec2]
+Use arrow keys to highlight an option and Enter to select.
+Press ESC to cancel.
+
+=== === From account === ===
+
+ ▸   [1] Checking (Bank) [be79dec2]              
+     [2] Rent (ExpenseDestination) [b75c2c7f]    
+
+(Use arrow keys to navigate, Enter to select, ESC to go back)
+Transaction update cancelled.
+ledger: TxnLedger ⮞
+=== === Main menu === ===
+
+     ledger         Ledger operations (new, load, save, backup, restore...)
+     account        Manage accounts via wizard flows
+     category       Manage categories and budgets
+     transaction    Manage transactions via wizard flows
+     simulation     Manage simulations and what-if scenarios
+     list           List accounts, categories, transactions, simulations...
+     summary        Show ledger summary
+     forecast       Forecast upcoming activity
+     config         Global CLI preferences
+     help           Show available commands
+     version        Show build metadata
+ ▸   exit           Exit the shell
+
+(Use arrow keys to navigate, Enter to select, ESC to go back)

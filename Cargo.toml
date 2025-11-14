@@ -23,6 +23,7 @@ rustyline = { version = "14", features = ["custom-bindings"] }
 strsim = "0.11"
 shell-words = "1.1"
 dirs = "5.0"
+once_cell = "1.19"
 
 [build-dependencies]
 cbindgen = "0.26"
@@ -38,7 +39,7 @@ assert_cmd = "2.0"
 predicates = "3.1"
 libloading = "0.8"
 criterion = { version = "0.5", features = ["html_reports"] }
-once_cell = "1.19"
+insta = { version = "1.34", features = ["glob"] }
 
 [[bin]]
 name = "budget_core_cli"

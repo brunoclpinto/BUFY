@@ -10,6 +10,7 @@ use crossterm::{
 
 use crate::cli::output::{current_preferences, OutputPreferences};
 use crate::cli::ui::formatting::Formatter;
+use crate::cli::ui::test_mode::{self, MenuTestEvent};
 
 #[derive(Clone, Debug)]
 pub struct MenuUI {
@@ -90,6 +91,10 @@ impl MenuRenderer {
             return Ok(None);
         }
 
+        if let Some(events) = test_mode::next_menu_events(&menu.title) {
+            return self.show_with_script(menu, events);
+        }
+
         let mut stdout = io::stdout();
         terminal::enable_raw_mode()?;
         stdout.execute(cursor::Hide)?;
@@ -162,6 +167,85 @@ impl MenuRenderer {
         clear_status?;
 
         result
+    }
+
+    fn show_with_script(
+        &self,
+        menu: &MenuUI,
+        events: Vec<MenuTestEvent>,
+    ) -> Result<Option<String>, MenuRenderError> {
+        let len = menu.items.len();
+        if len == 0 {
+            return Ok(None);
+        }
+        let mut selected_index = menu.initial_index.unwrap_or(0);
+        if selected_index >= len {
+            selected_index = len - 1;
+        }
+        for event in events {
+            match event {
+                MenuTestEvent::Up => {
+                    selected_index = selected_index.checked_sub(1).unwrap_or(len - 1);
+                }
+                MenuTestEvent::Down => {
+                    selected_index = (selected_index + 1) % len;
+                }
+                MenuTestEvent::Home => selected_index = 0,
+                MenuTestEvent::End => selected_index = len - 1,
+                MenuTestEvent::PageUp => {
+                    selected_index = selected_index.saturating_sub(3);
+                }
+                MenuTestEvent::PageDown => {
+                    selected_index = std::cmp::min(selected_index + 3, len - 1);
+                }
+                MenuTestEvent::Enter => {
+                    self.print_snapshot(menu, selected_index);
+                    let key = menu.items[selected_index].key.clone();
+                    return Ok(Some(key));
+                }
+                MenuTestEvent::Esc => {
+                    self.print_snapshot(menu, selected_index);
+                    return Ok(None);
+                }
+            }
+        }
+        self.print_snapshot(menu, selected_index);
+        panic!(
+            "Scripted menu events must end with ENTER or ESC for `{}`",
+            menu.title
+        );
+    }
+
+    fn print_snapshot(&self, menu: &MenuUI, selected_index: usize) {
+        let formatter = Formatter::new();
+        if let Some(context) = &menu.context {
+            println!("{}", formatter.detail_text(context));
+            println!();
+        }
+        println!("{}", formatter.header_text(&menu.title));
+        println!();
+        let max_label_len = menu
+            .items
+            .iter()
+            .map(|item| item.label.len())
+            .max()
+            .unwrap_or(0);
+        for (index, item) in menu.items.iter().enumerate() {
+            let pointer = if index == selected_index {
+                if self.prefs.plain_mode {
+                    ">"
+                } else {
+                    "▸"
+                }
+            } else {
+                " "
+            };
+            let row =
+                formatter.format_two_column_row(&item.label, &item.description, max_label_len);
+            println!(" {pointer} {}", row);
+        }
+        println!();
+        println!("{}", formatter.detail_text(formatter.navigation_hint()));
     }
 
     fn render(
