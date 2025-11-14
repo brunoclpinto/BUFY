@@ -6,11 +6,11 @@ use crate::cli::ui::formatting::Formatter;
 use crate::ledger::SimulationStatus;
 
 pub fn list_simulations(context: &mut ShellContext) -> CommandResult {
-    context.with_ledger(|ledger| {
+    let displayed = context.with_ledger(|ledger| {
         let sims = ledger.simulations();
         if sims.is_empty() {
             io::print_warning("No simulations defined.");
-            return Ok(());
+            return Ok(false);
         }
         Formatter::new().print_header("Simulations");
         for sim in sims {
@@ -22,8 +22,12 @@ pub fn list_simulations(context: &mut ShellContext) -> CommandResult {
                 sim.updated_at
             ));
         }
-        Ok(())
-    })
+        Ok(true)
+    })?;
+    if displayed {
+        context.await_menu_escape()?;
+    }
+    Ok(())
 }
 
 pub fn handle_create(context: &mut ShellContext, args: &[&str]) -> CommandResult {

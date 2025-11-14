@@ -202,6 +202,36 @@ fn interpret_buffer(buffer: &str, default: Option<&str>) -> TextPromptResult {
     }
 }
 
+pub fn wait_for_escape() -> io::Result<()> {
+    if test_mode::is_enabled() {
+        return Ok(());
+    }
+    let mut guard = RawModeGuard::activate()?;
+    loop {
+        let event = event::read()?;
+        match event {
+            Event::Key(key) if key.kind == KeyEventKind::Press => {
+                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                    match key.code {
+                        KeyCode::Char('c') | KeyCode::Char('C') => {
+                            guard.deactivate();
+                            println!();
+                            return Ok(());
+                        }
+                        _ => {}
+                    }
+                }
+                if matches!(key.code, KeyCode::Esc) {
+                    guard.deactivate();
+                    println!();
+                    return Ok(());
+                }
+            }
+            _ => continue,
+        }
+    }
+}
+
 fn join_context(lines: &[String]) -> Option<String> {
     if lines.is_empty() {
         return None;

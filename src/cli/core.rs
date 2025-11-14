@@ -57,6 +57,7 @@ use crate::cli::shell_context::SelectionOverride;
 pub use crate::cli::shell_context::{CliMode, ShellContext};
 use crate::cli::ui::banner::Banner;
 use crate::cli::ui::formatting::Formatter;
+use crate::cli::ui::prompts;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LoopControl {
@@ -501,6 +502,14 @@ impl ShellContext {
 
     pub(crate) fn print_hint(&self, message: &str) {
         cli_io::print_hint(message);
+    }
+
+    pub(crate) fn await_menu_escape(&self) -> CommandResult {
+        if self.mode != CliMode::Interactive {
+            return Ok(());
+        }
+        Formatter::new().print_detail("Press ESC to return to the main menu.");
+        prompts::wait_for_escape().map_err(CommandError::Io)
     }
 
     pub(crate) fn with_ledger<T>(
@@ -972,7 +981,8 @@ impl ShellContext {
                 }
             }
             Ok(())
-        })
+        })?;
+        self.await_menu_escape()
     }
 
     pub(crate) fn run_account_add_wizard(&mut self) -> CommandResult {
@@ -1459,7 +1469,7 @@ impl ShellContext {
             let description = format_backup_label(backup_name);
             cli_io::print_info(format!("  {:>2}. {}", idx + 1, description));
         }
-        Ok(())
+        self.await_menu_escape()
     }
 
     pub(crate) fn restore_backup(&mut self, name: &str, reference: &str) -> CommandResult {
@@ -1557,7 +1567,7 @@ impl ShellContext {
         for (idx, name) in backups.iter().enumerate() {
             cli_io::print_info(format!("  {:>2}. {}", idx + 1, format_backup_label(name)));
         }
-        Ok(())
+        self.await_menu_escape()
     }
 
     pub(crate) fn restore_config_by_reference(&mut self, reference: &str) -> CommandResult {
@@ -1847,8 +1857,11 @@ impl ShellContext {
             )))
         })?;
 
-        match data {
-            None => cli_io::print_warning("No category budgets configured."),
+        let displayed = match data {
+            None => {
+                cli_io::print_warning("No category budgets configured.");
+                false
+            }
             Some((heading, rows)) => {
                 Formatter::new().print_header(heading);
                 output_table(
@@ -1862,12 +1875,16 @@ impl ShellContext {
                     ],
                     &rows,
                 );
+                true
             }
-        }
+        };
         if name_filter.is_none() {
             self.print_hint(
                 "Hint: Use `category budget set <name> <amount>` to add or update a budget.",
             );
+        }
+        if displayed {
+            self.await_menu_escape()?;
         }
         Ok(())
     }
@@ -2299,10 +2316,13 @@ impl ShellContext {
             Some(rows) => {
                 Formatter::new().print_header("Accounts");
                 output_table(&["Name", "Kind", "Category", "Notes"], &rows);
+                self.await_menu_escape()
             }
-            None => cli_io::print_warning("No accounts defined."),
+            None => {
+                cli_io::print_warning("No accounts defined.");
+                Ok(())
+            }
         }
-        Ok(())
     }
 
     pub(crate) fn list_categories(&self) -> CommandResult {
@@ -2350,10 +2370,13 @@ impl ShellContext {
             Some(rows) => {
                 Formatter::new().print_header("Categories");
                 output_table(&["Name", "Kind", "Parent", "Budget", "Notes"], &rows);
+                self.await_menu_escape()
             }
-            None => cli_io::print_warning("No categories defined."),
+            None => {
+                cli_io::print_warning("No categories defined.");
+                Ok(())
+            }
         }
-        Ok(())
     }
 
     pub(crate) fn list_transactions(&self) -> CommandResult {
@@ -2388,14 +2411,17 @@ impl ShellContext {
             Some(rows) => {
                 Formatter::new().print_header("Transactions");
                 output_table(&["Date", "From", "To", "Amount"], &rows);
+                self.await_menu_escape()
             }
-            None => cli_io::print_warning("No transactions recorded."),
+            None => {
+                cli_io::print_warning("No transactions recorded.");
+                Ok(())
+            }
         }
-        Ok(())
     }
 
     pub(crate) fn show_budget_summary(&self, args: &[&str]) -> CommandResult {
-        self.with_ledger(|ledger| {
+        let displayed = self.with_ledger(|ledger| {
             let today = Utc::now().date_naive();
 
             let (simulation_name, remainder) =
@@ -2411,14 +2437,18 @@ impl ShellContext {
                 let impact = SummaryService::summarize_simulation(ledger, name, window, scope)
                     .map_err(CommandError::from)?;
                 self.print_simulation_impact(ledger, &impact);
-                return Ok(());
+                return Ok(true);
             }
 
             let summary = SummaryService::summarize_window(ledger, window, scope);
             let category_budgets = SummaryService::category_budget_summaries(ledger, window, scope);
             self.print_budget_summary(ledger, &summary, &category_budgets);
-            Ok(())
-        })
+            Ok(true)
+        })?;
+        if displayed {
+            self.await_menu_escape()?;
+        }
+        Ok(())
     }
 
     fn resolve_summary_window(
@@ -2856,7 +2886,7 @@ impl ShellContext {
     }
 
     pub(crate) fn list_recurrences(&self, filter: RecurrenceListFilter) -> CommandResult {
-        self.with_ledger(|ledger| {
+        let had_entries = self.with_ledger(|ledger| {
             let today = Utc::now().date_naive();
             let snapshot_map: HashMap<Uuid, RecurrenceSnapshot> = ledger
                 .recurrence_snapshots(today)
@@ -2865,7 +2895,7 @@ impl ShellContext {
                 .collect();
             if snapshot_map.is_empty() {
                 cli_io::print_warning("No recurring schedules defined.");
-                return Ok(());
+                return Ok(false);
             }
             let mut entries: Vec<(usize, &Transaction, &RecurrenceSnapshot)> = ledger
                 .transactions
@@ -2898,8 +2928,12 @@ impl ShellContext {
             if shown == 0 {
                 cli_io::print_info("No recurring entries match the requested filter.");
             }
-            Ok(())
-        })
+            Ok(shown > 0)
+        })?;
+        if had_entries {
+            self.await_menu_escape()?;
+        }
+        Ok(())
     }
 
     fn print_recurrence_entry(

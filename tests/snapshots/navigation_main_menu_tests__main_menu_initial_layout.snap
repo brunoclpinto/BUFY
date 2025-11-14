@@ -1,5 +1,6 @@
 ---
 source: tests/navigation_main_menu_tests.rs
+assertion_line: 10
 expression: output.stdout
 ---
 no-ledger ⮞
@@ -10,9 +11,9 @@ no-ledger ⮞
   Category     Manage categories and budgets
   Transaction  Manage transactions via wizard flows
   Simulation   Manage simulations and what-if scenarios
+  Forecast     Forecast upcoming activity
   List         List accounts, categories, transactions, simulations...
   Summary      Show ledger summary
-  Forecast     Forecast upcoming activity
   Config       Global CLI preferences
   Help         Show available commands
   Version      Show build metadata
