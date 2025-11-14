@@ -5,9 +5,16 @@ use crate::cli::ui::menu_renderer::{MenuRenderer, MenuUI, MenuUIItem};
 use super::MenuError;
 
 pub fn show(context: &ShellContext) -> Result<Option<String>, MenuError> {
-    Banner::render(context);
     let renderer = MenuRenderer::new();
-    let menu = MenuUI::new("Main menu", main_menu_items())
+    let status = Banner::text(context);
+    let status_label_raw = status.trim_end_matches(" ⮞");
+    let status_label = if status_label_raw.eq_ignore_ascii_case("no-ledger") {
+        "No Ledger".to_string()
+    } else {
+        status_label_raw.to_string()
+    };
+    let title = format!("Main menu - {}", status_label);
+    let menu = MenuUI::new(title, main_menu_items())
         .with_footer_hint("(Use arrow keys to navigate, Enter to select, ESC to exit)");
     renderer.show(&menu)
 }

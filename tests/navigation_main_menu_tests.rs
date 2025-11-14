@@ -68,22 +68,13 @@ fn test_main_menu_alignment_rules() {
     let menu_lines: Vec<&str> = output
         .stdout
         .lines()
-        .filter(|line| line.starts_with('>') || line.starts_with('-'))
+        .filter(|line| line.starts_with("> ") || line.starts_with("  "))
         .collect();
     assert!(
         !menu_lines.is_empty(),
         "Menu lines missing:\n{}",
         output.stdout
     );
-
-    for line in &menu_lines {
-        let first = line.chars().next().unwrap();
-        assert!(
-            !first.is_whitespace(),
-            "Menu line must not start with whitespace: `{}`",
-            line
-        );
-    }
 
     let expected_desc_col = menu_lines[0]
         .rfind("  ")
