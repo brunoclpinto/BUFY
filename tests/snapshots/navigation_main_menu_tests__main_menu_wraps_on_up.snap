@@ -3,7 +3,7 @@ source: tests/navigation_main_menu_tests.rs
 expression: output.stdout
 ---
 no-ledger ⮞
-=== Main menu - No Ledger ===
+=== Main menu ===
 
   Ledger       Ledger operations (new, load, save, backup, restore...)
   Account      Manage accounts via wizard flows
