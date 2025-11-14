@@ -28,7 +28,7 @@ fn test_simulation_submenu_display() {
 fn test_submenu_esc_returns_to_main_menu() {
     let harness = NavigationTestHarness::new();
     let output = harness.run_interactive(&["DOWN,ENTER", "ESC", "ESC"], &[]);
-    let occurrences = output.stdout.matches("=== Main menu ===").count();
+    let occurrences = output.stdout.matches("Version").count();
     assert!(
         occurrences >= 2,
         "Main menu should render again after ESC:\n{}",

@@ -4,10 +4,9 @@ use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     terminal::{self, ClearType},
-    ExecutableCommand,
+    ExecutableCommand, QueueableCommand,
 };
 
-use crate::cli::output::{current_preferences, OutputPreferences};
 use crate::cli::ui::test_mode::{self, MenuTestEvent};
 
 const DEFAULT_HINT: &str = "(Use arrow keys to navigate, Enter to select, ESC to go back)";
@@ -82,15 +81,11 @@ impl From<io::Error> for MenuRenderError {
     }
 }
 
-pub struct MenuRenderer {
-    prefs: OutputPreferences,
-}
+pub struct MenuRenderer;
 
 impl MenuRenderer {
     pub fn new() -> Self {
-        Self {
-            prefs: current_preferences(),
-        }
+        Self
     }
 
     pub fn show(&self, menu: &MenuUI) -> Result<Option<String>, MenuRenderError> {
@@ -110,10 +105,8 @@ impl MenuRenderer {
         if selected_index >= menu.items.len() {
             selected_index = menu.items.len() - 1;
         }
-        let label_width = self.label_width(menu);
-
         let result = loop {
-            self.draw_frame(&mut stdout, menu, selected_index, label_width)?;
+            self.draw_frame(&mut stdout, menu, selected_index, false)?;
             let event = event::read()?;
             match event {
                 Event::Key(key) => {
@@ -216,68 +209,93 @@ impl MenuRenderer {
         );
     }
 
-    fn label_width(&self, menu: &MenuUI) -> usize {
-        menu.items
-            .iter()
-            .map(|item| item.label.len())
-            .max()
-            .unwrap_or(0)
-    }
-
     fn draw_frame(
         &self,
         stdout: &mut Stdout,
         menu: &MenuUI,
         selected_index: usize,
-        label_width: usize,
+        plain: bool,
     ) -> Result<(), io::Error> {
         self.clear_screen(stdout)?;
-        self.write_layout(stdout, menu, selected_index, label_width)?;
+        self.write_layout(stdout, menu, selected_index, plain)?;
         stdout.flush()
     }
 
     fn write_layout(
         &self,
-        writer: &mut dyn Write,
+        writer: &mut Stdout,
         menu: &MenuUI,
         selected_index: usize,
-        label_width: usize,
+        plain: bool,
     ) -> Result<(), io::Error> {
-        if let Some(context) = &menu.context {
-            writeln!(writer, "{context}")?;
+        let label_width = menu
+            .items
+            .iter()
+            .map(|item| display_label(&item.label).len())
+            .max()
+            .unwrap_or(0);
+        let hint = menu.footer_hint.as_deref().unwrap_or(DEFAULT_HINT);
+
+        if plain {
+            if let Some(context) = &menu.context {
+                writeln!(writer, "{context}")?;
+            }
+            writeln!(writer, "=== {} ===", menu.title)?;
+            writeln!(writer)?;
+            for (index, item) in menu.items.iter().enumerate() {
+                let marker = if index == selected_index { '>' } else { ' ' };
+                let label = display_label(&item.label);
+                writeln!(
+                    writer,
+                    "{marker} {:<width$}  {}",
+                    label,
+                    item.description,
+                    width = label_width
+                )?;
+            }
+            writeln!(writer)?;
+            writeln!(writer, "{hint}")?;
+            return Ok(());
         }
-        writeln!(writer, "=== {} ===", menu.title)?;
-        writeln!(writer)?;
+
+        let mut row: u16 = 0;
+        if let Some(context) = &menu.context {
+            writer.queue(cursor::MoveTo(0, row))?;
+            write!(writer, "{context}")?;
+            row = row.saturating_add(1);
+        }
+
+        writer.queue(cursor::MoveTo(0, row))?;
+        write!(writer, "=== {} ===", menu.title)?;
+        row = row.saturating_add(1);
+
+        writer.queue(cursor::MoveTo(0, row))?;
+        row = row.saturating_add(1);
 
         for (index, item) in menu.items.iter().enumerate() {
-            let marker = if index == selected_index {
-                if self.prefs.plain_mode {
-                    '>'
-                } else {
-                    '▸'
-                }
-            } else {
-                ' '
-            };
-            writeln!(
-                writer,
+            let marker = if index == selected_index { '>' } else { ' ' };
+            let label = display_label(&item.label);
+            let line = format!(
                 "{marker} {:<width$}  {}",
-                item.label,
+                label,
                 item.description,
                 width = label_width
-            )?;
+            );
+            writer.queue(cursor::MoveTo(0, row))?;
+            write!(writer, "{line}")?;
+            row = row.saturating_add(1);
         }
 
-        writeln!(writer)?;
-        let hint = menu.footer_hint.as_deref().unwrap_or(DEFAULT_HINT);
-        writeln!(writer, "{hint}")?;
+        writer.queue(cursor::MoveTo(0, row))?;
+        row = row.saturating_add(1);
+        writer.queue(cursor::MoveTo(0, row))?;
+        write!(writer, "{hint}")?;
         Ok(())
     }
 
     fn print_snapshot(&self, menu: &MenuUI, selected_index: usize) {
-        let label_width = self.label_width(menu);
         let mut stdout = io::stdout();
-        self.write_layout(&mut stdout, menu, selected_index, label_width)
+        self.write_layout(&mut stdout, menu, selected_index, true)
             .expect("write snapshot layout");
     }
 
@@ -285,5 +303,13 @@ impl MenuRenderer {
         stdout.execute(terminal::Clear(ClearType::All))?;
         stdout.execute(cursor::MoveTo(0, 0))?;
         Ok(())
+    }
+}
+
+fn display_label(label: &str) -> String {
+    let mut chars = label.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
     }
 }

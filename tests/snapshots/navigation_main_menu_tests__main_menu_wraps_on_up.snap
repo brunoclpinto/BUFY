@@ -1,22 +1,22 @@
 ---
 source: tests/navigation_main_menu_tests.rs
-assertion_line: 39
 expression: output.stdout
 ---
+no-ledger ⮞
 === Main menu - No Ledger ===
 
-  ledger       Ledger operations (new, load, save, backup, restore...)
-  account      Manage accounts via wizard flows
-  category     Manage categories and budgets
-  transaction  Manage transactions via wizard flows
-  simulation   Manage simulations and what-if scenarios
-  list         List accounts, categories, transactions, simulations...
-  summary      Show ledger summary
-  forecast     Forecast upcoming activity
-  config       Global CLI preferences
-  help         Show available commands
-  version      Show build metadata
-▸ exit         Exit the shell
+  Ledger       Ledger operations (new, load, save, backup, restore...)
+  Account      Manage accounts via wizard flows
+  Category     Manage categories and budgets
+  Transaction  Manage transactions via wizard flows
+  Simulation   Manage simulations and what-if scenarios
+  List         List accounts, categories, transactions, simulations...
+  Summary      Show ledger summary
+  Forecast     Forecast upcoming activity
+  Config       Global CLI preferences
+  Help         Show available commands
+  Version      Show build metadata
+> Exit         Exit the shell
 
 (Use arrow keys to navigate, Enter to select, ESC to exit)
 Exiting shell.

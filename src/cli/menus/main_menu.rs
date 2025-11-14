@@ -4,18 +4,16 @@ use crate::cli::ui::menu_renderer::{MenuRenderer, MenuUI, MenuUIItem};
 
 use super::MenuError;
 
+const MAIN_MENU_HINT: &str =
+    "(Use arrow keys to navigate, Enter to select, ESC to exit)";
+
 pub fn show(context: &ShellContext) -> Result<Option<String>, MenuError> {
     let renderer = MenuRenderer::new();
-    let status = Banner::text(context);
-    let status_label_raw = status.trim_end_matches(" ⮞");
-    let status_label = if status_label_raw.eq_ignore_ascii_case("no-ledger") {
-        "No Ledger".to_string()
-    } else {
-        status_label_raw.to_string()
-    };
-    let title = format!("Main menu - {}", status_label);
+    let banner = Banner::text(context);
+    let title = format!("Main menu - {}", format_status_label(&banner));
     let menu = MenuUI::new(title, main_menu_items())
-        .with_footer_hint("(Use arrow keys to navigate, Enter to select, ESC to exit)");
+        .with_context(banner)
+        .with_footer_hint(MAIN_MENU_HINT);
     renderer.show(&menu)
 }
 
@@ -50,4 +48,21 @@ fn main_menu_items() -> Vec<MenuUIItem> {
         MenuUIItem::new("version", "version", "Show build metadata"),
         MenuUIItem::new("exit", "exit", "Exit the shell"),
     ]
+}
+
+fn format_status_label(raw_status: &str) -> String {
+    let stripped = raw_status.trim_end_matches(" ⮞").trim();
+    if stripped.eq_ignore_ascii_case("no-ledger") {
+        "No Ledger".to_string()
+    } else {
+        capitalize(stripped)
+    }
+}
+
+fn capitalize(value: &str) -> String {
+    let mut chars = value.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
 }

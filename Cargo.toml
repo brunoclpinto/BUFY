@@ -40,6 +40,7 @@ predicates = "3.1"
 libloading = "0.8"
 criterion = { version = "0.5", features = ["html_reports"] }
 insta = { version = "1.34", features = ["glob"] }
+regex = "1.10"
 
 [[bin]]
 name = "budget_core_cli"

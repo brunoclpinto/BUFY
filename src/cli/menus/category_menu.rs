@@ -5,9 +5,9 @@ use crate::cli::ui::menu_renderer::{MenuRenderer, MenuUI, MenuUIItem};
 use super::MenuError;
 
 pub fn show(context: &ShellContext) -> Result<Option<String>, MenuError> {
-    Banner::render(context);
     let renderer = MenuRenderer::new();
-    let menu = MenuUI::new("category menu", menu_items());
+    let menu = MenuUI::new("category menu", menu_items())
+        .with_context(Banner::text(context));
     renderer.show(&menu)
 }
 

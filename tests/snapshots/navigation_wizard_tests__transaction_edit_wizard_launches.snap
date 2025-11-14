@@ -1,35 +1,34 @@
 ---
 source: tests/navigation_wizard_tests.rs
-assertion_line: 70
-expression: output.stdout
+expression: cleaned
 ---
 ✔ Automatically loaded last ledger `TxnLedger`.
 ledger: TxnLedger ⮞
-=== === Main menu === ===
+=== Main menu - Ledger: TxnLedger ===
 
-     ledger         Ledger operations (new, load, save, backup, restore...)
-     account        Manage accounts via wizard flows
-     category       Manage categories and budgets
- ▸   transaction    Manage transactions via wizard flows
-     simulation     Manage simulations and what-if scenarios
-     list           List accounts, categories, transactions, simulations...
-     summary        Show ledger summary
-     forecast       Forecast upcoming activity
-     config         Global CLI preferences
-     help           Show available commands
-     version        Show build metadata
-     exit           Exit the shell
+  Ledger       Ledger operations (new, load, save, backup, restore...)
+  Account      Manage accounts via wizard flows
+  Category     Manage categories and budgets
+> Transaction  Manage transactions via wizard flows
+  Simulation   Manage simulations and what-if scenarios
+  List         List accounts, categories, transactions, simulations...
+  Summary      Show ledger summary
+  Forecast     Forecast upcoming activity
+  Config       Global CLI preferences
+  Help         Show available commands
+  Version      Show build metadata
+  Exit         Exit the shell
 
-(Use arrow keys to navigate, Enter to select, ESC to go back)
+(Use arrow keys to navigate, Enter to select, ESC to exit)
 ledger: TxnLedger ⮞
-=== === transaction menu === ===
+=== transaction menu ===
 
-     add         Add a transaction
- ▸   edit        Edit a transaction
-     remove      Remove a transaction
-     complete    Mark a transaction as completed
-     list        List transactions
-     show        Show transaction details
+  Add       Add a transaction
+> Edit      Edit a transaction
+  Remove    Remove a transaction
+  Complete  Mark a transaction as completed
+  List      List transactions
+  Show      Show transaction details
 
 (Use arrow keys to navigate, Enter to select, ESC to go back)
 Select a transaction to edit:
@@ -37,31 +36,31 @@ Select a transaction to edit:
   Type cancel or press Esc to abort.
 ledger: TxnLedger ⮞
 Step 1 of 11 – From account
-Default: [1] Checking (Bank) [be79dec2]
+Default: [1] Checking (Bank) [ID]
 Use arrow keys to highlight an option and Enter to select.
 Press ESC to cancel.
+=== From account ===
 
-=== === From account === ===
-
- ▸   [1] Checking (Bank) [be79dec2]              
-     [2] Rent (ExpenseDestination) [b75c2c7f]    
+> [1] Checking (Bank) [ID]            
+  [2] Rent (ExpenseDestination) [ID]  
 
 (Use arrow keys to navigate, Enter to select, ESC to go back)
 Transaction update cancelled.
 ledger: TxnLedger ⮞
-=== === Main menu === ===
+=== Main menu - Ledger: TxnLedger ===
 
-     ledger         Ledger operations (new, load, save, backup, restore...)
-     account        Manage accounts via wizard flows
-     category       Manage categories and budgets
-     transaction    Manage transactions via wizard flows
-     simulation     Manage simulations and what-if scenarios
-     list           List accounts, categories, transactions, simulations...
-     summary        Show ledger summary
-     forecast       Forecast upcoming activity
-     config         Global CLI preferences
-     help           Show available commands
-     version        Show build metadata
- ▸   exit           Exit the shell
+> Ledger       Ledger operations (new, load, save, backup, restore...)
+  Account      Manage accounts via wizard flows
+  Category     Manage categories and budgets
+  Transaction  Manage transactions via wizard flows
+  Simulation   Manage simulations and what-if scenarios
+  List         List accounts, categories, transactions, simulations...
+  Summary      Show ledger summary
+  Forecast     Forecast upcoming activity
+  Config       Global CLI preferences
+  Help         Show available commands
+  Version      Show build metadata
+  Exit         Exit the shell
 
-(Use arrow keys to navigate, Enter to select, ESC to go back)
+(Use arrow keys to navigate, Enter to select, ESC to exit)
+Exiting shell.

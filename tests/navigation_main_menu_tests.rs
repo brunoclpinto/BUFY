@@ -68,7 +68,7 @@ fn test_main_menu_alignment_rules() {
     let menu_lines: Vec<&str> = output
         .stdout
         .lines()
-        .filter(|line| line.starts_with("> ") || line.starts_with("  "))
+        .filter(|line| line.starts_with('>') || line.starts_with("  "))
         .collect();
     assert!(
         !menu_lines.is_empty(),
@@ -76,7 +76,7 @@ fn test_main_menu_alignment_rules() {
         output.stdout
     );
 
-    let expected_desc_col = menu_lines[0]
+    let expected_col = menu_lines[0]
         .rfind("  ")
         .expect("menu line should contain separator");
     for line in &menu_lines {
@@ -84,8 +84,8 @@ fn test_main_menu_alignment_rules() {
             .rfind("  ")
             .expect("menu line should contain separator");
         assert_eq!(
-            idx, expected_desc_col,
-            "Descriptions should align consistently. Expected column {expected_desc_col}, got {idx} on `{}`",
+            idx, expected_col,
+            "Descriptions should align consistently. Expected column {expected_col}, got {idx} on `{}`",
             line
         );
     }

@@ -4,30 +4,30 @@ expression: output.stdout
 ---
 ✔ Automatically loaded last ledger `WizardLedger`.
 ledger: WizardLedger ⮞
-=== === Main menu === ===
+=== Main menu - Ledger: WizardLedger ===
 
-     ledger         Ledger operations (new, load, save, backup, restore...)
- ▸   account        Manage accounts via wizard flows
-     category       Manage categories and budgets
-     transaction    Manage transactions via wizard flows
-     simulation     Manage simulations and what-if scenarios
-     list           List accounts, categories, transactions, simulations...
-     summary        Show ledger summary
-     forecast       Forecast upcoming activity
-     config         Global CLI preferences
-     help           Show available commands
-     version        Show build metadata
-     exit           Exit the shell
+  Ledger       Ledger operations (new, load, save, backup, restore...)
+> Account      Manage accounts via wizard flows
+  Category     Manage categories and budgets
+  Transaction  Manage transactions via wizard flows
+  Simulation   Manage simulations and what-if scenarios
+  List         List accounts, categories, transactions, simulations...
+  Summary      Show ledger summary
+  Forecast     Forecast upcoming activity
+  Config       Global CLI preferences
+  Help         Show available commands
+  Version      Show build metadata
+  Exit         Exit the shell
 
-(Use arrow keys to navigate, Enter to select, ESC to go back)
+(Use arrow keys to navigate, Enter to select, ESC to exit)
 ledger: WizardLedger ⮞
-=== === account menu === ===
+=== account menu ===
 
- ▸   add       Add an account
-     edit      Edit an account
-     remove    Remove an account
-     list      List accounts
-     show      Show account details
+> Add     Add an account
+  Edit    Edit an account
+  Remove  Remove an account
+  List    List accounts
+  Show    Show account details
 
 (Use arrow keys to navigate, Enter to select, ESC to go back)
 ledger: WizardLedger ⮞
@@ -36,19 +36,20 @@ ledger: WizardLedger ⮞
 Type a value and press Enter to continue. Press ESC to cancel the wizard. Type :help for details or :clear to remove the current value.
 Account creation cancelled.
 ledger: WizardLedger ⮞
-=== === Main menu === ===
+=== Main menu - Ledger: WizardLedger ===
 
-     ledger         Ledger operations (new, load, save, backup, restore...)
-     account        Manage accounts via wizard flows
-     category       Manage categories and budgets
-     transaction    Manage transactions via wizard flows
-     simulation     Manage simulations and what-if scenarios
-     list           List accounts, categories, transactions, simulations...
-     summary        Show ledger summary
-     forecast       Forecast upcoming activity
-     config         Global CLI preferences
-     help           Show available commands
-     version        Show build metadata
- ▸   exit           Exit the shell
+> Ledger       Ledger operations (new, load, save, backup, restore...)
+  Account      Manage accounts via wizard flows
+  Category     Manage categories and budgets
+  Transaction  Manage transactions via wizard flows
+  Simulation   Manage simulations and what-if scenarios
+  List         List accounts, categories, transactions, simulations...
+  Summary      Show ledger summary
+  Forecast     Forecast upcoming activity
+  Config       Global CLI preferences
+  Help         Show available commands
+  Version      Show build metadata
+  Exit         Exit the shell
 
-(Use arrow keys to navigate, Enter to select, ESC to go back)
+(Use arrow keys to navigate, Enter to select, ESC to exit)
+Exiting shell.
