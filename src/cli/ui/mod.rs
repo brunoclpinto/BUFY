@@ -1,4 +1,5 @@
 pub mod banner;
+pub mod detail_view;
 pub mod formatting;
 pub mod list_selector;
 pub mod menu_renderer;
