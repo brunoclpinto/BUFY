@@ -1,6 +1,7 @@
 pub mod banner;
 pub mod formatting;
+pub mod list_selector;
 pub mod menu_renderer;
 pub mod prompts;
-pub mod test_mode;
 pub mod table_renderer;
+pub mod test_mode;
