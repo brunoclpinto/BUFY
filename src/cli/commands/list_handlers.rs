@@ -1,3 +1,4 @@
+use crate::cli::commands::ledger::list_ledgers;
 use crate::cli::core::{CommandError, CommandResult, ShellContext};
 
 use super::ledger_handlers;
@@ -9,7 +10,7 @@ pub fn dispatch(context: &mut ShellContext, key: &str) -> CommandResult {
         "categories" => context.list_categories(),
         "transactions" => context.list_transactions(),
         "simulations" => simulation_handlers::list_simulations(context),
-        "ledgers" => ledger_handlers::handle_overview(context),
+        "ledgers" => list_ledgers::run_list_ledgers(context),
         "backups" => ledger_handlers::handle_list_backups(context, &[]),
         other => Err(CommandError::InvalidArguments(format!(
             "unknown list target `{}`",

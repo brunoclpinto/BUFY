@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use chrono::Utc;
 
+use crate::cli::commands::ledger::list_ledgers;
 use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
 use crate::cli::io;
 use crate::core::services::SummaryService;
@@ -166,19 +167,11 @@ pub fn handle_restore(context: &mut ShellContext, args: &[&str]) -> CommandResul
 }
 
 pub fn handle_overview(context: &mut ShellContext) -> CommandResult {
-    if let Some(name) = context.ledger_name() {
-        io::print_info(format!("Active ledger: {}", name));
-        io::print_info("Listing backups for the active ledger (if any)...");
-        handle_list_backups(context, &[])
-    } else {
-        io::print_info("No ledger currently loaded. Load or create a ledger to view backups.");
-        Ok(())
-    }
+    list_ledgers::run_list_ledgers(context)
 }
 
-pub fn handle_delete(_context: &mut ShellContext) -> CommandResult {
-    io::print_warning("Ledger deletion workflow is not available yet.");
-    Ok(())
+pub fn handle_delete(context: &mut ShellContext) -> CommandResult {
+    list_ledgers::run_list_ledgers(context)
 }
 
 pub fn handle_summary(context: &mut ShellContext, args: &[&str]) -> CommandResult {

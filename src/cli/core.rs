@@ -3,7 +3,7 @@
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
-    env, io,
+    env, fs, io,
     path::{Path, PathBuf},
     sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
 };
@@ -627,6 +627,12 @@ impl ShellContext {
         )
     }
 
+    pub(crate) fn take_override_choice(&self) -> Option<Option<usize>> {
+        self.selection_override
+            .as_ref()
+            .and_then(|override_data| override_data.pop())
+    }
+
     pub(crate) fn select_account_index(&self, prompt: &str) -> Result<Option<usize>, CommandError> {
         self.select_with(
             AccountSelectionProvider::new(self),
@@ -1214,6 +1220,79 @@ impl ShellContext {
         let ledger = Ledger::new(name.clone(), period);
         self.set_ledger(ledger, None, Some(name));
         cli_io::print_success("New ledger created.");
+        Ok(())
+    }
+
+    pub(crate) fn edit_ledger(&mut self, meta: &LedgerMetadata) -> CommandResult {
+        let mut ledger = self
+            .storage
+            .load_from_path(&meta.path)
+            .map_err(CommandError::from_core)?;
+        let response =
+            cli_io::prompt_text("Ledger name", Some(&ledger.name)).map_err(CommandError::from)?;
+        let Some(name_input) = response else {
+            cli_io::print_info("Edit cancelled.");
+            return Ok(());
+        };
+        let trimmed = name_input.trim();
+        if !trimmed.is_empty() {
+            ledger.name = trimmed.to_string();
+        }
+
+        let default_label = ledger.budget_period.0.label();
+        let period_response = cli_io::prompt_text(
+            "Budget period (e.g., monthly, every 2 weeks)",
+            Some(default_label.as_str()),
+        )
+        .map_err(CommandError::from)?;
+        if let Some(period_text) = period_response {
+            if !period_text.trim().is_empty() {
+                let interval = parse_time_interval_str(&period_text)?;
+                ledger.budget_period = BudgetPeriod(interval);
+            }
+        } else {
+            cli_io::print_info("Edit cancelled.");
+            return Ok(());
+        }
+
+        ledger.updated_at = Utc::now();
+        let is_active_path = self
+            .ledger_path
+            .as_ref()
+            .map(|path| path == &meta.path)
+            .unwrap_or(false);
+        let updated = ledger.clone();
+        self.storage
+            .save_to_path(&ledger, &meta.path)
+            .map_err(CommandError::from_core)?;
+        if is_active_path {
+            self.set_ledger(
+                updated.clone(),
+                Some(meta.path.clone()),
+                Some(updated.name.clone()),
+            );
+            self.update_last_opened(Some(&updated.name))?;
+        }
+        cli_io::print_success(format!("Ledger `{}` updated.", ledger.name));
+        Ok(())
+    }
+
+    pub(crate) fn delete_ledger(&mut self, meta: &LedgerMetadata) -> CommandResult {
+        if meta.path.exists() {
+            fs::remove_file(&meta.path).map_err(CommandError::from)?;
+        }
+        let matches_active_path = self
+            .ledger_path
+            .as_ref()
+            .map(|path| path == &meta.path)
+            .unwrap_or(false);
+        if matches_active_path {
+            self.manager_mut().clear();
+            self.ledger_path = None;
+            self.clear_active_simulation();
+            self.update_last_opened(None)?;
+        }
+        cli_io::print_success(format!("Ledger `{}` deleted.", meta.name));
         Ok(())
     }
 

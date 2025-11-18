@@ -1,0 +1,95 @@
+use std::sync::{Arc, RwLock};
+
+use budget_core::cli::commands::ledger::list_ledgers;
+use budget_core::cli::core::{CliMode, ShellContext};
+use budget_core::cli::registry::CommandRegistry;
+use budget_core::cli::shell_context::SelectionOverride;
+use budget_core::config::{Config, ConfigManager};
+use budget_core::core::ledger_manager::LedgerManager;
+use budget_core::ledger::{BudgetPeriod, Ledger, TimeUnit};
+use budget_core::storage::json_backend::{load_ledger_from_path, JsonStorage};
+use budget_core::storage::StorageBackend;
+use dialoguer::theme::ColorfulTheme;
+use tempfile::TempDir;
+
+fn build_context(temp: &TempDir) -> ShellContext {
+    let storage = JsonStorage::new(Some(temp.path().to_path_buf()), Some(3)).unwrap();
+    let manager = Arc::new(RwLock::new(LedgerManager::new(Box::new(storage.clone()))));
+    let config_manager = Arc::new(RwLock::new(
+        ConfigManager::with_base_dir(temp.path().to_path_buf()).unwrap(),
+    ));
+    let config = Arc::new(RwLock::new(Config::default()));
+    ShellContext {
+        mode: CliMode::Script,
+        registry: CommandRegistry::new(),
+        ledger_manager: manager,
+        theme: ColorfulTheme::default(),
+        storage,
+        config_manager,
+        config,
+        ledger_path: None,
+        active_simulation_name: None,
+        selection_override: Some(SelectionOverride::default()),
+        current_simulation: None,
+        last_command: None,
+        running: true,
+    }
+}
+
+fn push_choices(context: &ShellContext, choices: &[Option<usize>]) {
+    let Some(override_data) = &context.selection_override else {
+        return;
+    };
+    for choice in choices {
+        override_data.push(*choice);
+    }
+}
+
+fn save_sample_ledger(storage: &JsonStorage, name: &str) {
+    let ledger = Ledger::new(name, BudgetPeriod::monthly());
+    storage.save(&ledger, name).unwrap();
+}
+
+#[test]
+fn delete_action_removes_ledger_file() {
+    let temp = TempDir::new().unwrap();
+    let mut context = build_context(&temp);
+    save_sample_ledger(&context.storage, "Alpha");
+    let path = context.storage.ledger_path("alpha");
+
+    push_choices(&context, &[Some(0), Some(1), None]);
+    list_ledgers::run_list_ledgers(&mut context).unwrap();
+
+    assert!(!path.exists());
+}
+
+#[test]
+fn edit_action_updates_metadata() {
+    let temp = TempDir::new().unwrap();
+    let mut context = build_context(&temp);
+    save_sample_ledger(&context.storage, "Beta");
+    let path = context.storage.ledger_path("beta");
+
+    std::env::set_var("BUFY_TEST_TEXT_INPUTS", "Renamed|every 2 weeks");
+    push_choices(&context, &[Some(0), Some(0), None]);
+    list_ledgers::run_list_ledgers(&mut context).unwrap();
+    std::env::remove_var("BUFY_TEST_TEXT_INPUTS");
+
+    let ledger = load_ledger_from_path(&path).unwrap();
+    assert_eq!(ledger.name, "Renamed");
+    assert_eq!(ledger.budget_period.0.every, 2);
+    assert_eq!(ledger.budget_period.0.unit, TimeUnit::Week);
+}
+
+#[test]
+fn escape_selection_returns_immediately() {
+    let temp = TempDir::new().unwrap();
+    let mut context = build_context(&temp);
+    save_sample_ledger(&context.storage, "Gamma");
+
+    push_choices(&context, &[None]);
+    list_ledgers::run_list_ledgers(&mut context).unwrap();
+
+    let path = context.storage.ledger_path("gamma");
+    assert!(path.exists());
+}
