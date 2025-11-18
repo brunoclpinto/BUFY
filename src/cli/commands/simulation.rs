@@ -1,3 +1,5 @@
+pub mod list_simulations;
+
 use crate::cli::commands::simulation_handlers;
 use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
 use crate::cli::menus::{menu_error_to_command_error, simulation_menu};
@@ -33,7 +35,7 @@ fn cmd_simulation(context: &mut ShellContext, args: &[&str]) -> CommandResult {
 
 fn dispatch_action(context: &mut ShellContext, action: &str, args: &[&str]) -> CommandResult {
     match action.to_ascii_lowercase().as_str() {
-        "list" | "ls" => simulation_handlers::list_simulations(context),
+        "list" | "ls" => list_simulations::run_list_simulations(context),
         "create" | "new" => simulation_handlers::handle_create(context, args),
         "enter" => simulation_handlers::handle_enter(context, args),
         "leave" => simulation_handlers::handle_leave(context),

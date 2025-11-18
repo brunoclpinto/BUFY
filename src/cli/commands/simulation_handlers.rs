@@ -2,33 +2,7 @@ use chrono::Local;
 
 use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
 use crate::cli::io;
-use crate::cli::ui::formatting::Formatter;
 use crate::ledger::SimulationStatus;
-
-pub fn list_simulations(context: &mut ShellContext) -> CommandResult {
-    let displayed = context.with_ledger(|ledger| {
-        let sims = ledger.simulations();
-        if sims.is_empty() {
-            io::print_warning("No simulations defined.");
-            return Ok(false);
-        }
-        Formatter::new().print_header("Simulations");
-        for sim in sims {
-            io::print_info(format!(
-                "  {:<20} {:<10} changes:{:>2} updated:{}",
-                sim.name,
-                format!("{:?}", sim.status),
-                sim.changes.len(),
-                sim.updated_at
-            ));
-        }
-        Ok(true)
-    })?;
-    if displayed {
-        context.await_menu_escape()?;
-    }
-    Ok(())
-}
 
 pub fn handle_create(context: &mut ShellContext, args: &[&str]) -> CommandResult {
     let name = if let Some(name) = args.first() {
