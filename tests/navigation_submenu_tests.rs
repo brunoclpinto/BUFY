@@ -68,8 +68,7 @@ fn test_submenu_invalid_input_handling() {
 #[test]
 fn test_ledger_load_prompt_escape_cancels() {
     let harness = NavigationTestHarness::new();
-    let output =
-        harness.run_interactive(&["ENTER", "DOWN,ENTER", "ESC", "ESC"], &["<ESC>"]);
+    let output = harness.run_interactive(&["ENTER", "DOWN,ENTER", "ESC", "ESC"], &["<ESC>"]);
     assert!(
         output.stdout.contains("Operation cancelled."),
         "Expected ESC to cancel the load prompt\n{}",

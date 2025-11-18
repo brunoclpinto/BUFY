@@ -211,10 +211,9 @@ pub fn horizontal_rule(widths: &[usize], padding: usize) -> String {
         return String::new();
     }
 
-    let total_width: usize = widths.iter().map(|w| w + (padding * 2)).sum::<usize>()
-        + widths.len().saturating_sub(1);
+    let total_width: usize =
+        widths.iter().map(|w| w + (padding * 2)).sum::<usize>() + widths.len().saturating_sub(1);
     let prefs = current_preferences();
     let ch = if prefs.plain_mode { '-' } else { '─' };
     ch.to_string().repeat(total_width)
 }
-
