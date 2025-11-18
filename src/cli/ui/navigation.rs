@@ -21,16 +21,20 @@ pub enum EscBehavior {
 
 pub fn read_nav_key() -> NavKey {
     match event::read() {
-        Ok(Event::Key(key)) => match key.code {
-            KeyCode::Up => NavKey::Up,
-            KeyCode::Down => NavKey::Down,
-            KeyCode::Left => NavKey::Left,
-            KeyCode::Right => NavKey::Right,
-            KeyCode::Enter => NavKey::Enter,
-            KeyCode::Esc => NavKey::Esc,
-            KeyCode::Char(c) => NavKey::Char(c),
-            _ => NavKey::Unknown,
-        },
+        Ok(Event::Key(key)) => map_key_code(key.code),
+        _ => NavKey::Unknown,
+    }
+}
+
+pub fn map_key_code(code: KeyCode) -> NavKey {
+    match code {
+        KeyCode::Up => NavKey::Up,
+        KeyCode::Down => NavKey::Down,
+        KeyCode::Left => NavKey::Left,
+        KeyCode::Right => NavKey::Right,
+        KeyCode::Enter => NavKey::Enter,
+        KeyCode::Esc => NavKey::Esc,
+        KeyCode::Char(c) => NavKey::Char(c),
         _ => NavKey::Unknown,
     }
 }
