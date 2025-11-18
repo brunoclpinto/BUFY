@@ -2,11 +2,12 @@ use std::io::{self, Stdout, Write};
 
 use crossterm::{
     cursor,
-    event::{self, Event, KeyCode, KeyEventKind},
     terminal::{self, ClearType},
     ExecutableCommand,
 };
 
+use crate::cli::ui::navigation::{navigation_loop, NavKey};
+use crossterm::event::KeyCode;
 use crate::cli::ui::table_renderer::{horizontal_rule, Table};
 
 const DEFAULT_HIGHLIGHT: &str = "> ";
@@ -56,29 +57,26 @@ impl<'a> ListSelector<'a> {
         let mut current_index: usize = 0;
 
         let result = loop {
-            if self.draw(&mut stdout, current_index).is_err() {
+            let mut render_error = None;
+            let key = navigation_loop(|| {
+                if let Err(err) = self.draw(&mut stdout, current_index) {
+                    render_error = Some(err);
+                }
+            });
+            if render_error.is_some() {
                 break ListSelectionResult::Escaped;
             }
 
-            let event = match event::read() {
-                Ok(ev) => ev,
-                Err(_) => break ListSelectionResult::Escaped,
-            };
-
-            match event {
-                Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
-                    KeyCode::Up => {
-                        current_index = current_index.checked_sub(1).unwrap_or(len - 1);
-                    }
-                    KeyCode::Down => {
-                        current_index = (current_index + 1) % len;
-                    }
-                    KeyCode::Enter => break ListSelectionResult::Selected(current_index),
-                    KeyCode::Esc => break ListSelectionResult::Escaped,
-                    _ => {}
-                },
-                Event::Resize(_, _) => continue,
-                _ => continue,
+            match key {
+                NavKey::Up => {
+                    current_index = current_index.checked_sub(1).unwrap_or(len - 1);
+                }
+                NavKey::Down => {
+                    current_index = (current_index + 1) % len;
+                }
+                NavKey::Enter => break ListSelectionResult::Selected(current_index),
+                NavKey::Esc => break ListSelectionResult::Escaped,
+                _ => {}
             }
         };
 

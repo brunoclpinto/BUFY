@@ -2,10 +2,12 @@ use std::io::{self, Stdout, Write};
 
 use crossterm::{
     cursor,
-    event::{self, Event, KeyCode, KeyEventKind},
+    event::KeyCode,
     terminal::{self, ClearType},
     ExecutableCommand,
 };
+
+use crate::cli::ui::navigation::{navigation_loop, NavKey};
 
 const FOOTER_TEXT: &str = "Press ↑ ↓ to select an action, Enter to execute, ESC to go back.";
 
@@ -83,31 +85,28 @@ impl DetailActionsMenu {
         let len = self.actions.len();
 
         let result = loop {
-            if self.draw(&mut stdout, current_index).is_err() {
+            let mut render_error = None;
+            let key = navigation_loop(|| {
+                if let Err(err) = self.draw(&mut stdout, current_index) {
+                    render_error = Some(err);
+                }
+            });
+            if render_error.is_some() {
                 break DetailActionResult::Escaped;
             }
 
-            let event = match event::read() {
-                Ok(ev) => ev,
-                Err(_) => break DetailActionResult::Escaped,
-            };
-
-            match event {
-                Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
-                    KeyCode::Up => {
-                        current_index = current_index.checked_sub(1).unwrap_or(len - 1);
-                    }
-                    KeyCode::Down => {
-                        current_index = (current_index + 1) % len;
-                    }
-                    KeyCode::Enter => {
-                        break DetailActionResult::Selected(self.actions[current_index].clone())
-                    }
-                    KeyCode::Esc => break DetailActionResult::Escaped,
-                    _ => {}
-                },
-                Event::Resize(_, _) => continue,
-                _ => continue,
+            match key {
+                NavKey::Up => {
+                    current_index = current_index.checked_sub(1).unwrap_or(len - 1);
+                }
+                NavKey::Down => {
+                    current_index = (current_index + 1) % len;
+                }
+                NavKey::Enter => {
+                    break DetailActionResult::Selected(self.actions[current_index].clone())
+                }
+                NavKey::Esc => break DetailActionResult::Escaped,
+                _ => {}
             }
         };
 
