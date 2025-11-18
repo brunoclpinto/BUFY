@@ -1,0 +1,193 @@
+use std::io::{self, Stdout, Write};
+
+use crossterm::{
+    cursor,
+    event::{self, Event, KeyCode, KeyEventKind},
+    terminal::{self, ClearType},
+    ExecutableCommand,
+};
+
+const FOOTER_TEXT: &str = "Press ↑ ↓ to select an action, Enter to execute, ESC to go back.";
+
+/// A single action entry to show under a detail view.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DetailAction {
+    pub id: String,
+    pub label: String,
+    pub description: String,
+}
+
+impl DetailAction {
+    pub fn new(
+        id: impl Into<String>,
+        label: impl Into<String>,
+        description: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+            description: description.into(),
+        }
+    }
+}
+
+/// Result of the actions menu.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DetailActionResult {
+    Selected(DetailAction),
+    Escaped,
+    Empty,
+}
+
+/// Interactive actions menu rendered beneath a detail view.
+pub struct DetailActionsMenu {
+    pub title: String,
+    pub actions: Vec<DetailAction>,
+    pub highlight_symbol: String,
+    pub normal_symbol: String,
+}
+
+impl DetailActionsMenu {
+    pub fn new(title: impl Into<String>, actions: Vec<DetailAction>) -> Self {
+        Self {
+            title: title.into(),
+            actions,
+            highlight_symbol: "• ".to_string(),
+            normal_symbol: "  ".to_string(),
+        }
+    }
+
+    pub fn with_symbols(
+        mut self,
+        highlight_symbol: impl Into<String>,
+        normal_symbol: impl Into<String>,
+    ) -> Self {
+        self.highlight_symbol = highlight_symbol.into();
+        self.normal_symbol = normal_symbol.into();
+        self
+    }
+
+    /// Run the interactive actions menu and return the selection.
+    pub fn run(&self) -> DetailActionResult {
+        if self.actions.is_empty() {
+            return DetailActionResult::Empty;
+        }
+
+        if terminal::enable_raw_mode().is_err() {
+            return DetailActionResult::Escaped;
+        }
+
+        let mut stdout = io::stdout();
+        let cursor_hidden = stdout.execute(cursor::Hide).is_ok();
+        let mut current_index: usize = 0;
+        let len = self.actions.len();
+
+        let result = loop {
+            if self.draw(&mut stdout, current_index).is_err() {
+                break DetailActionResult::Escaped;
+            }
+
+            let event = match event::read() {
+                Ok(ev) => ev,
+                Err(_) => break DetailActionResult::Escaped,
+            };
+
+            match event {
+                Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
+                    KeyCode::Up => {
+                        current_index = current_index.checked_sub(1).unwrap_or(len - 1);
+                    }
+                    KeyCode::Down => {
+                        current_index = (current_index + 1) % len;
+                    }
+                    KeyCode::Enter => {
+                        break DetailActionResult::Selected(self.actions[current_index].clone())
+                    }
+                    KeyCode::Esc => break DetailActionResult::Escaped,
+                    _ => {}
+                },
+                Event::Resize(_, _) => continue,
+                _ => continue,
+            }
+        };
+
+        if cursor_hidden {
+            stdout.execute(cursor::Show).ok();
+        }
+        terminal::disable_raw_mode().ok();
+        result
+    }
+
+    fn draw(&self, stdout: &mut Stdout, index: usize) -> io::Result<()> {
+        stdout.execute(cursor::MoveToColumn(0))?;
+        stdout.execute(terminal::Clear(ClearType::FromCursorDown))?;
+        let rendered = self.render_actions(index);
+        writeln!(stdout, "{rendered}")?;
+        stdout.flush()
+    }
+
+    fn render_actions(&self, selected_index: usize) -> String {
+        let max_label_len = self
+            .actions
+            .iter()
+            .map(|action| action.label.len())
+            .max()
+            .unwrap_or(0);
+        let mut lines = Vec::with_capacity(self.actions.len());
+        for (idx, action) in self.actions.iter().enumerate() {
+            let symbol = if idx == selected_index {
+                &self.highlight_symbol
+            } else {
+                &self.normal_symbol
+            };
+            let padded_label = format!("{:width$}", action.label, width = max_label_len);
+            lines.push(format!(
+                "{}{}  {}",
+                symbol, padded_label, action.description
+            ));
+        }
+
+        let rule_len = std::cmp::max(40, max_label_len + 20);
+        let rule = "─".repeat(rule_len);
+        let mut output = String::new();
+        output.push_str(&self.title);
+        output.push('\n');
+        output.push_str(&rule);
+        output.push('\n');
+        output.push_str(&lines.join("\n"));
+        output.push('\n');
+        output.push_str(&rule);
+        output.push('\n');
+        output.push_str(FOOTER_TEXT);
+        output
+    }
+}
+
+impl DetailActionsMenu {
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn run_simulated(&self, keys: &[KeyCode]) -> DetailActionResult {
+        if self.actions.is_empty() {
+            return DetailActionResult::Empty;
+        }
+
+        let len = self.actions.len();
+        let mut current_index: usize = 0;
+        for key in keys {
+            match key {
+                KeyCode::Up => {
+                    current_index = current_index.checked_sub(1).unwrap_or(len - 1);
+                }
+                KeyCode::Down => {
+                    current_index = (current_index + 1) % len;
+                }
+                KeyCode::Enter => {
+                    return DetailActionResult::Selected(self.actions[current_index].clone())
+                }
+                KeyCode::Esc => return DetailActionResult::Escaped,
+                _ => {}
+            }
+        }
+
+        DetailActionResult::Escaped
+    }
+}
