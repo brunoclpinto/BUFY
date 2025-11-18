@@ -6,6 +6,7 @@ use budget_core::cli::registry::CommandRegistry;
 use budget_core::cli::shell_context::SelectionOverride;
 use budget_core::config::{Config, ConfigManager};
 use budget_core::core::ledger_manager::LedgerManager;
+use budget_core::domain::account::{Account, AccountKind};
 use budget_core::ledger::{BudgetPeriod, Ledger};
 use budget_core::storage::json_backend::JsonStorage;
 use dialoguer::theme::ColorfulTheme;
@@ -84,4 +85,31 @@ fn escape_leaves_backups_untouched() {
         .list_backup_metadata("Demo")
         .expect("metadata");
     assert_eq!(metadata.len(), 1);
+}
+
+#[test]
+fn restore_action_restores_backup_state() {
+    let temp = TempDir::new().unwrap();
+    let mut context = build_context(&temp);
+    set_loaded_ledger(&mut context, "Demo");
+
+    // mutate ledger after backup
+    {
+        let manager = context.ledger_manager.read().unwrap();
+        let handle = manager.current_handle().expect("ledger loaded");
+        let mut ledger = handle.write().unwrap();
+        ledger.add_account(Account::new("Temp", AccountKind::Bank));
+        assert_eq!(ledger.accounts.len(), 1, "mutation should be visible");
+    }
+
+    push_choices(&context, &[Some(0), Some(0), None]);
+    list_backups::run_list_backups(&mut context).unwrap();
+
+    let manager = context.ledger_manager.read().unwrap();
+    let handle = manager.current_handle().expect("ledger loaded");
+    let ledger = handle.read().unwrap();
+    assert!(
+        ledger.accounts.is_empty(),
+        "restore should revert to original backup state"
+    );
 }
