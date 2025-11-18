@@ -11,7 +11,7 @@ fn script_mode_creates_and_lists_accounts() -> Result<(), Box<dyn Error>> {
         .success()
         .stdout(
             predicate::str::contains("New ledger created.")
-                .and(predicate::str::contains("No accounts defined.")),
+                .and(predicate::str::contains("No accounts in this ledger.")),
         );
     Ok(())
 }

@@ -9,11 +9,11 @@ fn renders_basic_detail_view() {
     let output = view.render();
     let lines: Vec<&str> = output.lines().collect();
 
-    assert_eq!(lines[0], "Account: Groceries");
+    assert!(lines[0].starts_with("⮞ Account: Groceries"));
     assert!(lines[1].chars().all(|ch| ch == '─'));
     assert_eq!(lines[2], "{");
-    assert!(lines.iter().any(|line| line.contains("\"name\"")));
-    assert!(lines.iter().any(|line| line.contains("\"budgeted_total\"")));
+    assert!(lines.iter().any(|line| line.contains("\"name")));
+    assert!(lines.iter().any(|line| line.contains("\"budgeted_total")));
     assert_eq!(lines[lines.len() - 2], "}");
     assert_eq!(lines[1], lines[lines.len() - 1]);
 }

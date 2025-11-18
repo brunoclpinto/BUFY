@@ -41,10 +41,8 @@ fn test_submenu_selection_triggers_handler() {
     let harness = NavigationTestHarness::new();
     let output = harness.run_interactive(&["ENTER", "DOWN,DOWN,DOWN,DOWN,DOWN,ENTER", "ESC"], &[]);
     assert!(
-        output
-            .stdout
-            .contains("No ledger currently loaded. Load or create a ledger to view backups."),
-        "Expected ledger overview handler output:\n{}",
+        output.stdout.contains("No ledgers found."),
+        "Expected empty-ledger guard output:\n{}",
         output.stdout
     );
 }
@@ -57,9 +55,7 @@ fn test_submenu_invalid_input_handling() {
         &[],
     );
     assert!(
-        output
-            .stdout
-            .contains("Ledger deletion workflow is not available yet."),
+        output.stdout.contains("No ledgers found."),
         "Expected guard message for unavailable action:\n{}",
         output.stdout
     );

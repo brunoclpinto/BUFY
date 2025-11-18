@@ -1,66 +1,70 @@
 ---
 source: tests/navigation_wizard_tests.rs
+assertion_line: 73
 expression: cleaned
 ---
 ✔ Automatically loaded last ledger `TxnLedger`.
+⮞ Main menu
+────────────────────────────────────────────────────────────────────────
 ledger: TxnLedger ⮞
-=== Main menu ===
 
-  Ledger       Ledger operations (new, load, save, backup, restore...)
-  Account      Manage accounts via wizard flows
-  Category     Manage categories and budgets
-> Transaction  Manage transactions via wizard flows
-  Simulation   Manage simulations and what-if scenarios
-  List         List accounts, categories, transactions, simulations...
-  Summary      Show ledger summary
-  Forecast     Forecast upcoming activity
-  Config       Global CLI preferences
-  Help         Show available commands
-  Version      Show build metadata
-  Exit         Exit the shell
-
+    Ledger       Ledger operations (new, load, save, backup, restore...)
+    Account      Manage accounts via wizard flows
+    Category     Manage categories and budgets
+  > Transaction  Manage transactions via wizard flows
+    Simulation   Manage simulations and what-if scenarios
+    Forecast     Forecast upcoming activity
+    List         List accounts, categories, transactions, simulations...
+    Summary      Show ledger summary
+    Config       Global CLI preferences
+    Help         Show available commands
+    Version      Show build metadata
+    Exit         Exit the shell
+────────────────────────────────────────────────────────────────────────
 (Use arrow keys to navigate, Enter to select, ESC to exit)
+⮞ transaction menu
+────────────────────────────────────────────────────
 ledger: TxnLedger ⮞
-=== transaction menu ===
 
-  Add       Add a transaction
-> Edit      Edit a transaction
-  Remove    Remove a transaction
-  Complete  Mark a transaction as completed
-  List      List transactions
-  Show      Show transaction details
-
-(Use arrow keys to navigate, Enter to select, ESC to go back)
+    Add       Add a transaction
+  > Edit      Edit a transaction
+    Remove    Remove a transaction
+    Complete  Mark a transaction as completed
+    List      List transactions
+    Show      Show transaction details
+────────────────────────────────────────────────────
+Use ↑ ↓ to navigate, Enter to select, ESC to return.
 Select a transaction to edit:
    1. [  0] 2025-01-01 | Checking -> Rent | 42.00 | Uncategorized | Planned
   Type cancel or press Esc to abort.
 ledger: TxnLedger ⮞
-Step 1 of 11 – From account
+⮞ Step 1 / 11 — From account
+────────────────────────────────────────────────────
 Default: [1] Checking (Bank) [ID]
-Use arrow keys to highlight an option and Enter to select.
+Use ↑ ↓ to highlight an option, Enter to select.
 Press ESC to cancel.
-=== From account ===
 
-> [1] Checking (Bank) [ID]            
-  [2] Rent (ExpenseDestination) [ID]  
-
-(Use arrow keys to navigate, Enter to select, ESC to go back)
+  > [1] Checking (Bank) [ID]            
+    [2] Rent (ExpenseDestination) [ID]  
+────────────────────────────────────────────────────
+Use ↑ ↓ to navigate, Enter to select, ESC to return.
 Transaction update cancelled.
+⮞ Main menu
+────────────────────────────────────────────────────────────────────────
 ledger: TxnLedger ⮞
-=== Main menu ===
 
-> Ledger       Ledger operations (new, load, save, backup, restore...)
-  Account      Manage accounts via wizard flows
-  Category     Manage categories and budgets
-  Transaction  Manage transactions via wizard flows
-  Simulation   Manage simulations and what-if scenarios
-  List         List accounts, categories, transactions, simulations...
-  Summary      Show ledger summary
-  Forecast     Forecast upcoming activity
-  Config       Global CLI preferences
-  Help         Show available commands
-  Version      Show build metadata
-  Exit         Exit the shell
-
+  > Ledger       Ledger operations (new, load, save, backup, restore...)
+    Account      Manage accounts via wizard flows
+    Category     Manage categories and budgets
+    Transaction  Manage transactions via wizard flows
+    Simulation   Manage simulations and what-if scenarios
+    Forecast     Forecast upcoming activity
+    List         List accounts, categories, transactions, simulations...
+    Summary      Show ledger summary
+    Config       Global CLI preferences
+    Help         Show available commands
+    Version      Show build metadata
+    Exit         Exit the shell
+────────────────────────────────────────────────────────────────────────
 (Use arrow keys to navigate, Enter to select, ESC to exit)
 Exiting shell.

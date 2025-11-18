@@ -1,5 +1,8 @@
 use std::cmp;
 
+use crate::cli::ui::style::{format_header, style};
+use crate::cli::ui::table_renderer::visible_width;
+
 /// A simple key/value pair for display.
 pub struct DetailField {
     pub key: String,
@@ -45,20 +48,23 @@ impl DetailView {
 
     /// Render the detail view as a string (without actions/footer).
     pub fn render(&self) -> String {
+        let ui = style();
         let mut lines = Vec::new();
         lines.push("{".to_string());
         lines.extend(self.render_fields());
         lines.push("}".to_string());
 
-        let max_line_len = cmp::max(
-            self.title.len(),
-            lines.iter().map(|line| line.len()).max().unwrap_or(0),
-        );
-        let rule_len = cmp::max(max_line_len, 40);
-        let rule = horizontal_rule(rule_len);
+        let header = format_header(&self.title);
+        let content_width = lines
+            .iter()
+            .map(|line| visible_width(line))
+            .max()
+            .unwrap_or(0);
+        let total_width = cmp::max(visible_width(&header), content_width);
+        let rule = ui.horizontal_line(total_width);
 
         let mut output = String::new();
-        output.push_str(&self.title);
+        output.push_str(&header);
         output.push('\n');
         output.push_str(&rule);
         output.push('\n');
@@ -89,20 +95,19 @@ impl DetailView {
             .iter()
             .enumerate()
             .map(|(idx, field)| {
-                let padding = max_key_len.saturating_sub(field.key.len()) + 2;
-                let spacer = " ".repeat(padding);
+                let padded_key = format!("{:width$}", field.key, width = max_key_len);
                 let suffix = if idx + 1 == self.fields.len() {
                     ""
                 } else {
                     ","
                 };
-                format!("  \"{}\":{}{}{}", field.key, spacer, field.value, suffix)
+                let value = if field.value.trim().is_empty() {
+                    "—".to_string()
+                } else {
+                    field.value.clone()
+                };
+                format!("  \"{padded_key}\":  {value}{suffix}")
             })
             .collect()
     }
-}
-
-fn horizontal_rule(len: usize) -> String {
-    let width = len.max(1);
-    "─".repeat(width)
 }

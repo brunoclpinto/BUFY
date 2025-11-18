@@ -159,7 +159,7 @@ pub fn confirm_menu(context_lines: &[String]) -> io::Result<ConfirmationPromptRe
         MenuUIItem::new("cancel", "Cancel", "Abort this wizard"),
     ];
 
-    let mut menu = MenuUI::new("Review entries", items);
+    let mut menu = MenuUI::new("Confirm Action", items);
     if let Some(context) = join_context(context_lines) {
         menu = menu.with_context(context);
     }

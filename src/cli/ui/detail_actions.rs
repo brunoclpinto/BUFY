@@ -118,47 +118,56 @@ impl DetailActionsMenu {
     }
 
     fn draw(&self, stdout: &mut Stdout, index: usize) -> io::Result<()> {
+        let ui = style();
         stdout.execute(cursor::MoveToColumn(0))?;
         stdout.execute(terminal::Clear(ClearType::FromCursorDown))?;
         let rendered = self.render_actions(index);
         writeln!(stdout, "{rendered}")?;
+        writeln!(stdout, "{}", ui.horizontal_line(FOOTER_TEXT.len().max(40)))?;
+        writeln!(stdout, "{FOOTER_TEXT}")?;
         stdout.flush()
     }
 
     fn render_actions(&self, selected_index: usize) -> String {
+        let ui = style();
         let max_label_len = self
             .actions
             .iter()
             .map(|action| action.label.len())
             .max()
             .unwrap_or(0);
-        let mut lines = Vec::with_capacity(self.actions.len());
+        let max_desc_len = self
+            .actions
+            .iter()
+            .map(|action| action.description.len())
+            .max()
+            .unwrap_or(0);
+        let rule_len = std::cmp::max(40, max_label_len + max_desc_len + 10);
+        let mut lines = Vec::new();
+        lines.push(format_header(&self.title));
+        lines.push(ui.horizontal_line(rule_len));
         for (idx, action) in self.actions.iter().enumerate() {
-            let symbol = if idx == selected_index {
-                &self.highlight_symbol
+            let marker = if idx == selected_index {
+                format!("{} ", ui.highlight_marker)
             } else {
-                &self.normal_symbol
+                "  ".into()
             };
             let padded_label = format!("{:width$}", action.label, width = max_label_len);
-            lines.push(format!(
-                "{}{}  {}",
-                symbol, padded_label, action.description
-            ));
+            let line = format!("  {}{}  {}", marker, padded_label, action.description);
+            let rendered = if idx == selected_index {
+                ui.apply_highlight_style(&line)
+            } else {
+                line
+            };
+            lines.push(rendered);
         }
+        lines.push(ui.horizontal_line(rule_len));
+        lines.join("\n")
+    }
 
-        let rule_len = std::cmp::max(40, max_label_len + 20);
-        let rule = "─".repeat(rule_len);
-        let mut output = String::new();
-        output.push_str(&self.title);
-        output.push('\n');
-        output.push_str(&rule);
-        output.push('\n');
-        output.push_str(&lines.join("\n"));
-        output.push('\n');
-        output.push_str(&rule);
-        output.push('\n');
-        output.push_str(FOOTER_TEXT);
-        output
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn render_snapshot(&self, selected_index: usize) -> String {
+        self.render_actions(selected_index)
     }
 }
 
@@ -190,3 +199,4 @@ impl DetailActionsMenu {
         DetailActionResult::Escaped
     }
 }
+use crate::cli::ui::style::{format_header, style};

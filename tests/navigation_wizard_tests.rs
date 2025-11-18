@@ -53,7 +53,7 @@ fn test_wizard_does_not_modify_state_on_cancel() {
     let _ = harness.run_interactive(&["DOWN,ENTER", "ENTER", "ESC", "ESC"], &["<ESC>"]);
     let inspection = harness.run_script("ledger load-ledger StateLedger\naccount list\nexit\n");
     assert!(
-        inspection.stdout.contains("No accounts defined."),
+        inspection.stdout.contains("No accounts in this ledger."),
         "Cancelled wizard should not add accounts\n{}",
         inspection.stdout
     );
@@ -116,8 +116,8 @@ fn test_wizard_escape_in_text_field_goes_back() {
         "Later wizard prompts should teach ESC back behaviour\n{}",
         output.stdout
     );
-    let linked_marker = "Step 3 of 5 – Linked category";
-    let opening_marker = "Step 4 of 5 – Opening balance";
+    let linked_marker = "Step 3 / 5 — Linked category";
+    let opening_marker = "Step 4 / 5 — Opening balance";
     let mut linked_positions = output
         .stdout
         .match_indices(linked_marker)

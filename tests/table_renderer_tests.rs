@@ -77,8 +77,12 @@ fn truncation_adds_ellipsis_and_resets_styles() {
     };
 
     let rendered = table.render();
-    assert!(rendered.contains('…'));
-    assert!(rendered.ends_with("\u{1b}[0m"));
+    let lines: Vec<&str> = rendered.lines().collect();
+    assert!(lines.iter().any(|line| line.contains('…')));
+    assert!(lines
+        .get(1)
+        .map(|line| line.ends_with("\u{1b}[0m"))
+        .unwrap_or(false));
     assert_eq!(table.compute_widths(), vec![5]);
 }
 
@@ -107,11 +111,18 @@ fn header_rendering_includes_rule() {
     let rendered = table.render();
     let lines: Vec<&str> = rendered.lines().collect();
 
-    let header_cells: Vec<String> = table.columns.iter().map(|col| col.header.clone()).collect();
+    let header_cells: Vec<String> = table
+        .columns
+        .iter()
+        .map(|col| col.header.to_uppercase())
+        .collect();
     let expected_header = table.render_row(&header_cells, &widths);
+    let rule_line = horizontal_rule(&widths, table.padding);
 
-    assert_eq!(lines[0], expected_header);
-    assert_eq!(lines[1], horizontal_rule(&widths, table.padding));
+    assert_eq!(lines[0], rule_line);
+    assert_eq!(lines[1], expected_header);
+    assert_eq!(lines[2], rule_line);
+    assert_eq!(lines.last().copied(), Some(rule_line.as_str()));
 }
 
 #[test]
@@ -141,6 +152,13 @@ fn renders_full_table_example() {
         ],
     };
 
-    let expected = " NAME          BALANCE\n───────────────────────\n Checking      1200.00\n Savings       5000.50";
+    let expected = concat!(
+        "────────────────────────────────────────\n",
+        " NAME           BALANCE\n",
+        "────────────────────────────────────────\n",
+        " Checking       1200.00\n",
+        " Savings        5000.50\n",
+        "────────────────────────────────────────"
+    );
     assert_eq!(table.render(), expected);
 }

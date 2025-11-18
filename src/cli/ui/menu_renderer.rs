@@ -4,12 +4,16 @@ use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     terminal::{self, ClearType},
-    ExecutableCommand, QueueableCommand,
+    ExecutableCommand,
 };
 
-use crate::cli::ui::test_mode::{self, MenuTestEvent};
+use crate::cli::ui::{
+    style::{format_header, style},
+    table_renderer::visible_width,
+    test_mode::{self, MenuTestEvent},
+};
 
-const DEFAULT_HINT: &str = "(Use arrow keys to navigate, Enter to select, ESC to go back)";
+const DEFAULT_HINT: &str = "Use ↑ ↓ to navigate, Enter to select, ESC to return.";
 
 #[derive(Clone, Debug)]
 pub struct MenuUI {
@@ -106,7 +110,7 @@ impl MenuRenderer {
             selected_index = menu.items.len() - 1;
         }
         let result = loop {
-            self.draw_frame(&mut stdout, menu, selected_index, false)?;
+            self.draw_frame(&mut stdout, menu, selected_index)?;
             let event = event::read()?;
             match event {
                 Event::Key(key) => {
@@ -214,10 +218,9 @@ impl MenuRenderer {
         stdout: &mut Stdout,
         menu: &MenuUI,
         selected_index: usize,
-        plain: bool,
     ) -> Result<(), io::Error> {
         self.clear_screen(stdout)?;
-        self.write_layout(stdout, menu, selected_index, plain)?;
+        self.write_layout(stdout, menu, selected_index)?;
         stdout.flush()
     }
 
@@ -226,77 +229,82 @@ impl MenuRenderer {
         writer: &mut Stdout,
         menu: &MenuUI,
         selected_index: usize,
-        plain: bool,
     ) -> Result<(), io::Error> {
+        for line in self.layout_lines(menu, selected_index) {
+            writeln!(writer, "{line}")?;
+        }
+        Ok(())
+    }
+
+    fn layout_lines(&self, menu: &MenuUI, selected_index: usize) -> Vec<String> {
+        let ui = style();
+        let hint = menu.footer_hint.as_deref().unwrap_or(DEFAULT_HINT);
         let label_width = menu
             .items
             .iter()
             .map(|item| display_label(&item.label).len())
             .max()
             .unwrap_or(0);
-        let hint = menu.footer_hint.as_deref().unwrap_or(DEFAULT_HINT);
-
-        if plain {
-            if let Some(context) = &menu.context {
-                writeln!(writer, "{context}")?;
-            }
-            writeln!(writer, "=== {} ===", menu.title)?;
-            writeln!(writer)?;
-            for (index, item) in menu.items.iter().enumerate() {
-                let marker = if index == selected_index { '>' } else { ' ' };
-                let label = display_label(&item.label);
-                writeln!(
-                    writer,
-                    "{marker} {:<width$}  {}",
-                    label,
-                    item.description,
-                    width = label_width
-                )?;
-            }
-            writeln!(writer)?;
-            writeln!(writer, "{hint}")?;
-            return Ok(());
-        }
-
-        let mut row: u16 = 0;
+        let mut context_lines = Vec::new();
         if let Some(context) = &menu.context {
-            writer.queue(cursor::MoveTo(0, row))?;
-            write!(writer, "{context}")?;
-            row = row.saturating_add(1);
+            context_lines.extend(context.lines().map(|line| line.to_string()));
         }
-
-        writer.queue(cursor::MoveTo(0, row))?;
-        write!(writer, "=== {} ===", menu.title)?;
-        row = row.saturating_add(1);
-
-        writer.queue(cursor::MoveTo(0, row))?;
-        row = row.saturating_add(1);
-
+        let mut items = Vec::new();
         for (index, item) in menu.items.iter().enumerate() {
-            let marker = if index == selected_index { '>' } else { ' ' };
             let label = display_label(&item.label);
-            let line = format!(
-                "{marker} {:<width$}  {}",
-                label,
-                item.description,
-                width = label_width
-            );
-            writer.queue(cursor::MoveTo(0, row))?;
-            write!(writer, "{line}")?;
-            row = row.saturating_add(1);
+            let padded_label = format!("{:width$}", label, width = label_width);
+            let prefix = if index == selected_index {
+                format!("  {} ", ui.highlight_marker)
+            } else {
+                "    ".to_string()
+            };
+            let base = format!("{prefix}{padded_label}  {}", item.description);
+            let width = visible_width(&base);
+            let rendered = if index == selected_index {
+                ui.apply_highlight_style(&base)
+            } else {
+                base
+            };
+            items.push((rendered, width));
         }
 
-        writer.queue(cursor::MoveTo(0, row))?;
-        row = row.saturating_add(1);
-        writer.queue(cursor::MoveTo(0, row))?;
-        write!(writer, "{hint}")?;
-        Ok(())
+        let header = format_header(&menu.title);
+        let mut max_width = visible_width(&header);
+        for line in &context_lines {
+            max_width = max_width.max(visible_width(line));
+        }
+        for (_, width) in &items {
+            max_width = max_width.max(*width);
+        }
+        max_width = max_width.max(visible_width(hint));
+
+        let rule = ui.horizontal_line(max_width);
+        let mut lines = Vec::new();
+        lines.push(header);
+        lines.push(rule.clone());
+        if !context_lines.is_empty() {
+            lines.extend(context_lines.clone());
+            if context_lines
+                .last()
+                .map(|line| !line.is_empty())
+                .unwrap_or(false)
+            {
+                lines.push(String::new());
+            }
+        }
+        for (rendered, _) in items {
+            lines.push(rendered);
+        }
+        lines.push(rule);
+        lines.push(hint.to_string());
+        lines
     }
 
     fn print_snapshot(&self, menu: &MenuUI, selected_index: usize) {
         let mut stdout = io::stdout();
-        self.write_layout(&mut stdout, menu, selected_index, true)
-            .expect("write snapshot layout");
+        for line in self.layout_lines(menu, selected_index) {
+            writeln!(stdout, "{line}").expect("write snapshot layout");
+        }
     }
 
     fn clear_screen(&self, stdout: &mut Stdout) -> Result<(), io::Error> {

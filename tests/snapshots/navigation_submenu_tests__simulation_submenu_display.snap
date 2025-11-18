@@ -3,50 +3,53 @@ source: tests/navigation_submenu_tests.rs
 assertion_line: 24
 expression: output.stdout
 ---
+⮞ Main menu
+────────────────────────────────────────────────────────────────────────
 no-ledger ⮞
-=== Main menu ===
 
-  Ledger       Ledger operations (new, load, save, backup, restore...)
-  Account      Manage accounts via wizard flows
-  Category     Manage categories and budgets
-  Transaction  Manage transactions via wizard flows
-> Simulation   Manage simulations and what-if scenarios
-  Forecast     Forecast upcoming activity
-  List         List accounts, categories, transactions, simulations...
-  Summary      Show ledger summary
-  Config       Global CLI preferences
-  Help         Show available commands
-  Version      Show build metadata
-  Exit         Exit the shell
-
+    Ledger       Ledger operations (new, load, save, backup, restore...)
+    Account      Manage accounts via wizard flows
+    Category     Manage categories and budgets
+    Transaction  Manage transactions via wizard flows
+  > Simulation   Manage simulations and what-if scenarios
+    Forecast     Forecast upcoming activity
+    List         List accounts, categories, transactions, simulations...
+    Summary      Show ledger summary
+    Config       Global CLI preferences
+    Help         Show available commands
+    Version      Show build metadata
+    Exit         Exit the shell
+────────────────────────────────────────────────────────────────────────
 (Use arrow keys to navigate, Enter to select, ESC to exit)
+⮞ simulation menu
+────────────────────────────────────────────────────
 no-ledger ⮞
-=== simulation menu ===
 
-> New      Create a simulation
-  Enter    Enter a simulation
-  Leave    Leave active simulation
-  Apply    Apply simulation changes
-  Discard  Discard a simulation
-  List     List simulations
-  Show     Show simulation details
-
-(Use arrow keys to navigate, Enter to select, ESC to go back)
+  > New      Create a simulation
+    Enter    Enter a simulation
+    Leave    Leave active simulation
+    Apply    Apply simulation changes
+    Discard  Discard a simulation
+    List     List simulations
+    Show     Show simulation details
+────────────────────────────────────────────────────
+Use ↑ ↓ to navigate, Enter to select, ESC to return.
+⮞ Main menu
+────────────────────────────────────────────────────────────────────────
 no-ledger ⮞
-=== Main menu ===
 
-> Ledger       Ledger operations (new, load, save, backup, restore...)
-  Account      Manage accounts via wizard flows
-  Category     Manage categories and budgets
-  Transaction  Manage transactions via wizard flows
-  Simulation   Manage simulations and what-if scenarios
-  Forecast     Forecast upcoming activity
-  List         List accounts, categories, transactions, simulations...
-  Summary      Show ledger summary
-  Config       Global CLI preferences
-  Help         Show available commands
-  Version      Show build metadata
-  Exit         Exit the shell
-
+  > Ledger       Ledger operations (new, load, save, backup, restore...)
+    Account      Manage accounts via wizard flows
+    Category     Manage categories and budgets
+    Transaction  Manage transactions via wizard flows
+    Simulation   Manage simulations and what-if scenarios
+    Forecast     Forecast upcoming activity
+    List         List accounts, categories, transactions, simulations...
+    Summary      Show ledger summary
+    Config       Global CLI preferences
+    Help         Show available commands
+    Version      Show build metadata
+    Exit         Exit the shell
+────────────────────────────────────────────────────────────────────────
 (Use arrow keys to navigate, Enter to select, ESC to exit)
 Exiting shell.

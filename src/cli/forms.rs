@@ -19,6 +19,8 @@ use crate::cli::ui::prompts::{
     choice_menu, confirm_menu, text_input, ChoicePromptResult, ConfirmationPromptResult,
     TextPromptResult,
 };
+use crate::cli::ui::style::{format_header, style};
+use crate::cli::ui::table_renderer::visible_width;
 use crate::ledger::{
     AccountKind, CategoryKind, Recurrence, RecurrenceMode, TimeInterval, TimeUnit,
     TransactionStatus,
@@ -1558,6 +1560,7 @@ impl WizardInteraction {
     }
 
     fn prompt_text(&mut self, context: &PromptContext<'_>) -> PromptResponse {
+        self.print_step_header(context);
         match text_input(context.descriptor.label, context.default) {
             Ok(TextPromptResult::Value(value)) => PromptResponse::Value(value),
             Ok(TextPromptResult::Keep) => PromptResponse::Keep,
@@ -1579,13 +1582,8 @@ impl WizardInteraction {
         if let Some(help) = context.descriptor.help {
             lines.push(help.to_string());
         }
-        match choice_menu(
-            context.descriptor.label,
-            &lines,
-            options,
-            context.default,
-            context.index > 0,
-        ) {
+        let title = self.step_title(context);
+        match choice_menu(&title, &lines, options, context.default, context.index > 0) {
             Ok(ChoicePromptResult::Value(value)) => {
                 if context
                     .default
@@ -1615,13 +1613,8 @@ impl WizardInteraction {
         if let Some(help) = context.descriptor.help {
             lines.push(help.to_string());
         }
-        match choice_menu(
-            context.descriptor.label,
-            &lines,
-            &options,
-            default_label,
-            context.index > 0,
-        ) {
+        let title = self.step_title(context);
+        match choice_menu(&title, &lines, &options, default_label, context.index > 0) {
             Ok(ChoicePromptResult::Value(choice)) => {
                 let bool_value = if choice.eq_ignore_ascii_case("yes") {
                     "true"
@@ -1644,21 +1637,35 @@ impl WizardInteraction {
     }
 
     fn choice_context_lines(&self, context: &PromptContext<'_>) -> Vec<String> {
-        let mut lines = vec![format!(
-            "Step {} of {} – {}",
-            context.index + 1,
-            context.total,
-            context.descriptor.label
-        )];
+        let mut lines = Vec::new();
         if let Some(default) = context.default {
             lines.push(format!("Default: {}", default));
         }
-        lines.push("Use arrow keys to highlight an option and Enter to select.".into());
+        lines.push("Use ↑ ↓ to highlight an option, Enter to select.".into());
         lines.push("Press ESC to cancel.".into());
         if context.index > 0 {
             lines.push("Select ← Back to revisit the previous field.".into());
         }
         lines
+    }
+
+    fn step_title(&self, context: &PromptContext<'_>) -> String {
+        format!(
+            "Step {} / {} — {}",
+            context.index + 1,
+            context.total,
+            context.descriptor.label
+        )
+    }
+
+    fn print_step_header(&self, context: &PromptContext<'_>) {
+        let title = self.step_title(context);
+        let header = format_header(&title);
+        let ui = style();
+        let rule = ui.horizontal_line(visible_width(&header));
+        println!("{header}");
+        println!("{rule}");
+        println!();
     }
 }
 

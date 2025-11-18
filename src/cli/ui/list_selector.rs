@@ -2,13 +2,14 @@ use std::io::{self, Stdout, Write};
 
 use crossterm::{
     cursor,
+    event::KeyCode,
     terminal::{self, ClearType},
     ExecutableCommand,
 };
 
 use crate::cli::ui::navigation::{navigation_loop, NavKey};
-use crossterm::event::KeyCode;
-use crate::cli::ui::table_renderer::{horizontal_rule, Table};
+use crate::cli::ui::style::style;
+use crate::cli::ui::table_renderer::{horizontal_rule, visible_width, Table};
 
 const DEFAULT_HIGHLIGHT: &str = "> ";
 const DEFAULT_NORMAL: &str = "  ";
@@ -88,30 +89,45 @@ impl<'a> ListSelector<'a> {
     }
 
     fn draw(&self, stdout: &mut Stdout, index: usize) -> io::Result<()> {
+        let ui = style();
+        let (content, width) = self.render_with_highlight(index);
         stdout.execute(cursor::MoveToColumn(0))?;
         stdout.execute(terminal::Clear(ClearType::FromCursorDown))?;
-        writeln!(stdout, "{}", self.render_with_highlight(index))?;
+        writeln!(stdout, "{content}")?;
+        let footer_rule = ui.horizontal_line(width.max(FOOTER_HINT.len()));
+        writeln!(stdout, "{footer_rule}")?;
         writeln!(stdout, "{FOOTER_HINT}")?;
+        if self.table.rows.len() > 1 {
+            writeln!(stdout, "({} items)", self.table.rows.len())?;
+        }
         stdout.flush()
     }
 
-    fn render_with_highlight(&self, index: usize) -> String {
+    fn render_with_highlight(&self, index: usize) -> (String, usize) {
+        let ui = style();
         let widths = self.table.compute_widths();
         let mut lines = Vec::new();
+        let mut max_width = 0usize;
+
+        let mut push_line = |line: String| {
+            max_width = max_width.max(visible_width(&line));
+            lines.push(line);
+        };
 
         if self.table.show_headers {
             let headers: Vec<String> = self
                 .table
                 .columns
                 .iter()
-                .map(|c| c.header.clone())
+                .map(|c| c.header.to_uppercase())
                 .collect();
-            lines.push(format!(
+            let header_row = self.table.render_row(&headers, &widths);
+            push_line(format!(
                 "{}{}",
                 self.normal_symbol,
-                self.table.render_row(&headers, &widths)
+                ui.apply_header_style(&header_row)
             ));
-            lines.push(format!(
+            push_line(format!(
                 "{}{}",
                 self.normal_symbol,
                 horizontal_rule(&widths, self.table.padding)
@@ -124,10 +140,17 @@ impl<'a> ListSelector<'a> {
             } else {
                 self.normal_symbol
             };
-            lines.push(format!("{}{}", prefix, self.table.render_row(row, &widths)));
+            let content = self.table.render_row(row, &widths);
+            let line = format!("{prefix}{content}");
+            let rendered = if row_idx == index {
+                ui.apply_highlight_style(&line)
+            } else {
+                line
+            };
+            push_line(rendered);
         }
 
-        lines.join("\n")
+        (lines.join("\n"), max_width)
     }
 
     #[cfg_attr(not(test), allow(dead_code))]

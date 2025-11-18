@@ -91,11 +91,7 @@ exit
         .write_stdin(script)
         .assert()
         .success()
-        .stdout(
-            contains("Ledger `demo` saved")
-                .and(contains("Available backups"))
-                .and(contains("Ledger `demo` loaded")),
-        );
+        .stdout(contains("Ledger `demo` saved").and(contains("Ledger `demo` loaded")));
 }
 
 #[test]

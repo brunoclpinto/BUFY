@@ -3,50 +3,53 @@ source: tests/navigation_submenu_tests.rs
 assertion_line: 10
 expression: output.stdout
 ---
+⮞ Main menu
+────────────────────────────────────────────────────────────────────────
 no-ledger ⮞
-=== Main menu ===
 
-> Ledger       Ledger operations (new, load, save, backup, restore...)
-  Account      Manage accounts via wizard flows
-  Category     Manage categories and budgets
-  Transaction  Manage transactions via wizard flows
-  Simulation   Manage simulations and what-if scenarios
-  Forecast     Forecast upcoming activity
-  List         List accounts, categories, transactions, simulations...
-  Summary      Show ledger summary
-  Config       Global CLI preferences
-  Help         Show available commands
-  Version      Show build metadata
-  Exit         Exit the shell
-
+  > Ledger       Ledger operations (new, load, save, backup, restore...)
+    Account      Manage accounts via wizard flows
+    Category     Manage categories and budgets
+    Transaction  Manage transactions via wizard flows
+    Simulation   Manage simulations and what-if scenarios
+    Forecast     Forecast upcoming activity
+    List         List accounts, categories, transactions, simulations...
+    Summary      Show ledger summary
+    Config       Global CLI preferences
+    Help         Show available commands
+    Version      Show build metadata
+    Exit         Exit the shell
+────────────────────────────────────────────────────────────────────────
 (Use arrow keys to navigate, Enter to select, ESC to exit)
+⮞ ledger menu
+────────────────────────────────────────────────────
 no-ledger ⮞
-=== ledger menu ===
 
-> New      Create a new ledger
-  Load     Load an existing ledger
-  Save     Save current ledger
-  Backup   Create a snapshot
-  Restore  Restore from snapshot
-  List     List ledgers and backups
-  Delete   Delete a ledger
-
-(Use arrow keys to navigate, Enter to select, ESC to go back)
+  > New      Create a new ledger
+    Load     Load an existing ledger
+    Save     Save current ledger
+    Backup   Create a snapshot
+    Restore  Restore from snapshot
+    List     List ledgers and backups
+    Delete   Delete a ledger
+────────────────────────────────────────────────────
+Use ↑ ↓ to navigate, Enter to select, ESC to return.
+⮞ Main menu
+────────────────────────────────────────────────────────────────────────
 no-ledger ⮞
-=== Main menu ===
 
-> Ledger       Ledger operations (new, load, save, backup, restore...)
-  Account      Manage accounts via wizard flows
-  Category     Manage categories and budgets
-  Transaction  Manage transactions via wizard flows
-  Simulation   Manage simulations and what-if scenarios
-  Forecast     Forecast upcoming activity
-  List         List accounts, categories, transactions, simulations...
-  Summary      Show ledger summary
-  Config       Global CLI preferences
-  Help         Show available commands
-  Version      Show build metadata
-  Exit         Exit the shell
-
+  > Ledger       Ledger operations (new, load, save, backup, restore...)
+    Account      Manage accounts via wizard flows
+    Category     Manage categories and budgets
+    Transaction  Manage transactions via wizard flows
+    Simulation   Manage simulations and what-if scenarios
+    Forecast     Forecast upcoming activity
+    List         List accounts, categories, transactions, simulations...
+    Summary      Show ledger summary
+    Config       Global CLI preferences
+    Help         Show available commands
+    Version      Show build metadata
+    Exit         Exit the shell
+────────────────────────────────────────────────────────────────────────
 (Use arrow keys to navigate, Enter to select, ESC to exit)
 Exiting shell.

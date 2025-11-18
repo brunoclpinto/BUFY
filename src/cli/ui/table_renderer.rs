@@ -1,4 +1,7 @@
-use crate::cli::output::current_preferences;
+use crate::cli::ui::style::style;
+
+const COLUMN_GAP: &str = "  ";
+const COLUMN_GAP_WIDTH: usize = 2;
 
 /// Describes how a column should align its contents.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,7 +52,11 @@ impl Table {
     }
 
     fn render_header(&self, widths: &[usize]) -> String {
-        let header: Vec<String> = self.columns.iter().map(|c| c.header.clone()).collect();
+        let header: Vec<String> = self
+            .columns
+            .iter()
+            .map(|c| c.header.to_uppercase())
+            .collect();
         self.render_row(&header, widths)
     }
 
@@ -65,16 +72,24 @@ impl Table {
             })
             .collect();
 
-        rendered_cells.join(" ").trim_end().to_string()
+        rendered_cells.join(COLUMN_GAP).trim_end().to_string()
     }
 
     /// Renders the full table, optionally including headers and separators.
     pub fn render(&self) -> String {
         let widths = self.compute_widths();
         let mut out = String::new();
+        let total_width = table_width(&widths, self.padding);
+        let style = style();
+
+        if self.show_headers || !self.rows.is_empty() {
+            out.push_str(&style.horizontal_line(total_width));
+            out.push('\n');
+        }
 
         if self.show_headers {
-            out.push_str(&self.render_header(&widths));
+            let header_line = self.render_header(&widths);
+            out.push_str(&style.apply_header_style(&header_line));
             out.push('\n');
             out.push_str(&horizontal_rule(&widths, self.padding));
             if !self.rows.is_empty() {
@@ -88,12 +103,17 @@ impl Table {
                 out.push('\n');
             }
         }
-
+        if !self.rows.is_empty() {
+            out.push('\n');
+        }
+        if self.show_headers || !self.rows.is_empty() {
+            out.push_str(&style.horizontal_line(total_width));
+        }
         out
     }
 }
 
-fn visible_width(text: &str) -> usize {
+pub fn visible_width(text: &str) -> usize {
     let bytes = text.as_bytes();
     let mut idx = 0;
     let mut width = 0;
@@ -211,9 +231,15 @@ pub fn horizontal_rule(widths: &[usize], padding: usize) -> String {
         return String::new();
     }
 
-    let total_width: usize =
-        widths.iter().map(|w| w + (padding * 2)).sum::<usize>() + widths.len().saturating_sub(1);
-    let prefs = current_preferences();
-    let ch = if prefs.plain_mode { '-' } else { '─' };
-    ch.to_string().repeat(total_width)
+    let total_width = table_width(widths, padding);
+    style().horizontal_line(total_width)
+}
+
+fn table_width(widths: &[usize], padding: usize) -> usize {
+    if widths.is_empty() {
+        return 0;
+    }
+
+    widths.iter().map(|w| w + (padding * 2)).sum::<usize>()
+        + COLUMN_GAP_WIDTH * widths.len().saturating_sub(1)
 }

@@ -7,8 +7,8 @@ fn test_banner_no_ledger() {
     let harness = NavigationTestHarness::new();
     let output = harness.run_interactive(&["END,ENTER"], &[]);
     assert!(
-        output.stdout.contains("Main menu - No Ledger"),
-        "Expected header to mention No Ledger\n{}",
+        output.stdout.contains("no-ledger"),
+        "Expected header to mention no-ledger indicator\n{}",
         output.stdout
     );
 }

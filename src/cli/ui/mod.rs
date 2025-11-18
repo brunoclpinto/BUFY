@@ -6,5 +6,6 @@ pub mod list_selector;
 pub mod menu_renderer;
 pub mod navigation;
 pub mod prompts;
+pub mod style;
 pub mod table_renderer;
 pub mod test_mode;
