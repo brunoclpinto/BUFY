@@ -1,5 +1,6 @@
 use chrono::Utc;
 
+use crate::cli::commands::transaction::list_transactions;
 use crate::cli::core::{CliMode, CommandError, CommandResult, RecurrenceListFilter, ShellContext};
 use crate::cli::io;
 use crate::ledger::RecurrenceStatus;
@@ -21,7 +22,7 @@ pub fn handle_show(context: &mut ShellContext, args: &[&str]) -> CommandResult {
 }
 
 pub fn handle_list(context: &mut ShellContext) -> CommandResult {
-    context.list_transactions()
+    list_transactions::run_list_transactions(context)
 }
 
 pub fn handle_complete(context: &mut ShellContext, args: &[&str]) -> CommandResult {

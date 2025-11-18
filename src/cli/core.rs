@@ -2071,7 +2071,7 @@ impl ShellContext {
         }
     }
 
-    fn run_transaction_edit_wizard(&mut self, index: usize) -> CommandResult {
+    pub(crate) fn run_transaction_edit_wizard(&mut self, index: usize) -> CommandResult {
         self.ensure_base_mode("Transaction editing")?;
         if self.mode != CliMode::Interactive {
             return Err(CommandError::InvalidArguments(
@@ -2371,47 +2371,6 @@ impl ShellContext {
             recurrence.next_scheduled = existing.next_scheduled;
         }
         Ok(recurrence)
-    }
-
-    pub(crate) fn list_transactions(&self) -> CommandResult {
-        let rows = self.with_ledger(|ledger| {
-            if ledger.transactions.is_empty() {
-                return Ok(None);
-            }
-            let rows: Vec<Vec<String>> = ledger
-                .transactions
-                .iter()
-                .map(|txn| {
-                    let from = ledger
-                        .account(txn.from_account)
-                        .map(|acc| acc.name.clone())
-                        .unwrap_or_else(|| "Unknown".into());
-                    let to = ledger
-                        .account(txn.to_account)
-                        .map(|acc| acc.name.clone())
-                        .unwrap_or_else(|| "Unknown".into());
-                    vec![
-                        self.format_date(ledger, txn.scheduled_date),
-                        from,
-                        to,
-                        self.format_amount(ledger, txn.budgeted_amount),
-                    ]
-                })
-                .collect();
-            Ok(Some(rows))
-        })?;
-
-        match rows {
-            Some(rows) => {
-                Formatter::new().print_header("Transactions");
-                output_table(&["Date", "From", "To", "Amount"], &rows);
-                self.await_menu_escape()
-            }
-            None => {
-                cli_io::print_warning("No transactions recorded.");
-                Ok(())
-            }
-        }
     }
 
     pub(crate) fn show_budget_summary(&self, args: &[&str]) -> CommandResult {

@@ -1,3 +1,5 @@
+pub mod list_transactions;
+
 use crate::cli::commands::transaction_handlers;
 use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
 use crate::cli::menus::{menu_error_to_command_error, transaction_menu};
