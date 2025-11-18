@@ -8,6 +8,7 @@ use crate::cli::ui::detail_actions::{DetailAction, DetailActionResult, DetailAct
 use crate::cli::ui::detail_view::DetailView;
 use crate::cli::ui::list_selector::{ListSelectionResult, ListSelector};
 use crate::cli::ui::table_renderer::{Alignment, Table, TableColumn};
+use crate::cli::ui::test_mode;
 use crate::core::services::{AccountService, BudgetService};
 use crate::ledger::AccountKind;
 
@@ -197,6 +198,13 @@ fn select_row(context: &ShellContext, table: &Table, len: usize) -> RowSelection
         };
     }
 
+    if let Some(keys) = test_mode::next_selector_events("account_selector") {
+        return match ListSelector::new(table).run_simulated(&keys) {
+            ListSelectionResult::Selected(index) => RowSelection::Index(index),
+            ListSelectionResult::Escaped | ListSelectionResult::Empty => RowSelection::Exit,
+        };
+    }
+
     match ListSelector::new(table).run() {
         ListSelectionResult::Selected(index) => RowSelection::Index(index),
         ListSelectionResult::Escaped | ListSelectionResult::Empty => RowSelection::Exit,
@@ -226,6 +234,10 @@ fn choose_action(context: &ShellContext, actions: &[DetailAction]) -> DetailActi
                 .unwrap_or(DetailActionResult::Escaped),
             None => DetailActionResult::Escaped,
         };
+    }
+
+    if let Some(keys) = test_mode::next_action_events("account_actions") {
+        return DetailActionsMenu::new("Actions", actions.to_vec()).run_simulated(&keys);
     }
 
     DetailActionsMenu::new("Actions", actions.to_vec()).run()
