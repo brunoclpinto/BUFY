@@ -1541,23 +1541,6 @@ impl ShellContext {
         Ok(())
     }
 
-    pub(crate) fn list_backups(&self, name: &str) -> CommandResult {
-        let backups = self
-            .manager()
-            .list_backups(name)
-            .map_err(CommandError::from_core)?;
-        if backups.is_empty() {
-            cli_io::print_warning("No backups available.");
-            return Ok(());
-        }
-        cli_io::print_info("Available backups:");
-        for (idx, backup_name) in backups.iter().enumerate() {
-            let description = format_backup_label(backup_name);
-            cli_io::print_info(format!("  {:>2}. {}", idx + 1, description));
-        }
-        self.await_menu_escape()
-    }
-
     pub(crate) fn restore_backup(&mut self, name: &str, reference: &str) -> CommandResult {
         let backups = self
             .manager()

@@ -139,6 +139,29 @@ impl JsonStorage {
         Ok(entries)
     }
 
+    pub fn list_backup_metadata(&self, name: &str) -> Result<Vec<BackupMetadata>> {
+        let entries = self.list_backups(name)?;
+        let mut metadata = Vec::new();
+        for file_name in entries {
+            let path = self.backup_path(name, &file_name);
+            let size_bytes = fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0);
+            metadata.push(BackupMetadata {
+                name: file_name.clone(),
+                created_at: parse_backup_timestamp(&file_name),
+                size_bytes,
+            });
+        }
+        Ok(metadata)
+    }
+
+    pub fn delete_backup(&self, name: &str, backup_name: &str) -> Result<()> {
+        let path = self.backup_path(name, backup_name);
+        if path.exists() {
+            fs::remove_file(path)?;
+        }
+        Ok(())
+    }
+
     pub fn list_ledger_metadata(&self) -> Result<Vec<LedgerMetadata>> {
         if !self.ledgers_dir.exists() {
             return Ok(Vec::new());
@@ -358,6 +381,13 @@ pub struct ConfigBackupInfo {
     pub path: PathBuf,
     pub created_at: DateTime<Utc>,
     pub note: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BackupMetadata {
+    pub name: String,
+    pub created_at: Option<DateTime<Utc>>,
+    pub size_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

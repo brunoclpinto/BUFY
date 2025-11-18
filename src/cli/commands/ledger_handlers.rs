@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use chrono::Utc;
 
+use crate::cli::commands::backup::list_backups;
 use crate::cli::commands::ledger::list_ledgers;
 use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
 use crate::cli::io;
@@ -122,13 +123,8 @@ pub fn handle_backup(context: &mut ShellContext, args: &[&str]) -> CommandResult
     context.create_backup(&name)
 }
 
-pub fn handle_list_backups(context: &mut ShellContext, args: &[&str]) -> CommandResult {
-    let name = if let Some(name) = args.first() {
-        (*name).to_string()
-    } else {
-        context.require_named_ledger()?
-    };
-    context.list_backups(&name)
+pub fn handle_list_backups(context: &mut ShellContext, _args: &[&str]) -> CommandResult {
+    list_backups::run_list_backups(context)
 }
 
 pub fn handle_restore(context: &mut ShellContext, args: &[&str]) -> CommandResult {
