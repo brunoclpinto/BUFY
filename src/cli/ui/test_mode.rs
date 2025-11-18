@@ -1,3 +1,4 @@
+use crossterm::event::KeyCode;
 use once_cell::sync::Lazy;
 use std::{collections::VecDeque, env, sync::Mutex};
 
@@ -73,9 +74,40 @@ impl TextQueue {
     }
 }
 
+struct KeySequenceQueue {
+    enabled: bool,
+    sequences: VecDeque<Vec<KeyCode>>,
+}
+
+impl KeySequenceQueue {
+    fn from_env(var: &str) -> Self {
+        if let Ok(raw) = env::var(var) {
+            Self {
+                enabled: true,
+                sequences: parse_key_sequences(&raw),
+            }
+        } else {
+            Self::new()
+        }
+    }
+
+    fn new() -> Self {
+        Self {
+            enabled: false,
+            sequences: VecDeque::new(),
+        }
+    }
+}
+
 static MENU_EVENTS: Lazy<Mutex<MenuQueue>> = Lazy::new(|| Mutex::new(MenuQueue::from_env()));
 
 static TEXT_INPUTS: Lazy<Mutex<TextQueue>> = Lazy::new(|| Mutex::new(TextQueue::from_env()));
+
+static SELECTOR_EVENTS: Lazy<Mutex<KeySequenceQueue>> =
+    Lazy::new(|| Mutex::new(KeySequenceQueue::from_env("BUFY_TEST_SELECTOR_EVENTS")));
+
+static ACTION_EVENTS: Lazy<Mutex<KeySequenceQueue>> =
+    Lazy::new(|| Mutex::new(KeySequenceQueue::from_env("BUFY_TEST_ACTION_EVENTS")));
 
 pub fn is_enabled() -> bool {
     MENU_EVENTS
@@ -86,6 +118,11 @@ pub fn is_enabled() -> bool {
             .lock()
             .expect("text input queue poisoned")
             .enabled
+        || SELECTOR_EVENTS
+            .lock()
+            .expect("selector queue poisoned")
+            .enabled
+        || ACTION_EVENTS.lock().expect("action queue poisoned").enabled
 }
 
 pub fn next_menu_events(label: &str) -> Option<Vec<MenuTestEvent>> {
@@ -111,6 +148,32 @@ pub fn next_text_input(label: &str) -> Option<TextTestInput> {
             .inputs
             .pop_front()
             .unwrap_or_else(|| panic!("Text inputs exhausted before prompt `{label}`")),
+    )
+}
+
+pub fn next_selector_events(label: &str) -> Option<Vec<KeyCode>> {
+    let mut guard = SELECTOR_EVENTS.lock().expect("selector queue poisoned");
+    if !guard.enabled {
+        return None;
+    }
+    Some(
+        guard
+            .sequences
+            .pop_front()
+            .unwrap_or_else(|| panic!("Selector events exhausted before `{label}` rendered")),
+    )
+}
+
+pub fn next_action_events(label: &str) -> Option<Vec<KeyCode>> {
+    let mut guard = ACTION_EVENTS.lock().expect("action queue poisoned");
+    if !guard.enabled {
+        return None;
+    }
+    Some(
+        guard
+            .sequences
+            .pop_front()
+            .unwrap_or_else(|| panic!("Action events exhausted before `{label}` rendered")),
     )
 }
 
@@ -176,6 +239,39 @@ fn parse_text_sequences(raw: &str) -> VecDeque<TextTestInput> {
         .collect()
 }
 
+fn parse_key_sequences(raw: &str) -> VecDeque<Vec<KeyCode>> {
+    raw.split('|')
+        .filter_map(|segment| {
+            let trimmed = segment.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            let events = trimmed
+                .split(',')
+                .filter_map(|token| parse_key_code(token.trim()))
+                .collect::<Vec<_>>();
+            if events.is_empty() {
+                None
+            } else {
+                Some(events)
+            }
+        })
+        .collect()
+}
+
+fn parse_key_code(token: &str) -> Option<KeyCode> {
+    match token.to_ascii_uppercase().as_str() {
+        "UP" => Some(KeyCode::Up),
+        "DOWN" => Some(KeyCode::Down),
+        "LEFT" => Some(KeyCode::Left),
+        "RIGHT" => Some(KeyCode::Right),
+        "ENTER" | "RETURN" => Some(KeyCode::Enter),
+        "ESC" | "ESCAPE" => Some(KeyCode::Esc),
+        other if other.len() == 1 => other.chars().next().map(KeyCode::Char),
+        _ => None,
+    }
+}
+
 pub fn install_menu_events(events: Vec<Vec<MenuTestEvent>>) {
     let mut guard = MENU_EVENTS.lock().expect("menu event queue poisoned");
     guard.enabled = true;
@@ -198,4 +294,28 @@ pub fn reset_text_inputs() {
     let mut guard = TEXT_INPUTS.lock().expect("text input queue poisoned");
     guard.enabled = false;
     guard.inputs.clear();
+}
+
+pub fn install_selector_events(events: Vec<Vec<KeyCode>>) {
+    let mut guard = SELECTOR_EVENTS.lock().expect("selector queue poisoned");
+    guard.enabled = true;
+    guard.sequences = events.into();
+}
+
+pub fn reset_selector_events() {
+    let mut guard = SELECTOR_EVENTS.lock().expect("selector queue poisoned");
+    guard.enabled = false;
+    guard.sequences.clear();
+}
+
+pub fn install_action_events(events: Vec<Vec<KeyCode>>) {
+    let mut guard = ACTION_EVENTS.lock().expect("action queue poisoned");
+    guard.enabled = true;
+    guard.sequences = events.into();
+}
+
+pub fn reset_action_events() {
+    let mut guard = ACTION_EVENTS.lock().expect("action queue poisoned");
+    guard.enabled = false;
+    guard.sequences.clear();
 }
