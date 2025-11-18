@@ -2373,60 +2373,6 @@ impl ShellContext {
         Ok(recurrence)
     }
 
-    pub(crate) fn list_categories(&self) -> CommandResult {
-        let rows = self.with_ledger(|ledger| {
-            if ledger.categories.is_empty() {
-                return Ok(None);
-            }
-            let rows: Vec<Vec<String>> = ledger
-                .categories
-                .iter()
-                .map(|category| {
-                    let parent = category
-                        .parent_id
-                        .and_then(|id| ledger.category(id))
-                        .map(|cat| cat.name.clone())
-                        .unwrap_or_else(|| "-".into());
-                    let budget_display = category
-                        .budget
-                        .as_ref()
-                        .map(|budget| {
-                            format!(
-                                "{} ({})",
-                                self.format_amount(ledger, budget.amount),
-                                self.describe_budget_period_label(
-                                    ledger,
-                                    &budget.period,
-                                    budget.reference_date
-                                )
-                            )
-                        })
-                        .unwrap_or_else(|| "-".into());
-                    vec![
-                        category.name.clone(),
-                        category.kind.to_string(),
-                        parent,
-                        budget_display,
-                        category.notes.as_deref().unwrap_or("-").to_string(),
-                    ]
-                })
-                .collect();
-            Ok(Some(rows))
-        })?;
-
-        match rows {
-            Some(rows) => {
-                Formatter::new().print_header("Categories");
-                output_table(&["Name", "Kind", "Parent", "Budget", "Notes"], &rows);
-                self.await_menu_escape()
-            }
-            None => {
-                cli_io::print_warning("No categories defined.");
-                Ok(())
-            }
-        }
-    }
-
     pub(crate) fn list_transactions(&self) -> CommandResult {
         let rows = self.with_ledger(|ledger| {
             if ledger.transactions.is_empty() {

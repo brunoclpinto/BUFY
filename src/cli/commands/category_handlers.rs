@@ -1,3 +1,4 @@
+use crate::cli::commands::category::list_categories;
 use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
 use crate::cli::io;
 
@@ -29,11 +30,11 @@ pub fn handle_edit(context: &mut ShellContext, args: &[&str]) -> CommandResult {
 }
 
 pub fn handle_list(context: &mut ShellContext) -> CommandResult {
-    context.list_categories()
+    list_categories::run_list_categories(context)
 }
 
 pub fn handle_show(context: &mut ShellContext) -> CommandResult {
-    context.list_categories()
+    list_categories::run_list_categories(context)
 }
 
 pub fn handle_remove(_context: &mut ShellContext) -> CommandResult {

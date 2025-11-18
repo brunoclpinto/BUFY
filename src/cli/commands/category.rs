@@ -1,3 +1,5 @@
+pub mod list_categories;
+
 use crate::cli::commands::category_handlers;
 use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
 use crate::cli::menus::{category_menu, menu_error_to_command_error};
