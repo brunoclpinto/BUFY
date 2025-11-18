@@ -1,3 +1,4 @@
+use crate::cli::commands::account::list_accounts;
 use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
 use crate::cli::io;
 
@@ -29,11 +30,11 @@ pub fn handle_edit(context: &mut ShellContext, args: &[&str]) -> CommandResult {
 }
 
 pub fn handle_list(context: &mut ShellContext) -> CommandResult {
-    context.list_accounts()
+    list_accounts::run_list_accounts(context)
 }
 
 pub fn handle_show(context: &mut ShellContext) -> CommandResult {
-    context.list_accounts()
+    list_accounts::run_list_accounts(context)
 }
 
 pub fn handle_remove(_context: &mut ShellContext) -> CommandResult {

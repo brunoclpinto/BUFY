@@ -1,3 +1,4 @@
+use crate::cli::commands::account::list_accounts;
 use crate::cli::commands::ledger::list_ledgers;
 use crate::cli::core::{CommandError, CommandResult, ShellContext};
 
@@ -6,7 +7,7 @@ use super::simulation_handlers;
 
 pub fn dispatch(context: &mut ShellContext, key: &str) -> CommandResult {
     match key.to_ascii_lowercase().as_str() {
-        "accounts" => context.list_accounts(),
+        "accounts" => list_accounts::run_list_accounts(context),
         "categories" => context.list_categories(),
         "transactions" => context.list_transactions(),
         "simulations" => simulation_handlers::list_simulations(context),

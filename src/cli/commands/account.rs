@@ -1,3 +1,5 @@
+pub mod list_accounts;
+
 use crate::cli::commands::account_handlers;
 use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
 use crate::cli::menus::{account_menu, menu_error_to_command_error};

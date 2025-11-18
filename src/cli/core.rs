@@ -2373,44 +2373,6 @@ impl ShellContext {
         Ok(recurrence)
     }
 
-    pub(crate) fn list_accounts(&self) -> CommandResult {
-        let rows = self.with_ledger(|ledger| {
-            if ledger.accounts.is_empty() {
-                return Ok(None);
-            }
-            let rows: Vec<Vec<String>> = ledger
-                .accounts
-                .iter()
-                .map(|account| {
-                    let category = account
-                        .category_id
-                        .and_then(|id| ledger.category(id))
-                        .map(|cat| cat.name.clone())
-                        .unwrap_or_else(|| "-".into());
-                    vec![
-                        account.name.clone(),
-                        account.kind.to_string(),
-                        category,
-                        account.notes.as_deref().unwrap_or("-").to_string(),
-                    ]
-                })
-                .collect();
-            Ok(Some(rows))
-        })?;
-
-        match rows {
-            Some(rows) => {
-                Formatter::new().print_header("Accounts");
-                output_table(&["Name", "Kind", "Category", "Notes"], &rows);
-                self.await_menu_escape()
-            }
-            None => {
-                cli_io::print_warning("No accounts defined.");
-                Ok(())
-            }
-        }
-    }
-
     pub(crate) fn list_categories(&self) -> CommandResult {
         let rows = self.with_ledger(|ledger| {
             if ledger.categories.is_empty() {
