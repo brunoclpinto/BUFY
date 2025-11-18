@@ -15,6 +15,7 @@ use crate::{
     cli::ui::{
         formatting::Formatter,
         prompts::{text_input, TextPromptResult},
+        style::refresh_style,
     },
     config::Config,
 };
@@ -65,7 +66,9 @@ pub fn apply_config(config: &Config) {
         high_contrast_mode: plain,
         quiet_mode: false,
         audio_feedback: config.audio_feedback,
+        color_enabled: config.ui_color_enabled,
     });
+    refresh_style();
 }
 
 fn guard_to_theme<'a>(

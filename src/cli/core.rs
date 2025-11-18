@@ -291,6 +291,14 @@ impl ShellContext {
             config.theme.as_deref().unwrap_or("default")
         ));
         cli_io::print_info(format!(
+            "  Color output: {}",
+            if config.ui_color_enabled { "on" } else { "off" }
+        ));
+        cli_io::print_info(format!(
+            "  UI style: {}",
+            config.ui_style.as_deref().unwrap_or("default")
+        ));
+        cli_io::print_info(format!(
             "  Last opened ledger: {}",
             config.last_opened_ledger.as_deref().unwrap_or("(none)")
         ));
@@ -349,6 +357,30 @@ impl ShellContext {
                         config.theme = None;
                     } else {
                         config.theme = Some(value.to_string());
+                    }
+                }
+                "ui_color_enabled" => {
+                    let normalized = value.trim().to_lowercase();
+                    match normalized.as_str() {
+                        "on" | "true" | "yes" | "1" => config.ui_color_enabled = true,
+                        "off" | "false" | "no" | "0" => config.ui_color_enabled = false,
+                        "" => config.ui_color_enabled = Config::default_ui_color_enabled(),
+                        other => {
+                            return Err(CommandError::InvalidArguments(format!(
+                                "invalid ui_color_enabled value `{}`",
+                                other
+                            )))
+                        }
+                    }
+                }
+                "ui_style" => {
+                    if value.eq_ignore_ascii_case("default")
+                        || value.eq_ignore_ascii_case("none")
+                        || value.is_empty()
+                    {
+                        config.ui_style = None;
+                    } else {
+                        config.ui_style = Some(value.to_string());
                     }
                 }
                 "last_opened_ledger" => {

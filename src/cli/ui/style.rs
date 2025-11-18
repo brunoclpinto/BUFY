@@ -1,9 +1,13 @@
-use std::{io::IsTerminal, sync::OnceLock};
+use std::{
+    io::IsTerminal,
+    sync::{OnceLock, RwLock},
+};
 
 use colored::{Color, Colorize};
 
 use crate::cli::output::current_preferences;
 
+#[derive(Clone)]
 pub struct UiStyle {
     pub header_prefix: String,
     pub separator: char,
@@ -15,10 +19,24 @@ pub struct UiStyle {
     pub highlight_marker: String,
 }
 
-static STYLE: OnceLock<UiStyle> = OnceLock::new();
+static STYLE: OnceLock<RwLock<UiStyle>> = OnceLock::new();
 
-pub fn style() -> &'static UiStyle {
-    STYLE.get_or_init(UiStyle::detect)
+pub fn style() -> UiStyle {
+    STYLE
+        .get_or_init(|| RwLock::new(UiStyle::detect()))
+        .read()
+        .expect("style lock poisoned")
+        .clone()
+}
+
+pub fn refresh_style() {
+    if let Some(lock) = STYLE.get() {
+        if let Ok(mut guard) = lock.write() {
+            *guard = UiStyle::detect();
+        }
+    } else {
+        let _ = STYLE.set(RwLock::new(UiStyle::detect()));
+    }
 }
 
 impl UiStyle {
@@ -26,7 +44,11 @@ impl UiStyle {
         let prefs = current_preferences();
         let stdout_tty = std::io::stdout().is_terminal();
         let no_color = std::env::var_os("NO_COLOR").is_some();
-        let use_color = stdout_tty && !prefs.plain_mode && !prefs.screen_reader_mode && !no_color;
+        let use_color = stdout_tty
+            && prefs.color_enabled
+            && !prefs.plain_mode
+            && !prefs.screen_reader_mode
+            && !no_color;
 
         let header_prefix = if prefs.plain_mode || prefs.screen_reader_mode {
             "> ".into()

@@ -25,6 +25,10 @@ pub struct Config {
     pub currency: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub theme: Option<String>,
+    #[serde(default = "Config::default_ui_color_enabled")]
+    pub ui_color_enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ui_style: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_opened_ledger: Option<String>,
     #[serde(default)]
@@ -41,6 +45,8 @@ impl Default for Config {
             locale: "en-US".into(),
             currency: "USD".into(),
             theme: None,
+            ui_color_enabled: Self::default_ui_color_enabled(),
+            ui_style: None,
             last_opened_ledger: None,
             audio_feedback: false,
             default_budget_period: Self::default_budget_period_value(),
@@ -52,6 +58,10 @@ impl Default for Config {
 impl Config {
     pub fn default_budget_period_value() -> String {
         "monthly".into()
+    }
+
+    pub fn default_ui_color_enabled() -> bool {
+        true
     }
 }
 

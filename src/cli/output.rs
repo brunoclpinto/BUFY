@@ -2,6 +2,8 @@ use colored::Colorize;
 use std::fmt;
 use std::sync::{OnceLock, RwLock};
 
+use crate::cli::ui::style::refresh_style;
+
 /// Message categories used by the CLI output helpers.
 #[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -16,13 +18,27 @@ pub enum MessageKind {
     Separator,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct OutputPreferences {
     pub plain_mode: bool,
     pub screen_reader_mode: bool,
     pub high_contrast_mode: bool,
     pub quiet_mode: bool,
     pub audio_feedback: bool,
+    pub color_enabled: bool,
+}
+
+impl Default for OutputPreferences {
+    fn default() -> Self {
+        Self {
+            plain_mode: false,
+            screen_reader_mode: false,
+            high_contrast_mode: false,
+            quiet_mode: false,
+            audio_feedback: false,
+            color_enabled: true,
+        }
+    }
 }
 
 static PREFERENCES: OnceLock<RwLock<OutputPreferences>> = OnceLock::new();
@@ -32,6 +48,7 @@ pub fn set_preferences(prefs: OutputPreferences) {
     if let Ok(mut guard) = lock.write() {
         *guard = prefs;
     }
+    refresh_style();
 }
 
 pub fn current_preferences() -> OutputPreferences {
