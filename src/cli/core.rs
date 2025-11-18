@@ -30,7 +30,7 @@ use crate::{
         SimulationBudgetImpact, SimulationChange, SimulationTransactionPatch, TimeInterval,
         TimeUnit, Transaction, TransactionStatus,
     },
-    storage::json_backend::JsonStorage,
+    storage::json_backend::{JsonStorage, LedgerMetadata},
 };
 
 use crate::cli::forms::{
@@ -117,6 +117,13 @@ impl ShellContext {
         self.config_manager
             .read()
             .expect("ConfigManager lock poisoned")
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn list_ledger_metadata(&self) -> Result<Vec<LedgerMetadata>, CommandError> {
+        self.storage
+            .list_ledger_metadata()
+            .map_err(CommandError::from_core)
     }
 
     pub(crate) fn persist_config(&self) -> Result<(), CommandError> {

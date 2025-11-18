@@ -13,10 +13,11 @@ use std::{
 use crate::{
     core::{
         errors::BudgetError,
+        services::BudgetService,
         utils::{ensure_dir, PathResolver},
     },
     currency::{CurrencyCode, CurrencyDisplay, LocaleConfig, NegativeStyle, ValuationPolicy},
-    ledger::Ledger,
+    ledger::{BudgetPeriod, Ledger},
 };
 
 use super::{Result, StorageBackend};
@@ -135,6 +136,45 @@ impl JsonStorage {
             });
         }
         entries.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        Ok(entries)
+    }
+
+    pub fn list_ledger_metadata(&self) -> Result<Vec<LedgerMetadata>> {
+        if !self.ledgers_dir.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut entries = Vec::new();
+        for entry in fs::read_dir(&self.ledgers_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext.eq_ignore_ascii_case("json"))
+                != Some(true)
+            {
+                continue;
+            }
+
+            let ledger = load_ledger_from_path(&path)?;
+            let summary = BudgetService::summarize_current_period(&ledger);
+            entries.push(LedgerMetadata {
+                name: ledger.name.clone(),
+                path: path.clone(),
+                created_at: ledger.created_at,
+                updated_at: ledger.updated_at,
+                budget_period: ledger.budget_period.clone(),
+                account_count: ledger.accounts.len(),
+                category_count: ledger.categories.len(),
+                transaction_count: ledger.transactions.len(),
+                simulation_count: ledger.simulations.len(),
+                total_budgeted: summary.totals.budgeted,
+                total_available: summary.totals.remaining,
+            });
+        }
+
+        entries.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(entries)
     }
 
@@ -377,6 +417,21 @@ impl ConfigData {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct LedgerMetadata {
+    pub name: String,
+    pub path: PathBuf,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub budget_period: BudgetPeriod,
+    pub account_count: usize,
+    pub category_count: usize,
+    pub transaction_count: usize,
+    pub simulation_count: usize,
+    pub total_budgeted: f64,
+    pub total_available: f64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -416,6 +471,20 @@ mod tests {
             !backups.is_empty(),
             "expected at least one backup file to be created"
         );
+    }
+
+    #[test]
+    fn list_ledger_metadata_includes_saved_entries() {
+        let (storage, _guard) = storage_with_temp_dir();
+        let ledger = sample_ledger();
+        storage.save(&ledger, "main").expect("save ledger");
+
+        let entries = storage.list_ledger_metadata().expect("list ledgers");
+        assert_eq!(entries.len(), 1);
+        let entry = &entries[0];
+        assert_eq!(entry.name, "Sample");
+        assert_eq!(entry.account_count, 0);
+        assert!(entry.total_budgeted >= 0.0);
     }
 }
 

@@ -26,5 +26,6 @@ pub trait StorageBackend: Send + Sync {
 }
 
 pub use json_backend::{
-    ConfigBackupInfo, ConfigData, ConfigSnapshot, JsonStorage, CONFIG_BACKUP_SCHEMA_VERSION,
+    ConfigBackupInfo, ConfigData, ConfigSnapshot, JsonStorage, LedgerMetadata,
+    CONFIG_BACKUP_SCHEMA_VERSION,
 };
