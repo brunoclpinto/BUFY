@@ -1,5 +1,6 @@
 use std::{
     fmt::Display,
+    io::{self, Write},
     ops::Deref,
     sync::{OnceLock, RwLock, RwLockReadGuard},
 };
@@ -157,6 +158,18 @@ pub fn print_warning(message: impl Display) {
 
 pub fn print_error(message: impl Display) {
     Formatter::new().print_error(message);
+}
+
+pub fn write_line<W: Write>(mut out: W, text: &str) -> io::Result<()> {
+    out.write_all(text.as_bytes())?;
+    out.write_all(b"\r\n")?;
+    out.flush()?;
+    Ok(())
+}
+
+pub fn println_text(text: &str) -> io::Result<()> {
+    let mut out = io::stdout();
+    write_line(&mut out, text)
 }
 
 pub fn print_success(message: impl Display) {

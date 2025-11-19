@@ -7,10 +7,13 @@ use crossterm::{
     ExecutableCommand,
 };
 
-use crate::cli::ui::{
+use crate::cli::{
+    io::write_line,
+    ui::{
     style::{format_header, style},
     table_renderer::visible_width,
     test_mode::{self, MenuTestEvent},
+    },
 };
 
 const DEFAULT_HINT: &str = "Use ↑ ↓ to navigate, Enter to select, ESC to return.";
@@ -231,7 +234,7 @@ impl MenuRenderer {
         selected_index: usize,
     ) -> Result<(), io::Error> {
         for line in self.layout_lines(menu, selected_index) {
-            writeln!(writer, "{line}")?;
+            write_line(&mut *writer, &line)?;
         }
         Ok(())
     }
@@ -303,7 +306,7 @@ impl MenuRenderer {
     fn print_snapshot(&self, menu: &MenuUI, selected_index: usize) {
         let mut stdout = io::stdout();
         for line in self.layout_lines(menu, selected_index) {
-            writeln!(stdout, "{line}").expect("write snapshot layout");
+            write_line(&mut stdout, &line).expect("write snapshot layout");
         }
     }
 

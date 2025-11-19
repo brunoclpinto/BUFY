@@ -2,7 +2,10 @@ use std::fmt;
 
 use colored::Colorize;
 
-use crate::cli::output::{current_preferences, OutputPreferences};
+use crate::cli::{
+    io::println_text,
+    output::{current_preferences, OutputPreferences},
+};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Style {
@@ -26,7 +29,9 @@ impl Formatter {
     }
 
     pub fn print_header(&self, title: impl fmt::Display) {
-        println!("\n{}", self.header_text(title));
+        let text = self.header_text(title);
+        let _ = println_text("");
+        let _ = println_text(&text);
     }
 
     pub fn header_text(&self, title: impl fmt::Display) -> String {
@@ -35,11 +40,11 @@ impl Formatter {
     }
 
     pub fn print_info(&self, message: impl fmt::Display) {
-        println!("{}", self.apply_style(Style::Info, message));
+        let _ = println_text(&self.apply_style(Style::Info, message));
     }
 
     pub fn print_detail(&self, message: impl fmt::Display) {
-        println!("{}", self.apply_style(Style::Detail, message));
+        let _ = println_text(&self.apply_style(Style::Detail, message));
     }
 
     pub fn detail_text(&self, message: impl fmt::Display) -> String {
@@ -62,7 +67,7 @@ impl Formatter {
         if self.prefs.audio_feedback && matches!(style, Style::Warning | Style::Error) {
             print!("\x07");
         }
-        println!("{}", self.apply_style(style, message));
+        let _ = println_text(&self.apply_style(style, message));
     }
 
     fn apply_style(&self, style: Style, message: impl fmt::Display) -> String {
@@ -129,12 +134,13 @@ impl Formatter {
             .max()
             .unwrap_or(0);
         for (label, description) in entries {
-            println!(
+            let line = format!(
                 "  {:<width$}  {}",
                 label,
                 description,
                 width = label_width + 2
             );
+            let _ = println_text(&line);
         }
     }
 

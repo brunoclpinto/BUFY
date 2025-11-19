@@ -28,10 +28,11 @@ pub fn run_list_backups(context: &mut ShellContext) -> CommandResult {
             RowSelection::Exit => return Ok(()),
             RowSelection::Index(index) => {
                 let entry = &entries[index];
-                println!();
-                println!("{}", build_detail_view(entry).render());
+                let _ = cli_io::println_text("");
+                let detail = build_detail_view(entry).render();
+                let _ = cli_io::println_text(&detail);
                 handle_actions(context, &ledger_name, entry)?;
-                println!();
+                let _ = cli_io::println_text("");
             }
         }
     }

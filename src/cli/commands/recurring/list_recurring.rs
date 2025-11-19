@@ -36,10 +36,11 @@ pub fn run_list_recurring(context: &mut ShellContext) -> CommandResult {
             RowSelection::Exit => return Ok(()),
             RowSelection::Index(index) => {
                 let entry = &entries[index];
-                println!();
-                println!("{}", build_detail_view(entry).render());
+                let _ = cli_io::println_text("");
+                let detail = build_detail_view(entry).render();
+                let _ = cli_io::println_text(&detail);
                 handle_actions(context, entry)?;
-                println!();
+                let _ = cli_io::println_text("");
             }
         }
     }
@@ -308,7 +309,8 @@ fn preview_schedule(entry: &RecurringEntry) -> CommandResult {
             .join(", ");
         view = view.with_field("upcoming", joined);
     }
-    println!("{}", view.render());
+    let view_text = view.render();
+    let _ = cli_io::println_text(&view_text);
     Ok(())
 }
 

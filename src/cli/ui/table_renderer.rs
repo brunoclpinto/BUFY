@@ -90,27 +90,27 @@ impl Table {
 
         if self.show_headers || !self.rows.is_empty() {
             out.push_str(&style.horizontal_line(total_width));
-            out.push('\n');
+            out.push_str("\r\n");
         }
 
         if self.show_headers {
             let header_line = self.render_header(&widths);
             out.push_str(&style.apply_header_style(&header_line));
-            out.push('\n');
+            out.push_str("\r\n");
             out.push_str(&horizontal_rule(&widths, self.padding));
             if !self.rows.is_empty() {
-                out.push('\n');
+                out.push_str("\r\n");
             }
         }
 
         for (idx, row) in self.rows.iter().enumerate() {
             out.push_str(&self.render_row(row, &widths));
             if idx < self.rows.len() - 1 {
-                out.push('\n');
+                out.push_str("\r\n");
             }
         }
         if !self.rows.is_empty() {
-            out.push('\n');
+            out.push_str("\r\n");
         }
         if self.show_headers || !self.rows.is_empty() {
             out.push_str(&style.horizontal_line(total_width));

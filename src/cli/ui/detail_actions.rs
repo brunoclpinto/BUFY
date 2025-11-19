@@ -1,4 +1,4 @@
-use std::io::{self, Stdout, Write};
+use std::io::{self, Stdout};
 
 use crossterm::{
     cursor,
@@ -7,7 +7,10 @@ use crossterm::{
     ExecutableCommand,
 };
 
-use crate::cli::ui::navigation::{navigation_loop, NavKey};
+use crate::cli::{
+    io::write_line,
+    ui::navigation::{navigation_loop, NavKey},
+};
 use crate::cli::ui::style::{format_header, style};
 
 const FOOTER_TEXT: &str = "Press ↑ ↓ to select an action, Enter to execute, ESC to go back.";
@@ -124,10 +127,11 @@ impl DetailActionsMenu {
         stdout.execute(cursor::MoveToColumn(0))?;
         stdout.execute(terminal::Clear(ClearType::FromCursorDown))?;
         let rendered = self.render_actions(index);
-        writeln!(stdout, "{rendered}")?;
-        writeln!(stdout, "{}", ui.horizontal_line(FOOTER_TEXT.len().max(40)))?;
-        writeln!(stdout, "{FOOTER_TEXT}")?;
-        stdout.flush()
+        write_line(&mut *stdout, &rendered)?;
+        let footer_rule = ui.horizontal_line(FOOTER_TEXT.len().max(40));
+        write_line(&mut *stdout, &footer_rule)?;
+        write_line(&mut *stdout, FOOTER_TEXT)?;
+        Ok(())
     }
 
     fn render_actions(&self, selected_index: usize) -> String {
@@ -164,7 +168,7 @@ impl DetailActionsMenu {
             lines.push(rendered);
         }
         lines.push(ui.horizontal_line(rule_len));
-        lines.join("\n")
+        lines.join("\r\n")
     }
 
     #[cfg_attr(not(test), allow(dead_code))]

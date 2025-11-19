@@ -7,6 +7,7 @@ use crossterm::{
     ExecutableCommand,
 };
 
+use crate::cli::io::println_text;
 use crate::cli::ui::menu_renderer::{MenuRenderer, MenuUI, MenuUIItem};
 use crate::cli::ui::test_mode::{self, TextTestInput};
 
@@ -58,7 +59,7 @@ pub fn text_input(label: &str, default: Option<&str>) -> io::Result<TextPromptRe
                     match key.code {
                         KeyCode::Char('c') | KeyCode::Char('C') => {
                             guard.deactivate();
-                            println!();
+                            let _ = println_text("");
                             return Ok(TextPromptResult::Cancel);
                         }
                         KeyCode::Char('u') | KeyCode::Char('U') => {
@@ -73,12 +74,12 @@ pub fn text_input(label: &str, default: Option<&str>) -> io::Result<TextPromptRe
                 match key.code {
                     KeyCode::Esc => {
                         guard.deactivate();
-                        println!();
+                        let _ = println_text("");
                         return Ok(TextPromptResult::Escape);
                     }
                     KeyCode::Enter => {
                         guard.deactivate();
-                        println!();
+                        let _ = println_text("");
                         return Ok(interpret_buffer(&buffer, default));
                     }
                     KeyCode::Backspace => {
@@ -215,7 +216,7 @@ pub fn wait_for_escape() -> io::Result<()> {
                     match key.code {
                         KeyCode::Char('c') | KeyCode::Char('C') => {
                             guard.deactivate();
-                            println!();
+                            let _ = println_text("");
                             return Ok(());
                         }
                         _ => {}
@@ -223,7 +224,7 @@ pub fn wait_for_escape() -> io::Result<()> {
                 }
                 if matches!(key.code, KeyCode::Esc) {
                     guard.deactivate();
-                    println!();
+                    let _ = println_text("");
                     return Ok(());
                 }
             }
@@ -243,7 +244,7 @@ fn join_context(lines: &[String]) -> Option<String> {
     if filtered.iter().all(|line| line.is_empty()) {
         None
     } else {
-        Some(filtered.join("\n"))
+        Some(filtered.join("\r\n"))
     }
 }
 

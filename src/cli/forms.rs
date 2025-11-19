@@ -1663,9 +1663,9 @@ impl WizardInteraction {
         let header = format_header(&title);
         let ui = style();
         let rule = ui.horizontal_line(visible_width(&header));
-        println!("{header}");
-        println!("{rule}");
-        println!();
+        let _ = io::println_text(&header);
+        let _ = io::println_text(&rule);
+        let _ = io::println_text("");
     }
 }
 

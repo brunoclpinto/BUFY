@@ -1,7 +1,9 @@
-use colored::Colorize;
 use std::fmt;
 use std::sync::{OnceLock, RwLock};
 
+use colored::Colorize;
+
+use crate::cli::io::println_text;
 use crate::cli::ui::style::refresh_style;
 
 /// Message categories used by the CLI output helpers.
@@ -145,8 +147,13 @@ pub fn print(kind: MessageKind, message: impl fmt::Display) {
     }
     let formatted = apply_style(kind, message, &prefs);
     match kind {
-        MessageKind::Section | MessageKind::Separator => println!("\n{}", formatted),
-        _ => println!("{}", formatted),
+        MessageKind::Section | MessageKind::Separator => {
+            let _ = println_text("");
+            let _ = println_text(&formatted);
+        }
+        _ => {
+            let _ = println_text(&formatted);
+        }
     }
 }
 
@@ -192,7 +199,7 @@ pub fn separator() {
 #[allow(dead_code)]
 pub fn blank_line() {
     if !preferences().quiet_mode {
-        println!();
+        let _ = println_text("");
     }
 }
 
@@ -247,30 +254,30 @@ fn char_width(value: &str) -> usize {
 }
 
 fn draw_line(chars: &TableChars, widths: &[usize], left: &str, mid: &str, right: &str) {
-    print!("{}", left);
+    let mut line = String::new();
+    line.push_str(left);
     for (idx, width) in widths.iter().enumerate() {
         let segment = chars.horizontal.repeat(width + 2);
-        print!("{}", segment);
+        line.push_str(&segment);
         if idx + 1 == widths.len() {
-            println!("{}", right);
+            line.push_str(right);
         } else {
-            print!("{}", mid);
+            line.push_str(mid);
         }
     }
+    let _ = println_text(&line);
 }
 
 fn draw_row(chars: &TableChars, widths: &[usize], cells: &[String]) {
-    print!("{}", chars.vertical);
+    let mut line = String::new();
+    line.push_str(chars.vertical);
     for (idx, width) in widths.iter().enumerate() {
         let cell = cells.get(idx).map(String::as_str).unwrap_or("");
         let padded = format!(" {:width$} ", cell, width = *width);
-        print!("{padded}");
-        if idx + 1 == widths.len() {
-            println!("{}", chars.vertical);
-        } else {
-            print!("{}", chars.vertical);
-        }
+        line.push_str(&padded);
+        line.push_str(chars.vertical);
     }
+    let _ = println_text(&line);
 }
 
 /// Renders data as a formatted table, respecting accessibility preferences.
@@ -290,7 +297,7 @@ pub fn render_table(headers: &[&str], rows: &[Vec<String>]) {
     }
 
     let chars = table_chars(prefs.plain_mode);
-    println!();
+    let _ = println_text("");
     draw_line(
         &chars,
         &widths,
@@ -322,5 +329,5 @@ pub fn render_table(headers: &[&str], rows: &[Vec<String>]) {
         chars.bottom_mid,
         chars.bottom_right,
     );
-    println!();
+    let _ = println_text("");
 }

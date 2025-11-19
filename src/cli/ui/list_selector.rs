@@ -1,4 +1,4 @@
-use std::io::{self, Stdout, Write};
+use std::io::{self, Stdout};
 
 use crossterm::{
     cursor,
@@ -7,7 +7,10 @@ use crossterm::{
     ExecutableCommand,
 };
 
-use crate::cli::ui::navigation::{navigation_loop, NavKey};
+use crate::cli::{
+    io::write_line,
+    ui::navigation::{navigation_loop, NavKey},
+};
 use crate::cli::ui::style::style;
 use crate::cli::ui::table_renderer::{horizontal_rule, visible_width, Table};
 
@@ -93,14 +96,15 @@ impl<'a> ListSelector<'a> {
         let (content, width) = self.render_with_highlight(index);
         stdout.execute(cursor::MoveToColumn(0))?;
         stdout.execute(terminal::Clear(ClearType::FromCursorDown))?;
-        writeln!(stdout, "{content}")?;
+        write_line(&mut *stdout, &content)?;
         let footer_rule = ui.horizontal_line(width.max(FOOTER_HINT.len()));
-        writeln!(stdout, "{footer_rule}")?;
-        writeln!(stdout, "{FOOTER_HINT}")?;
+        write_line(&mut *stdout, &footer_rule)?;
+        write_line(&mut *stdout, FOOTER_HINT)?;
         if self.table.rows.len() > 1 {
-            writeln!(stdout, "({} items)", self.table.rows.len())?;
+            let line = format!("({} items)", self.table.rows.len());
+            write_line(&mut *stdout, &line)?;
         }
-        stdout.flush()
+        Ok(())
     }
 
     fn render_with_highlight(&self, index: usize) -> (String, usize) {
@@ -150,7 +154,7 @@ impl<'a> ListSelector<'a> {
             push_line(rendered);
         }
 
-        (lines.join("\n"), max_width)
+        (lines.join("\r\n"), max_width)
     }
 
     #[cfg_attr(not(test), allow(dead_code))]

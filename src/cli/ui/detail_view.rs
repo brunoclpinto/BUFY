@@ -65,16 +65,16 @@ impl DetailView {
 
         let mut output = String::new();
         output.push_str(&header);
-        output.push('\n');
+        output.push_str("\r\n");
         output.push_str(&rule);
-        output.push('\n');
+        output.push_str("\r\n");
         for (idx, line) in lines.iter().enumerate() {
             output.push_str(line);
             if idx + 1 < lines.len() {
-                output.push('\n');
+                output.push_str("\r\n");
             }
         }
-        output.push('\n');
+        output.push_str("\r\n");
         output.push_str(&rule);
         output
     }
