@@ -34,7 +34,6 @@ fn build_context(temp: &TempDir) -> ShellContext {
         config,
         ledger_path: None,
         active_simulation_name: None,
-        selection_override: None,
         current_simulation: None,
         last_command: None,
         running: true,

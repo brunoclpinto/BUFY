@@ -1,8 +1,6 @@
 //! Shared runtime state for CLI interactions and command execution.
 
 use std::{
-    cell::RefCell,
-    collections::VecDeque,
     path::PathBuf,
     sync::{Arc, RwLock},
 };
@@ -24,29 +22,6 @@ pub enum CliMode {
     Script,
 }
 
-#[derive(Default)]
-pub struct SelectionOverride {
-    queue: RefCell<VecDeque<Option<usize>>>,
-}
-
-impl SelectionOverride {
-    pub fn push(&self, choice: Option<usize>) {
-        self.queue.borrow_mut().push_back(choice);
-    }
-
-    pub fn pop(&self) -> Option<Option<usize>> {
-        self.queue.borrow_mut().pop_front()
-    }
-
-    pub fn has_choices(&self) -> bool {
-        !self.queue.borrow().is_empty()
-    }
-
-    pub fn clear(&self) {
-        self.queue.borrow_mut().clear();
-    }
-}
-
 pub struct ShellContext {
     pub mode: CliMode,
     pub registry: CommandRegistry,
@@ -57,7 +32,6 @@ pub struct ShellContext {
     pub config: Arc<RwLock<Config>>,
     pub ledger_path: Option<PathBuf>,
     pub active_simulation_name: Option<String>,
-    pub selection_override: Option<SelectionOverride>,
     pub current_simulation: Option<Simulation>,
     pub last_command: Option<String>,
     pub running: bool,

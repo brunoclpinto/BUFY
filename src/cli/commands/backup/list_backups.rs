@@ -116,14 +116,7 @@ enum RowSelection {
     Exit,
 }
 
-fn select_row(context: &ShellContext, table: &Table, len: usize) -> RowSelection {
-    if let Some(choice) = context.take_override_choice() {
-        return match choice {
-            Some(index) if index < len => RowSelection::Index(index),
-            _ => RowSelection::Exit,
-        };
-    }
-
+fn select_row(_context: &ShellContext, table: &Table, _len: usize) -> RowSelection {
     if let Some(keys) = test_mode::next_selector_events("backup_selector") {
         return match ListSelector::new(table).run_simulated(&keys) {
             ListSelectionResult::Selected(index) => RowSelection::Index(index),
@@ -162,18 +155,7 @@ fn handle_actions(
     Ok(())
 }
 
-fn choose_action(context: &ShellContext, actions: &[DetailAction]) -> DetailActionResult {
-    if let Some(choice) = context.take_override_choice() {
-        return match choice {
-            Some(index) => actions
-                .get(index)
-                .cloned()
-                .map(DetailActionResult::Selected)
-                .unwrap_or(DetailActionResult::Escaped),
-            None => DetailActionResult::Escaped,
-        };
-    }
-
+fn choose_action(_context: &ShellContext, actions: &[DetailAction]) -> DetailActionResult {
     if let Some(keys) = test_mode::next_action_events("backup_actions") {
         return DetailActionsMenu::new("Actions", actions.to_vec()).run_simulated(&keys);
     }

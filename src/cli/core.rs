@@ -3,7 +3,7 @@
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
-    env, fs, io,
+    fs, io,
     path::{Path, PathBuf},
     sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
 };
@@ -53,11 +53,11 @@ use super::commands;
 use super::io as cli_io;
 use super::output::render_table as output_table;
 use super::registry::{CommandEntry, CommandRegistry};
-use crate::cli::shell_context::SelectionOverride;
 pub use crate::cli::shell_context::{CliMode, ShellContext};
 use crate::cli::ui::banner::Banner;
 use crate::cli::ui::formatting::Formatter;
 use crate::cli::ui::prompts;
+use crate::cli::ui::test_mode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LoopControl {
@@ -163,15 +163,10 @@ impl ShellContext {
             config,
             ledger_path: None,
             active_simulation_name: None,
-            selection_override: None,
             current_simulation: None,
             last_command: None,
             running: true,
         };
-
-        if let Some(selection_override) = selection_override_from_env() {
-            app.selection_override = Some(selection_override);
-        }
 
         app.auto_load_last()?;
         Ok(app)
@@ -582,11 +577,10 @@ impl ShellContext {
 
     pub(crate) fn can_prompt(&self) -> bool {
         if self.mode == CliMode::Interactive {
-            return true;
+            true
+        } else {
+            test_mode::has_selection_results()
         }
-        self.selection_override
-            .as_ref()
-            .is_some_and(|override_data| override_data.has_choices())
     }
 
     fn select_with<P>(
@@ -601,10 +595,7 @@ impl ShellContext {
         CommandError: From<P::Error>,
     {
         let manager = SelectionManager::new(provider);
-        let selection_choice = self
-            .selection_override
-            .as_ref()
-            .and_then(|override_data| override_data.pop());
+        let selection_choice = test_mode::next_selection_result(prompt);
         let outcome = if let Some(choice) = selection_choice {
             manager.choose_with(prompt, empty_message, move |_, _| Ok(choice))
         } else {
@@ -657,12 +648,6 @@ impl ShellContext {
             prompt,
             "No configuration backups found.",
         )
-    }
-
-    pub(crate) fn take_override_choice(&self) -> Option<Option<usize>> {
-        self.selection_override
-            .as_ref()
-            .and_then(|override_data| override_data.pop())
     }
 
     pub(crate) fn select_account_index(&self, prompt: &str) -> Result<Option<usize>, CommandError> {
@@ -1201,23 +1186,6 @@ impl ShellContext {
             self.select_transaction_index(prompt)
         } else {
             Err(CommandError::InvalidArguments(usage.into()))
-        }
-    }
-
-    #[cfg(test)]
-    fn set_selection_choices(&mut self, choices: impl IntoIterator<Item = Option<usize>>) {
-        let override_data = self
-            .selection_override
-            .get_or_insert_with(SelectionOverride::default);
-        for choice in choices {
-            override_data.push(choice);
-        }
-    }
-
-    #[cfg(test)]
-    fn reset_selection_choices(&mut self) {
-        if let Some(override_data) = &self.selection_override {
-            override_data.clear();
         }
     }
 
@@ -3331,27 +3299,6 @@ impl ShellContext {
     }
 }
 
-fn selection_override_from_env() -> Option<SelectionOverride> {
-    let raw = env::var("BUFY_TEST_SELECTIONS").ok()?;
-    let override_data = SelectionOverride::default();
-    for token in raw
-        .split('|')
-        .map(|segment| segment.trim())
-        .filter(|s| !s.is_empty())
-    {
-        let choice = match token.to_ascii_uppercase().as_str() {
-            "CANCEL" | "<ESC>" => None,
-            value => Some(
-                value
-                    .parse::<usize>()
-                    .unwrap_or_else(|_| panic!("Invalid BUFY selection token `{value}`")),
-            ),
-        };
-        override_data.push(choice);
-    }
-    Some(override_data)
-}
-
 fn parse_period(input: &str) -> Result<BudgetPeriod, CommandError> {
     Ok(BudgetPeriod(parse_time_interval_str(input)?))
 }
@@ -3767,14 +3714,36 @@ mod tests {
     };
     use crate::cli::selection::SelectionManager;
     use crate::cli::selectors::SelectionOutcome;
+    use crate::cli::ui::test_mode::{install_selection_results, reset_selection_results};
     use crate::config::{Config, ConfigManager};
     use crate::core::ledger_manager::LedgerManager;
     use crate::ledger::{AccountKind, CategoryKind, TimeInterval, TimeUnit};
     use crate::ledger::{Simulation, SimulationStatus};
     use crate::storage::json_backend::JsonStorage;
     use chrono::{NaiveDate, Utc};
-    use std::sync::{Arc, RwLock};
+    use once_cell::sync::Lazy;
+    use std::sync::{Arc, Mutex, MutexGuard, RwLock};
     use tempfile::{tempdir, NamedTempFile};
+
+    static TEST_SELECTION_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+    struct SelectionScript {
+        _guard: MutexGuard<'static, ()>,
+    }
+
+    impl SelectionScript {
+        fn new(results: Vec<Option<usize>>) -> Self {
+            let guard = TEST_SELECTION_LOCK.lock().expect("selection lock");
+            install_selection_results(results);
+            Self { _guard: guard }
+        }
+    }
+
+    impl Drop for SelectionScript {
+        fn drop(&mut self) {
+            reset_selection_results();
+        }
+    }
 
     #[test]
     fn parse_line_handles_quotes() {
@@ -3959,18 +3928,21 @@ mod tests {
         let ledger = sample_ledger();
         app.set_ledger(ledger, None, Some("sample".into()));
 
-        app.set_selection_choices([Some(0)]);
-        let selected = app
-            .resolve_simulation_name(None, "Select simulation", false, "usage")
-            .unwrap();
-        assert_eq!(selected.as_deref(), Some("Scenario"));
+        {
+            let _selection = SelectionScript::new(vec![Some(0)]);
+            let selected = app
+                .resolve_simulation_name(None, "Select simulation", false, "usage")
+                .unwrap();
+            assert_eq!(selected.as_deref(), Some("Scenario"));
+        }
 
-        app.reset_selection_choices();
-        app.set_selection_choices([None]);
-        let cancel = app
-            .resolve_simulation_name(None, "Select simulation", false, "usage")
-            .unwrap();
-        assert!(cancel.is_none());
+        {
+            let _selection = SelectionScript::new(vec![None]);
+            let cancel = app
+                .resolve_simulation_name(None, "Select simulation", false, "usage")
+                .unwrap();
+            assert!(cancel.is_none());
+        }
     }
 
     #[test]

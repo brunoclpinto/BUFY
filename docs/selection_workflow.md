@@ -27,8 +27,8 @@ current CLI implementation.
 4. **`SelectionManager`** – orchestrates user interaction. Providers hand their
    items to the manager, which renders labels and delegates the actual choice to
    a selector function. The default selector uses `dialoguer::Select`, while
-   tests can inject deterministic selectors via `ShellContext::set_selection_choices`
-   (which feeds a queue consumed by `SelectionManager::choose_with`).
+   tests can inject deterministic selectors via `cli::ui::test_mode`
+   (which feeds scripted results into `SelectionManager::choose_with`).
 
 ## Runtime Flow
 

@@ -109,6 +109,34 @@ static SELECTOR_EVENTS: Lazy<Mutex<KeySequenceQueue>> =
 static ACTION_EVENTS: Lazy<Mutex<KeySequenceQueue>> =
     Lazy::new(|| Mutex::new(KeySequenceQueue::from_env("BUFY_TEST_ACTION_EVENTS")));
 
+struct SelectionQueue {
+    enabled: bool,
+    results: VecDeque<Option<usize>>,
+}
+
+impl SelectionQueue {
+    fn from_env() -> Self {
+        if let Ok(raw) = env::var("BUFY_TEST_SELECTIONS") {
+            Self {
+                enabled: true,
+                results: parse_selection_sequences(&raw),
+            }
+        } else {
+            Self::new()
+        }
+    }
+
+    fn new() -> Self {
+        Self {
+            enabled: false,
+            results: VecDeque::new(),
+        }
+    }
+}
+
+static SELECTION_RESULTS: Lazy<Mutex<SelectionQueue>> =
+    Lazy::new(|| Mutex::new(SelectionQueue::from_env()));
+
 pub fn is_enabled() -> bool {
     MENU_EVENTS
         .lock()
@@ -123,6 +151,10 @@ pub fn is_enabled() -> bool {
             .expect("selector queue poisoned")
             .enabled
         || ACTION_EVENTS.lock().expect("action queue poisoned").enabled
+        || SELECTION_RESULTS
+            .lock()
+            .expect("selection queue poisoned")
+            .enabled
 }
 
 pub fn next_menu_events(label: &str) -> Option<Vec<MenuTestEvent>> {
@@ -174,6 +206,19 @@ pub fn next_action_events(label: &str) -> Option<Vec<KeyCode>> {
             .sequences
             .pop_front()
             .unwrap_or_else(|| panic!("Action events exhausted before `{label}` rendered")),
+    )
+}
+
+pub fn next_selection_result(label: &str) -> Option<Option<usize>> {
+    let mut guard = SELECTION_RESULTS.lock().expect("selection queue poisoned");
+    if !guard.enabled {
+        return None;
+    }
+    Some(
+        guard
+            .results
+            .pop_front()
+            .unwrap_or_else(|| panic!("Selection results exhausted before `{label}` handled")),
     )
 }
 
@@ -272,6 +317,26 @@ fn parse_key_code(token: &str) -> Option<KeyCode> {
     }
 }
 
+fn parse_selection_sequences(raw: &str) -> VecDeque<Option<usize>> {
+    raw.split('|')
+        .filter_map(|segment| {
+            let trimmed = segment.trim();
+            if trimmed.is_empty() {
+                None
+            } else if matches!(
+                trimmed.to_ascii_uppercase().as_str(),
+                "CANCEL" | "<ESC>" | "ESC"
+            ) {
+                Some(None)
+            } else {
+                Some(Some(trimmed.parse::<usize>().unwrap_or_else(|_| {
+                    panic!("Invalid BUFY selection token `{trimmed}`")
+                })))
+            }
+        })
+        .collect()
+}
+
 pub fn install_menu_events(events: Vec<Vec<MenuTestEvent>>) {
     let mut guard = MENU_EVENTS.lock().expect("menu event queue poisoned");
     guard.enabled = true;
@@ -318,4 +383,21 @@ pub fn reset_action_events() {
     let mut guard = ACTION_EVENTS.lock().expect("action queue poisoned");
     guard.enabled = false;
     guard.sequences.clear();
+}
+
+pub fn install_selection_results(results: Vec<Option<usize>>) {
+    let mut guard = SELECTION_RESULTS.lock().expect("selection queue poisoned");
+    guard.enabled = true;
+    guard.results = results.into();
+}
+
+pub fn reset_selection_results() {
+    let mut guard = SELECTION_RESULTS.lock().expect("selection queue poisoned");
+    guard.enabled = false;
+    guard.results.clear();
+}
+
+pub fn has_selection_results() -> bool {
+    let guard = SELECTION_RESULTS.lock().expect("selection queue poisoned");
+    guard.enabled && !guard.results.is_empty()
 }
