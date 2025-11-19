@@ -3,6 +3,7 @@ use std::io::{self, Stdout, Write};
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
+    style::Stylize,
     terminal::{self, ClearType},
     ExecutableCommand,
 };
@@ -10,9 +11,9 @@ use crossterm::{
 use crate::cli::{
     io::write_line,
     ui::{
-    style::{format_header, style},
-    table_renderer::visible_width,
-    test_mode::{self, MenuTestEvent},
+        style::{format_header, style},
+        table_renderer::visible_width,
+        test_mode::{self, MenuTestEvent},
     },
 };
 
@@ -59,6 +60,7 @@ pub struct MenuUIItem {
     pub key: String,
     pub label: String,
     pub description: String,
+    pub enabled: bool,
 }
 
 impl MenuUIItem {
@@ -71,7 +73,26 @@ impl MenuUIItem {
             key: key.into(),
             label: label.into(),
             description: description.into(),
+            enabled: true,
         }
+    }
+
+    pub fn disabled(
+        key: impl Into<String>,
+        label: impl Into<String>,
+        description: impl Into<String>,
+    ) -> Self {
+        Self {
+            key: key.into(),
+            label: label.into(),
+            description: description.into(),
+            enabled: false,
+        }
+    }
+
+    pub fn with_enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
     }
 }
 
@@ -108,10 +129,7 @@ impl MenuRenderer {
         terminal::enable_raw_mode()?;
         stdout.execute(cursor::Hide)?;
 
-        let mut selected_index = menu.initial_index.unwrap_or(0);
-        if selected_index >= menu.items.len() {
-            selected_index = menu.items.len() - 1;
-        }
+        let mut selected_index = Self::initial_index(menu);
         let result = loop {
             self.draw_frame(&mut stdout, menu, selected_index)?;
             let event = event::read()?;
@@ -133,25 +151,33 @@ impl MenuRenderer {
                     }
                     match key.code {
                         KeyCode::Up => {
-                            selected_index = selected_index
-                                .checked_sub(1)
-                                .unwrap_or(menu.items.len() - 1);
+                            selected_index =
+                                Self::previous_enabled_index(&menu.items, selected_index);
                         }
                         KeyCode::Down => {
-                            selected_index = (selected_index + 1) % menu.items.len();
+                            selected_index = Self::next_enabled_index(&menu.items, selected_index);
                         }
-                        KeyCode::Home => selected_index = 0,
-                        KeyCode::End => selected_index = menu.items.len().saturating_sub(1),
+                        KeyCode::Home => {
+                            if let Some(idx) = Self::first_enabled_index(&menu.items) {
+                                selected_index = idx;
+                            }
+                        }
+                        KeyCode::End => {
+                            if let Some(idx) = Self::last_enabled_index(&menu.items) {
+                                selected_index = idx;
+                            }
+                        }
                         KeyCode::PageUp => {
-                            selected_index = selected_index.saturating_sub(3);
+                            selected_index = Self::page_up_index(&menu.items, selected_index);
                         }
                         KeyCode::PageDown => {
-                            selected_index =
-                                std::cmp::min(selected_index + 3, menu.items.len() - 1);
+                            selected_index = Self::page_down_index(&menu.items, selected_index);
                         }
                         KeyCode::Enter => {
-                            let key = menu.items[selected_index].key.clone();
-                            break Ok(Some(key));
+                            if menu.items[selected_index].enabled {
+                                let key = menu.items[selected_index].key.clone();
+                                break Ok(Some(key));
+                            }
                         }
                         KeyCode::Esc => break Ok(None),
                         _ => {}
@@ -176,33 +202,39 @@ impl MenuRenderer {
         menu: &MenuUI,
         events: Vec<MenuTestEvent>,
     ) -> Result<Option<String>, MenuRenderError> {
-        let len = menu.items.len();
-        if len == 0 {
+        if menu.items.is_empty() {
             return Ok(None);
         }
-        let mut selected_index = menu.initial_index.unwrap_or(0);
-        if selected_index >= len {
-            selected_index = len - 1;
-        }
+        let mut selected_index = Self::initial_index(menu);
         for event in events {
             match event {
                 MenuTestEvent::Up => {
-                    selected_index = selected_index.checked_sub(1).unwrap_or(len - 1);
+                    selected_index = Self::previous_enabled_index(&menu.items, selected_index);
                 }
                 MenuTestEvent::Down => {
-                    selected_index = (selected_index + 1) % len;
+                    selected_index = Self::next_enabled_index(&menu.items, selected_index);
                 }
-                MenuTestEvent::Home => selected_index = 0,
-                MenuTestEvent::End => selected_index = len.saturating_sub(1),
+                MenuTestEvent::Home => {
+                    if let Some(idx) = Self::first_enabled_index(&menu.items) {
+                        selected_index = idx;
+                    }
+                }
+                MenuTestEvent::End => {
+                    if let Some(idx) = Self::last_enabled_index(&menu.items) {
+                        selected_index = idx;
+                    }
+                }
                 MenuTestEvent::PageUp => {
-                    selected_index = selected_index.saturating_sub(3);
+                    selected_index = Self::page_up_index(&menu.items, selected_index);
                 }
                 MenuTestEvent::PageDown => {
-                    selected_index = std::cmp::min(selected_index + 3, len - 1);
+                    selected_index = Self::page_down_index(&menu.items, selected_index);
                 }
                 MenuTestEvent::Enter => {
-                    self.print_snapshot(menu, selected_index);
-                    return Ok(Some(menu.items[selected_index].key.clone()));
+                    if menu.items[selected_index].enabled {
+                        self.print_snapshot(menu, selected_index);
+                        return Ok(Some(menu.items[selected_index].key.clone()));
+                    }
                 }
                 MenuTestEvent::Esc => {
                     self.print_snapshot(menu, selected_index);
@@ -252,18 +284,29 @@ impl MenuRenderer {
         if let Some(context) = &menu.context {
             context_lines.extend(context.lines().map(|line| line.to_string()));
         }
+        let selected_enabled = menu
+            .items
+            .get(selected_index)
+            .map(|item| item.enabled)
+            .unwrap_or(false);
         let mut items = Vec::new();
         for (index, item) in menu.items.iter().enumerate() {
             let label = display_label(&item.label);
             let padded_label = format!("{:width$}", label, width = label_width);
-            let prefix = if index == selected_index {
+            let highlight = selected_enabled && item.enabled && index == selected_index;
+            let prefix = if highlight {
                 format!("  {} ", ui.highlight_marker)
             } else {
                 "    ".to_string()
             };
-            let base = format!("{prefix}{padded_label}  {}", item.description);
+            let label_body = if highlight {
+                padded_label.clone()
+            } else {
+                format_menu_label(&padded_label, item.enabled, ui.use_color)
+            };
+            let base = format!("{prefix}{label_body}  {}", item.description);
             let width = visible_width(&base);
-            let rendered = if index == selected_index {
+            let rendered = if highlight {
                 ui.apply_highlight_style(&base)
             } else {
                 base
@@ -315,6 +358,104 @@ impl MenuRenderer {
         stdout.execute(cursor::MoveTo(0, 0))?;
         Ok(())
     }
+
+    fn initial_index(menu: &MenuUI) -> usize {
+        if menu.items.is_empty() {
+            return 0;
+        }
+        let mut index = menu.initial_index.unwrap_or(0);
+        if index >= menu.items.len() {
+            index = menu.items.len() - 1;
+        }
+        Self::first_enabled_from(&menu.items, index).unwrap_or(index)
+    }
+
+    fn has_enabled(items: &[MenuUIItem]) -> bool {
+        items.iter().any(|item| item.enabled)
+    }
+
+    fn first_enabled_from(items: &[MenuUIItem], start: usize) -> Option<usize> {
+        if items.is_empty() {
+            return None;
+        }
+        let len = items.len();
+        let mut idx = start % len;
+        for _ in 0..len {
+            if items[idx].enabled {
+                return Some(idx);
+            }
+            idx = (idx + 1) % len;
+        }
+        None
+    }
+
+    fn next_enabled_index(items: &[MenuUIItem], current: usize) -> usize {
+        if items.is_empty() || !Self::has_enabled(items) {
+            return current;
+        }
+        let len = items.len();
+        let mut idx = current;
+        for _ in 0..len {
+            idx = (idx + 1) % len;
+            if items[idx].enabled {
+                return idx;
+            }
+        }
+        current
+    }
+
+    fn previous_enabled_index(items: &[MenuUIItem], current: usize) -> usize {
+        if items.is_empty() || !Self::has_enabled(items) {
+            return current;
+        }
+        let len = items.len();
+        let mut idx = current;
+        for _ in 0..len {
+            idx = if idx == 0 { len - 1 } else { idx - 1 };
+            if items[idx].enabled {
+                return idx;
+            }
+        }
+        current
+    }
+
+    fn first_enabled_index(items: &[MenuUIItem]) -> Option<usize> {
+        items.iter().position(|item| item.enabled)
+    }
+
+    fn last_enabled_index(items: &[MenuUIItem]) -> Option<usize> {
+        items.iter().rposition(|item| item.enabled)
+    }
+
+    fn page_up_index(items: &[MenuUIItem], current: usize) -> usize {
+        if items.is_empty() || !Self::has_enabled(items) {
+            return current;
+        }
+        let mut idx = current;
+        for _ in 0..3 {
+            let next = Self::previous_enabled_index(items, idx);
+            if next == idx {
+                break;
+            }
+            idx = next;
+        }
+        idx
+    }
+
+    fn page_down_index(items: &[MenuUIItem], current: usize) -> usize {
+        if items.is_empty() || !Self::has_enabled(items) {
+            return current;
+        }
+        let mut idx = current;
+        for _ in 0..3 {
+            let next = Self::next_enabled_index(items, idx);
+            if next == idx {
+                break;
+            }
+            idx = next;
+        }
+        idx
+    }
 }
 
 fn display_label(label: &str) -> String {
@@ -322,5 +463,16 @@ fn display_label(label: &str) -> String {
     match chars.next() {
         Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
         None => String::new(),
+    }
+}
+
+fn format_menu_label(label: &str, enabled: bool, use_color: bool) -> String {
+    if !use_color {
+        return label.to_string();
+    }
+    if enabled {
+        label.white().to_string()
+    } else {
+        label.dark_grey().italic().to_string()
     }
 }

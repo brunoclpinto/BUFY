@@ -4,6 +4,7 @@ pub mod ledger_menu;
 pub mod list_menu;
 pub mod main_menu;
 pub mod simulation_menu;
+mod state;
 pub mod transaction_menu;
 
 use crate::cli::core::CommandError;
