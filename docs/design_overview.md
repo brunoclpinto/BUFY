@@ -221,14 +221,14 @@ The CLI is now split into focused modules so future interactive features can plu
 Command handlers still live alongside the shell for now, but they interact with the registry/state/output instead of writing directly to stdout or poking global variables. Script mode continues to use the same entry point (`run_cli`) and benefits from the new modular boundary.
 
 When a required argument is omitted in interactive mode, the handler calls into
-`ShellContext::select_with`, which delegates to the appropriate provider and prompts
-the user to choose an entry. Cancelling simply returns control to the prompt;
-supplying a value proceeds exactly as if it had been typed initially. Tests can
-exercise the same code paths by queueing deterministic selections via the
-`SelectionOverride` helper, keeping script-mode fixtures repeatable. Wizard-style
-flows use the same philosophy: future entity forms will instantiate the shared
-`FormEngine`, letting the dialogue layer consume queued responses during tests
-and dialoguer prompts in interactive sessions.
+`ShellContext::select_with`, which delegates to the appropriate provider and
+prompts the user to choose an entry. Cancelling simply returns control to the
+prompt; supplying a value proceeds exactly as if it had been typed initially.
+Tests exercise the same code paths by queuing deterministic key sequences via
+`cli::ui::test_mode`, which feeds the list selector and action menus with scripted
+navigation. Wizard-style flows use the same philosophy: entity forms instantiate
+the shared `FormEngine`, letting the dialogue layer consume queued responses
+during tests and dialoguer prompts in interactive sessions.
 
 #### Unified Output & Accessibility (Phase 19)
 

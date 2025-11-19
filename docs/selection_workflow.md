@@ -43,10 +43,11 @@ current CLI implementation.
    `TransactionSelectionProvider`, etc.) captures the latest state via
    `SelectionProvider::items()`.
 3. **Display** – `SelectionManager` renders labels and uses either the Dialoguer
-   selector (`choose_with_dialoguer`) or the queued override to obtain a
-   selected index. Items are always printed with two leading spaces and
-   pre-numbered (`  1. …`), followed by a `Type cancel or press Esc to abort.`
-   hint so scripting and accessibility tooling receive consistent output.
+   selector (`choose_with_dialoguer`) or the scripted NavKey events provided by
+   `cli::ui::test_mode` to obtain a selected index. Items are always printed with
+   two leading spaces and pre-numbered (`  1. …`), followed by a `Type cancel or
+   press Esc to abort.` hint so scripting and accessibility tooling receive
+   consistent output.
 4. **Continuation** – command handlers receive the resulting identifier. If the
    user cancels, the command simply aborts without side effects; otherwise, the
    handler proceeds as if the argument had been supplied explicitly.
@@ -57,7 +58,8 @@ agnostic of domain specifics and makes it trivial to add new providers later.
 ## Testing Hooks
 
 Script mode remains non-interactive, but unit tests can still exercise
-selection-driven branches by pushing `Option<usize>` values into the
-`SelectionOverride` queue (`ShellContext::set_selection_choices`). This bypasses the
-Dialoguer TTY requirements, keeps command behaviour deterministic, and ensures
-that cancel flows are covered alongside the happy paths.
+selection-driven branches by installing scripted key sequences through
+`cli::ui::test_mode`. The helpers (`install_selector_events`, `install_action_events`)
+feed deterministic `NavKey` streams into the selector and action menus, keeping
+command behaviour deterministic and ensuring cancel flows are covered alongside
+the happy paths.
