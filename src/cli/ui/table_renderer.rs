@@ -62,24 +62,30 @@ impl Table {
 
     /// Renders a single row using the provided column widths.
     pub fn render_row(&self, row: &[String], widths: &[usize]) -> String {
-        let rendered_cells: Vec<String> = self
-            .columns
-            .iter()
-            .enumerate()
-            .map(|(idx, column)| {
-                let cell_text = row.get(idx).map(|s| s.as_str()).unwrap_or("");
-                render_cell(cell_text, widths[idx], &column.alignment, self.padding)
-            })
-            .collect();
-
-        rendered_cells.join(COLUMN_GAP).trim_end().to_string()
+        let row_capacity = table_width(widths, self.padding);
+        let mut rendered = String::with_capacity(row_capacity + COLUMN_GAP_WIDTH * widths.len());
+        for (idx, column) in self.columns.iter().enumerate() {
+            if idx > 0 {
+                rendered.push_str(COLUMN_GAP);
+            }
+            let cell_text = row.get(idx).map(|s| s.as_str()).unwrap_or("");
+            append_cell(
+                &mut rendered,
+                cell_text,
+                widths[idx],
+                &column.alignment,
+                self.padding,
+            );
+        }
+        trim_trailing_spaces(rendered)
     }
 
     /// Renders the full table, optionally including headers and separators.
     pub fn render(&self) -> String {
         let widths = self.compute_widths();
-        let mut out = String::new();
         let total_width = table_width(&widths, self.padding);
+        let estimated_lines = self.rows.len() + if self.show_headers { 4 } else { 2 };
+        let mut out = String::with_capacity(total_width.saturating_mul(estimated_lines.max(1)));
         let style = style();
 
         if self.show_headers || !self.rows.is_empty() {
@@ -205,7 +211,7 @@ fn truncate_text(text: &str, width: usize) -> String {
 }
 
 /// Renders a single cell with padding and alignment applied.
-pub fn render_cell(text: &str, width: usize, alignment: &Alignment, padding: usize) -> String {
+fn append_cell(out: &mut String, text: &str, width: usize, alignment: &Alignment, padding: usize) {
     let fitted = truncate_text(text, width);
     let fitted_width = visible_width(&fitted);
     let remaining = width.saturating_sub(fitted_width);
@@ -216,12 +222,15 @@ pub fn render_cell(text: &str, width: usize, alignment: &Alignment, padding: usi
         Alignment::Center => (remaining / 2, remaining - (remaining / 2)),
     };
 
+    push_spaces(out, padding + left_spaces);
+    out.push_str(&fitted);
+    push_spaces(out, right_spaces + padding);
+}
+
+/// Helper retained for tests and legacy callers.
+pub fn render_cell(text: &str, width: usize, alignment: &Alignment, padding: usize) -> String {
     let mut cell = String::new();
-    cell.push_str(&" ".repeat(padding));
-    cell.push_str(&" ".repeat(left_spaces));
-    cell.push_str(&fitted);
-    cell.push_str(&" ".repeat(right_spaces));
-    cell.push_str(&" ".repeat(padding));
+    append_cell(&mut cell, text, width, alignment, padding);
     cell
 }
 
@@ -242,4 +251,17 @@ fn table_width(widths: &[usize], padding: usize) -> usize {
 
     widths.iter().map(|w| w + (padding * 2)).sum::<usize>()
         + COLUMN_GAP_WIDTH * widths.len().saturating_sub(1)
+}
+
+fn push_spaces(out: &mut String, count: usize) {
+    for _ in 0..count {
+        out.push(' ');
+    }
+}
+
+fn trim_trailing_spaces(mut text: String) -> String {
+    while text.ends_with(' ') {
+        text.pop();
+    }
+    text
 }
