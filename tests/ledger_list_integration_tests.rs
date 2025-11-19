@@ -3,13 +3,18 @@ use std::sync::{Arc, RwLock};
 use budget_core::cli::commands::ledger::list_ledgers;
 use budget_core::cli::core::{CliMode, ShellContext};
 use budget_core::cli::registry::CommandRegistry;
-use budget_core::cli::shell_context::SelectionOverride;
+use budget_core::cli::ui::test_mode::{
+    install_action_events, install_selector_events, reset_action_events, reset_selector_events,
+};
 use budget_core::config::{Config, ConfigManager};
 use budget_core::core::ledger_manager::LedgerManager;
 use budget_core::ledger::{BudgetPeriod, Ledger, TimeUnit};
 use budget_core::storage::json_backend::{load_ledger_from_path, JsonStorage};
 use budget_core::storage::StorageBackend;
+use crossterm::event::KeyCode;
 use dialoguer::theme::ColorfulTheme;
+use once_cell::sync::Lazy;
+use std::sync::{Mutex, MutexGuard};
 use tempfile::TempDir;
 
 fn build_context(temp: &TempDir) -> ShellContext {
@@ -29,19 +34,10 @@ fn build_context(temp: &TempDir) -> ShellContext {
         config,
         ledger_path: None,
         active_simulation_name: None,
-        selection_override: Some(SelectionOverride::default()),
+        selection_override: None,
         current_simulation: None,
         last_command: None,
         running: true,
-    }
-}
-
-fn push_choices(context: &ShellContext, choices: &[Option<usize>]) {
-    let Some(override_data) = &context.selection_override else {
-        return;
-    };
-    for choice in choices {
-        override_data.push(*choice);
     }
 }
 
@@ -57,7 +53,10 @@ fn delete_action_removes_ledger_file() {
     save_sample_ledger(&context.storage, "Alpha");
     let path = context.storage.ledger_path("alpha");
 
-    push_choices(&context, &[Some(0), Some(1), None]);
+    let _script = TestModeScript::new(
+        vec![vec![KeyCode::Enter], vec![KeyCode::Esc]],
+        vec![vec![KeyCode::Down, KeyCode::Enter]],
+    );
     list_ledgers::run_list_ledgers(&mut context).unwrap();
 
     assert!(!path.exists());
@@ -71,7 +70,10 @@ fn edit_action_updates_metadata() {
     let path = context.storage.ledger_path("beta");
 
     std::env::set_var("BUFY_TEST_TEXT_INPUTS", "Renamed|every 2 weeks");
-    push_choices(&context, &[Some(0), Some(0), None]);
+    let _script = TestModeScript::new(
+        vec![vec![KeyCode::Enter], vec![KeyCode::Esc]],
+        vec![vec![KeyCode::Enter]],
+    );
     list_ledgers::run_list_ledgers(&mut context).unwrap();
     std::env::remove_var("BUFY_TEST_TEXT_INPUTS");
 
@@ -87,9 +89,39 @@ fn escape_selection_returns_immediately() {
     let mut context = build_context(&temp);
     save_sample_ledger(&context.storage, "Gamma");
 
-    push_choices(&context, &[None]);
+    let _script = TestModeScript::new(vec![vec![KeyCode::Esc]], Vec::new());
     list_ledgers::run_list_ledgers(&mut context).unwrap();
 
     let path = context.storage.ledger_path("gamma");
     assert!(path.exists());
+}
+
+static TEST_MODE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+struct TestModeScript {
+    _guard: MutexGuard<'static, ()>,
+}
+
+impl TestModeScript {
+    fn new(selectors: Vec<Vec<KeyCode>>, actions: Vec<Vec<KeyCode>>) -> Self {
+        let guard = TEST_MODE_LOCK.lock().expect("test-mode lock");
+        if selectors.is_empty() {
+            reset_selector_events();
+        } else {
+            install_selector_events(selectors);
+        }
+        if actions.is_empty() {
+            reset_action_events();
+        } else {
+            install_action_events(actions);
+        }
+        Self { _guard: guard }
+    }
+}
+
+impl Drop for TestModeScript {
+    fn drop(&mut self) {
+        reset_selector_events();
+        reset_action_events();
+    }
 }
