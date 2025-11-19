@@ -8,6 +8,7 @@ use crossterm::{
 };
 
 use crate::cli::ui::navigation::{navigation_loop, NavKey};
+use crate::cli::ui::style::{format_header, style};
 
 const FOOTER_TEXT: &str = "Press ↑ ↓ to select an action, Enter to execute, ESC to go back.";
 
@@ -51,10 +52,11 @@ pub struct DetailActionsMenu {
 
 impl DetailActionsMenu {
     pub fn new(title: impl Into<String>, actions: Vec<DetailAction>) -> Self {
+        let ui = style();
         Self {
             title: title.into(),
             actions,
-            highlight_symbol: "• ".to_string(),
+            highlight_symbol: format!("{} ", ui.highlight_marker),
             normal_symbol: "  ".to_string(),
         }
     }
@@ -148,12 +150,12 @@ impl DetailActionsMenu {
         lines.push(ui.horizontal_line(rule_len));
         for (idx, action) in self.actions.iter().enumerate() {
             let marker = if idx == selected_index {
-                format!("{} ", ui.highlight_marker)
+                self.highlight_symbol.as_str()
             } else {
-                "  ".into()
+                self.normal_symbol.as_str()
             };
             let padded_label = format!("{:width$}", action.label, width = max_label_len);
-            let line = format!("  {}{}  {}", marker, padded_label, action.description);
+            let line = format!("  {marker}{padded_label}  {}", action.description);
             let rendered = if idx == selected_index {
                 ui.apply_highlight_style(&line)
             } else {
@@ -199,4 +201,3 @@ impl DetailActionsMenu {
         DetailActionResult::Escaped
     }
 }
-use crate::cli::ui::style::{format_header, style};
