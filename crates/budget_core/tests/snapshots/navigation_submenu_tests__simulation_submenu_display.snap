@@ -1,5 +1,5 @@
 ---
-source: tests/navigation_submenu_tests.rs
+source: crates/budget_core/tests/navigation_submenu_tests.rs
 assertion_line: 24
 expression: output.stdout
 ---
@@ -25,7 +25,7 @@ no-ledger ⮞
 ────────────────────────────────────────────────────
 no-ledger ⮞
 
-  > New      Create a simulation
+    New      Create a simulation
     Enter    Enter a simulation
     Leave    Leave active simulation
     Apply    Apply simulation changes

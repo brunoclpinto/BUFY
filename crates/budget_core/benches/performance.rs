@@ -3,7 +3,7 @@ use budget_core::ledger::{
     category::{Category, CategoryKind},
     BudgetPeriod, Ledger,
 };
-use budget_core::storage::json_backend::{
+use bufy_storage_json::{
     load_ledger_from_path as load_ledger_from_file, save_ledger_to_path as save_ledger_to_file,
 };
 use chrono::{Duration, NaiveDate};

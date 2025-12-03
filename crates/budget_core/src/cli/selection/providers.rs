@@ -155,7 +155,7 @@ impl<'a> SelectionProvider for LedgerBackupSelectionProvider<'a> {
             .map_err(|err| ProviderError::Store(err.to_string()))?;
         Ok(backups
             .into_iter()
-            .map(|item| SelectionItem::new(item.clone(), backup_label(&item)))
+            .map(|entry| SelectionItem::new(entry.id.clone(), backup_label(&entry.id)))
             .collect())
     }
 }

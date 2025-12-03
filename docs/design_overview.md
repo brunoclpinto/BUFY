@@ -51,7 +51,7 @@ Phase 3 introduces an interactive `rustyline`-powered shell that wraps the ledge
 - **Config system (Phase 18)** – `config show/set/backup/restore` manages the global preferences file (`config/config.json`) independently of any ledger. Snapshots land in `config/backups/config_<timestamp>.json`, and restores immediately update the live config so future sessions inherit locale/currency/theme defaults and the last-opened ledger name.
 - **Recurrence tooling** – `transaction recurring list/edit/clear/pause/resume/skip/sync` and `transaction complete <idx>` manage schedules without leaving the shell.
 - **Forecasting & simulations** – `forecast`, `summary <simulation>`, and `simulation add/modify/exclude` expose future-looking views side-by-side with base results.
-- **Persistence integration** – the CLI auto-loads the last ledger, exposes backup/restore commands, and surfaces migration warnings emitted by the `LedgerManager` + `JsonStorage` persistence layer.
+- **Persistence integration** – the CLI auto-loads the last ledger, exposes backup/restore commands, and surfaces migration warnings emitted by the `LedgerManager` + `JsonLedgerStorage` persistence layer.
 
 ### Simulations (Phase 5)
 
@@ -90,7 +90,7 @@ Decision rationale:
 Utility helpers house cross-cutting concerns.
 
 - `budget_core::utils::init_tracing` sets up an `EnvFilter`-driven `tracing` subscriber so both CLI and tests get consistent logging.
-- `budget_core::core::ledger_manager::LedgerManager` (Phase 7) is the single entry point for persistence, delegating on-disk work to `storage::json_backend::JsonStorage`. Responsibilities:
+- `budget_core::core::ledger_manager::LedgerManager` (Phase 7) is the single entry point for persistence, delegating on-disk work to `bufy_storage_json::JsonLedgerStorage`. Responsibilities:
   - Resolve the base directory (`~/.budget_core` or `BUDGET_CORE_HOME`).
   - Generate canonical filenames (slugified ledger names), temp-file paths, and backup directories.
   - Perform deterministic, pretty JSON serialization (`serde_json::to_string_pretty`) and atomic writes via `<file>.tmp` + `rename`.
@@ -107,7 +107,7 @@ Error handling:
 
 1. **Save**
    - CLI mutates the in-memory `Ledger`.
-  - `LedgerManager::save` / `save_as` serializes to pretty JSON, writes `<file>.tmp`, and atomically renames to the final path via the pluggable storage backend (`JsonStorage` today).
+  - `LedgerManager::save` / `save_as` serializes to pretty JSON, writes `<file>.tmp`, and atomically renames to the final path via the pluggable storage backend (`JsonLedgerStorage` today).
   - If an existing file is being overwritten, a timestamped `.json` snapshot is created first and old backups are pruned to respect retention.
    - `schema_version` is updated and `updated_at` re-stamped.
 2. **Load**

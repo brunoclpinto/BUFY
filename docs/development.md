@@ -8,16 +8,16 @@ This document supplements `docs/design_overview.md` with practical guidance for 
 | --- | --- | --- |
 | `cli/` | Command definitions, `ShellContext`, selection providers, output/IO utilities | `src/cli/core.rs`, `src/cli/registry.rs` |
 | `core/services/` | Business-logic helpers (`AccountService`, `CategoryService`, `TransactionService`, `SummaryService`) that mutate ledgers after validation | `src/domain` |
-| `core/ledger_manager.rs` | Coordinates persistence and manages the in-memory ledger handle | `src/storage/json_backend.rs` |
+| `core/ledger_manager.rs` | Coordinates persistence and manages the in-memory ledger handle | `crates/bufy-storage-json` |
 | `domain/` + `ledger/` | Fundamental data structures (accounts, categories, transactions, recurrence/time utilities) with `Display` implementations for CLI output | `docs/design_overview.md` |
-| `storage/` | Persistence backends (`JsonStorage`) and atomic save helpers | `config/mod.rs` |
+| `crates/bufy-storage-json/` | JSON persistence backend (`JsonLedgerStorage`) and atomic save helpers | `config/mod.rs` |
 | `config/` | `Config` + `ConfigManager`, backup/restore helpers, accessibility preferences | `cli/io.rs` |
 
 Each module begins with a `//!` summary and public items have `///` doc comments referencing related modules via “See also” sections to keep Rustdoc cross-links navigable.
 
 ## Naming & Style
 
-- Files use snake_case with one primary type per file (e.g., `account_service.rs`, `json_backend.rs`).
+- Files use snake_case with one primary type per file (e.g., `account_service.rs`, `bufy-storage-json/src/lib.rs`).
 - Public enums implement `Display` so CLI output no longer needs to format `{:?}`.
 - Manager methods use nouns for getters (`current_name`) and verbs for actions (`load`, `save_as`).
 - Command handlers follow the `cmd_<entity>_<action>` pattern and are registered via `CommandRegistry`.

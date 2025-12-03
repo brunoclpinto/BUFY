@@ -23,8 +23,8 @@ Version 2.0 completes the modular refactor, cleanly separating the CLI, service 
 └──────────────────────────────┬───────────────────────┘
                                ↓
 ┌──────────────────────────────────────────────────────┐
-│ Storage & Config (storage/, config/)                 │
-│   • JsonStorage, ConfigManager, backup helpers       │
+│ Storage & Config (bufy-storage-json/, config/)       │
+│   • JsonLedgerStorage, ConfigManager, backup helpers │
 └──────────────────────────────────────────────────────┘
 ```
 

@@ -1,5 +1,5 @@
 ---
-source: tests/navigation_submenu_tests.rs
+source: crates/budget_core/tests/navigation_submenu_tests.rs
 assertion_line: 24
 expression: output.stdout
 ---
@@ -11,26 +11,29 @@ no-ledger ⮞
     Account      Manage accounts via wizard flows
     Category     Manage categories and budgets
     Transaction  Manage transactions via wizard flows
-    Simulation   Manage simulations and what-if scenarios
+  > Simulation   Manage simulations and what-if scenarios
     Forecast     Forecast upcoming activity
     List         List accounts, categories, transactions, simulations...
     Summary      Show ledger summary
     Config       Global CLI preferences
     Help         Show available commands
-  > Version      Show build metadata
+    Version      Show build metadata
     Exit         Exit the shell
 ────────────────────────────────────────────────────────────────────────
 (Use arrow keys to navigate, Enter to select, ESC to exit)
+⮞ simulation menu
+────────────────────────────────────────────────────
+no-ledger ⮞
 
-=== === Budget Core 0.0.1 === ===
-  CLI version      0.0.1
-  Schema ver       v4
-  Config schema    v1
-  Build hash       ef42be6 (dirty)
-  Built at         2025-11-19T18:10:00Z
-  Target           aarch64-apple-darwin
-  Profile          debug
-  Rustc            rustc 1.90.0 (1159e78c4 2025-09-14)
+    New      Create a simulation
+    Enter    Enter a simulation
+    Leave    Leave active simulation
+    Apply    Apply simulation changes
+    Discard  Discard a simulation
+    List     List simulations
+    Show     Show simulation details
+────────────────────────────────────────────────────
+Use ↑ ↓ to navigate, Enter to select, ESC to return.
 ⮞ Main menu
 ────────────────────────────────────────────────────────────────────────
 no-ledger ⮞

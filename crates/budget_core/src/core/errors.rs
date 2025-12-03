@@ -1,5 +1,6 @@
 use std::result::Result as StdResult;
 
+use bufy_core::CoreError as ServiceCoreError;
 use thiserror::Error;
 
 /// Unified error type for core/domain/storage layers.
@@ -51,5 +52,25 @@ impl From<serde_json::Error> for BudgetError {
 impl From<bufy_domain::ledger::DateWindowError> for BudgetError {
     fn from(err: bufy_domain::ledger::DateWindowError) -> Self {
         BudgetError::InvalidInput(err.to_string())
+    }
+}
+
+impl From<ServiceCoreError> for BudgetError {
+    fn from(err: ServiceCoreError) -> Self {
+        match err {
+            ServiceCoreError::LedgerNotLoaded => BudgetError::LedgerNotLoaded,
+            ServiceCoreError::LedgerNotFound(message)
+            | ServiceCoreError::Storage(message)
+            | ServiceCoreError::Serde(message) => BudgetError::StorageError(message),
+            ServiceCoreError::AccountNotFound(message) => BudgetError::AccountNotFound(message),
+            ServiceCoreError::CategoryNotFound(message) => BudgetError::CategoryNotFound(message),
+            ServiceCoreError::TransactionNotFound(id) => {
+                BudgetError::TransactionError(format!("transaction {} not found", id))
+            }
+            ServiceCoreError::SimulationNotFound(message)
+            | ServiceCoreError::InvalidOperation(message)
+            | ServiceCoreError::Validation(message) => BudgetError::InvalidInput(message),
+            ServiceCoreError::Io(err) => BudgetError::StorageError(err.to_string()),
+        }
     }
 }

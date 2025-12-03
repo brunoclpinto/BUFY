@@ -4,10 +4,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::core::errors::BudgetError;
-use bufy_domain::CURRENT_SCHEMA_VERSION;
 use crate::ledger::Ledger;
-use crate::storage::json_backend::ledger_warnings;
-use crate::storage::StorageBackend;
+use bufy_core::storage::{ledger_warnings, LedgerBackupInfo, LedgerStorage};
+use bufy_domain::CURRENT_SCHEMA_VERSION;
 
 /// Metadata describing the outcome of a load operation.
 #[derive(Debug, Clone)]
@@ -21,15 +20,14 @@ pub struct LoadMetadata {
 
 /// Facade that coordinates ledger state, persistence, and backups.
 ///
-/// See also: [`crate::storage::json_backend::JsonStorage`] for the underlying storage backend.
 pub struct LedgerManager {
     pub current: Option<Arc<RwLock<Ledger>>>,
     current_name: Option<String>,
-    storage: Box<dyn StorageBackend>,
+    storage: Box<dyn LedgerStorage>,
 }
 
 impl LedgerManager {
-    pub fn new(storage: Box<dyn StorageBackend>) -> Self {
+    pub fn new(storage: Box<dyn LedgerStorage>) -> Self {
         Self {
             current: None,
             current_name: None,
@@ -37,12 +35,12 @@ impl LedgerManager {
         }
     }
 
-    pub fn storage(&self) -> &dyn StorageBackend {
+    pub fn storage(&self) -> &dyn LedgerStorage {
         self.storage.as_ref()
     }
 
     pub fn load(&mut self, name: &str) -> Result<LoadMetadata, BudgetError> {
-        let mut ledger = self.storage.load(name)?;
+        let mut ledger = self.storage.load_ledger(name)?;
         let meta = self.process_loaded_ledger(&mut ledger)?;
         self.current = Some(Arc::new(RwLock::new(ledger)));
         self.current_name = Some(name.to_string());
@@ -56,7 +54,7 @@ impl LedgerManager {
     }
 
     pub fn load_from_path(&mut self, path: &Path) -> Result<LoadMetadata, BudgetError> {
-        let mut ledger = self.storage.load_from_path(path)?;
+        let mut ledger = self.storage.load_ledger_from_path(path)?;
         let meta = self.process_loaded_ledger(&mut ledger)?;
         self.current = Some(Arc::new(RwLock::new(ledger)));
         self.current_name = None;
@@ -76,7 +74,9 @@ impl LedgerManager {
             .ok_or_else(|| BudgetError::StorageError("unnamed ledger cannot be saved".into()))?;
         {
             let ledger = self.read()?;
-            self.storage.save(&ledger, name)?;
+            self.storage
+                .save_ledger(name, &ledger)
+                .map_err(BudgetError::from)?;
         }
         Ok(())
     }
@@ -84,7 +84,9 @@ impl LedgerManager {
     pub fn save_as(&mut self, name: &str) -> Result<(), BudgetError> {
         {
             let ledger = self.read()?;
-            self.storage.save(&ledger, name)?;
+            self.storage
+                .save_ledger(name, &ledger)
+                .map_err(BudgetError::from)?;
         }
         self.current_name = Some(name.to_string());
         Ok(())
@@ -96,11 +98,14 @@ impl LedgerManager {
             .current_name
             .as_deref()
             .ok_or_else(|| BudgetError::StorageError("current ledger is unnamed".into()))?;
-        self.storage.backup(&ledger, name, note)
+        self.storage
+            .backup_ledger(name, &ledger, note)
+            .map(|_| ())
+            .map_err(BudgetError::from)
     }
 
-    pub fn list_backups(&self, name: &str) -> Result<Vec<String>, BudgetError> {
-        self.storage.list_backups(name)
+    pub fn list_backups(&self, name: &str) -> Result<Vec<LedgerBackupInfo>, BudgetError> {
+        self.storage.list_backups(name).map_err(BudgetError::from)
     }
 
     pub fn restore_backup(
@@ -108,7 +113,20 @@ impl LedgerManager {
         name: &str,
         backup_name: &str,
     ) -> Result<LoadMetadata, BudgetError> {
-        let mut ledger = self.storage.restore(name, backup_name)?;
+        let backups = self.list_backups(name)?;
+        let backup = backups
+            .into_iter()
+            .find(|entry| entry.id == backup_name)
+            .ok_or_else(|| {
+                BudgetError::StorageError(format!(
+                    "backup `{}` not found for ledger `{}`",
+                    backup_name, name
+                ))
+            })?;
+        let mut ledger = self
+            .storage
+            .restore_backup(&backup)
+            .map_err(BudgetError::from)?;
         let meta = self.process_loaded_ledger(&mut ledger)?;
         self.current = Some(Arc::new(RwLock::new(ledger)));
         self.current_name = Some(name.to_string());
@@ -212,17 +230,19 @@ struct LoadEffects {
 mod tests {
     use super::*;
     use crate::ledger::BudgetPeriod;
+    use bufy_storage_json::JsonLedgerStorage as JsonStorage;
     use std::fs;
     use tempfile::tempdir;
+
+    fn temp_storage(temp: &tempfile::TempDir) -> JsonStorage {
+        JsonStorage::with_retention(temp.path().join("ledgers"), temp.path().join("backups"), 3)
+            .expect("create json ledger storage")
+    }
 
     #[test]
     fn save_and_load_named_roundtrip() {
         let temp = tempdir().unwrap();
-        let store = crate::storage::json_backend::JsonStorage::new(
-            Some(temp.path().to_path_buf()),
-            Some(3),
-        )
-        .unwrap();
+        let store = temp_storage(&temp);
         let mut manager = LedgerManager::new(Box::new(store));
 
         let ledger = Ledger::new("Demo", BudgetPeriod::monthly());
@@ -238,11 +258,7 @@ mod tests {
     #[test]
     fn backup_uses_timestamped_names() {
         let temp = tempdir().unwrap();
-        let store = crate::storage::json_backend::JsonStorage::new(
-            Some(temp.path().to_path_buf()),
-            Some(3),
-        )
-        .unwrap();
+        let store = temp_storage(&temp);
         let mut manager = LedgerManager::new(Box::new(store));
         let ledger = Ledger::new("Household", BudgetPeriod::monthly());
         manager.set_current(ledger.clone(), None, Some("household-budget".into()));
@@ -253,17 +269,13 @@ mod tests {
             .expect("create backup");
         let backups = manager.list_backups("household-budget").unwrap();
         assert!(!backups.is_empty());
-        assert!(backups[0].starts_with("household_budget_"));
+        assert!(backups[0].id.starts_with("household_budget_"));
     }
 
     #[test]
     fn rejects_future_schema_versions() {
         let temp = tempdir().unwrap();
-        let store = crate::storage::json_backend::JsonStorage::new(
-            Some(temp.path().to_path_buf()),
-            Some(3),
-        )
-        .unwrap();
+        let store = temp_storage(&temp);
         let mut manager = LedgerManager::new(Box::new(store));
 
         let path = temp.path().join("future.json");
@@ -285,11 +297,7 @@ mod tests {
     #[test]
     fn with_current_helpers_access_loaded_ledger() {
         let temp = tempdir().unwrap();
-        let store = crate::storage::json_backend::JsonStorage::new(
-            Some(temp.path().to_path_buf()),
-            Some(3),
-        )
-        .unwrap();
+        let store = temp_storage(&temp);
         let mut manager = LedgerManager::new(Box::new(store));
         let ledger = Ledger::new("Helpers", BudgetPeriod::monthly());
         manager.set_current(ledger, None, Some("helpers".into()));

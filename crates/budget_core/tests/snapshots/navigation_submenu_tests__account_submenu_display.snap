@@ -1,5 +1,5 @@
 ---
-source: tests/navigation_submenu_tests.rs
+source: crates/budget_core/tests/navigation_submenu_tests.rs
 assertion_line: 17
 expression: output.stdout
 ---
@@ -25,7 +25,7 @@ no-ledger ⮞
 ────────────────────────────────────────────────────
 no-ledger ⮞
 
-  > Add     Add an account
+    Add     Add an account
     Edit    Edit an account
     Remove  Remove an account
     List    List accounts

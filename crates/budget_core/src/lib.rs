@@ -10,7 +10,6 @@ pub mod core;
 pub mod ffi;
 pub mod ledger;
 pub mod simulation;
-pub mod storage;
 pub mod utils;
 
 use std::sync::Once;

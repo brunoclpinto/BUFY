@@ -11,8 +11,8 @@ use crate::{
     config::{Config, ConfigManager},
     core::ledger_manager::LedgerManager,
     ledger::Simulation,
-    storage::json_backend::JsonStorage,
 };
+use bufy_storage_json::JsonLedgerStorage as JsonStorage;
 
 use super::registry::CommandRegistry;
 

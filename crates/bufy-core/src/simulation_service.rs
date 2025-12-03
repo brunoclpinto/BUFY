@@ -4,9 +4,7 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use bufy_domain::{
-    ledger::{
-        BudgetScope, BudgetTotalsDelta, CategoryBudgetSummaryKind, DateWindow,
-    },
+    ledger::{BudgetScope, BudgetTotalsDelta, CategoryBudgetSummaryKind, DateWindow},
     simulation::{
         Simulation, SimulationBudgetImpact, SimulationChange, SimulationStatus,
         SimulationTransactionPatch,

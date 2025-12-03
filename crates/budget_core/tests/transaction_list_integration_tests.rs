@@ -9,12 +9,12 @@ use budget_core::cli::ui::test_mode::{
 use budget_core::config::{Config, ConfigManager};
 use budget_core::core::ledger_manager::LedgerManager;
 use budget_core::ledger::{BudgetPeriod, Ledger};
-use budget_core::storage::json_backend::JsonStorage;
 use bufy_domain::{
     account::{Account, AccountKind},
     category::{Category, CategoryKind},
     transaction::{Transaction, TransactionStatus},
 };
+use bufy_storage_json::JsonLedgerStorage as JsonStorage;
 use chrono::NaiveDate;
 use crossterm::event::KeyCode;
 use dialoguer::theme::ColorfulTheme;
@@ -23,7 +23,9 @@ use std::sync::{Mutex, MutexGuard};
 use tempfile::TempDir;
 
 fn build_context(temp: &TempDir) -> ShellContext {
-    let storage = JsonStorage::new(Some(temp.path().to_path_buf()), Some(3)).unwrap();
+    let storage =
+        JsonStorage::with_retention(temp.path().join("ledgers"), temp.path().join("backups"), 3)
+            .unwrap();
     let manager = Arc::new(RwLock::new(LedgerManager::new(Box::new(storage.clone()))));
     let config_manager = Arc::new(RwLock::new(
         ConfigManager::with_base_dir(temp.path().to_path_buf()).unwrap(),

@@ -5,7 +5,7 @@ use crate::cli::ui::detail_view::DetailView;
 use crate::cli::ui::list_selector::{ListSelectionResult, ListSelector};
 use crate::cli::ui::table_renderer::{Alignment, Table, TableColumn};
 use crate::cli::ui::test_mode;
-use crate::storage::json_backend::BackupMetadata;
+use bufy_storage_json::BackupMetadata;
 
 pub fn run_list_backups(context: &mut ShellContext) -> CommandResult {
     let ledger_name = match context.require_named_ledger() {
@@ -45,7 +45,7 @@ fn gather_entries(
     context
         .storage
         .list_backup_metadata(ledger_name)
-        .map_err(CommandError::from_core)
+        .map_err(CommandError::from)
 }
 
 fn build_table(entries: &[BackupMetadata]) -> Table {
@@ -199,5 +199,5 @@ fn delete_backup(
     context
         .storage
         .delete_backup(ledger_name, &entry.name)
-        .map_err(CommandError::from_core)
+        .map_err(CommandError::from)
 }

@@ -80,7 +80,7 @@ return `None`, ensuring callers decide whether to abort or continue.
   categories, transactions, simulations, config, and metadata.
 - **Ledger backups**: `~/.budget_core/backups/<slug>/<slug>_YYYYMMDD_HHMM[_note].json`
   created before each save; retention is configurable when constructing the
-  storage backend (currently `JsonStorage`).
+  storage backend (currently `JsonLedgerStorage`).
 - **Config backups**: `~/.budget_core/config/backups/config_<timestamp>.json`
   with metadata `{ schema_version: CONFIG_BACKUP_SCHEMA_VERSION, created_at,
   note, config { ... } }`.

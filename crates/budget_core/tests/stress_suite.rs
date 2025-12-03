@@ -2,7 +2,8 @@ use budget_core::ledger::{
     account::AccountKind, category::CategoryKind, Account, BudgetPeriod, DateWindow, Ledger,
     LedgerExt, TimeInterval, TimeUnit, Transaction,
 };
-use budget_core::storage::{json_backend::JsonStorage, StorageBackend};
+use bufy_core::storage::LedgerStorage;
+use bufy_storage_json::JsonLedgerStorage as JsonStorage;
 use chrono::{Duration, NaiveDate};
 use tempfile::tempdir;
 
@@ -77,7 +78,9 @@ fn seed_ledger() -> Ledger {
 #[test]
 fn stress_repeated_save_load_and_forecast_cycles() {
     let tmp = tempdir().unwrap();
-    let store = JsonStorage::new(Some(tmp.path().to_path_buf()), Some(3)).unwrap();
+    let store =
+        JsonStorage::with_retention(tmp.path().join("ledgers"), tmp.path().join("backups"), 3)
+            .unwrap();
     let mut ledger = seed_ledger();
 
     // Simulation with an additional expense to exercise overlay calculations.
@@ -99,7 +102,9 @@ fn stress_repeated_save_load_and_forecast_cycles() {
         .add_simulation_transaction("Scenario", scenario_txn)
         .unwrap();
 
-    store.save(&ledger, "stress-ledger").expect("initial save");
+    store
+        .save_ledger("stress-ledger", &ledger)
+        .expect("initial save");
 
     let mut reference = NaiveDate::from_ymd_opt(2025, 1, 1).unwrap();
     for step in 0..24 {
@@ -156,9 +161,9 @@ fn stress_repeated_save_load_and_forecast_cycles() {
         }
 
         store
-            .save(&ledger, "stress-ledger")
+            .save_ledger("stress-ledger", &ledger)
             .expect("save iteration");
-        let reloaded = store.load("stress-ledger").expect("reload ledger");
+        let reloaded = store.load_ledger("stress-ledger").expect("reload ledger");
         assert_eq!(
             reloaded.transactions.len(),
             ledger.transactions.len(),

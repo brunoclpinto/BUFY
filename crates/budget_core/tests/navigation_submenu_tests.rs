@@ -39,7 +39,7 @@ fn test_submenu_esc_returns_to_main_menu() {
 #[test]
 fn test_submenu_selection_triggers_handler() {
     let harness = NavigationTestHarness::new();
-    let output = harness.run_interactive(&["ENTER", "DOWN,DOWN,DOWN,DOWN,DOWN,ENTER", "ESC"], &[]);
+    let output = harness.run_interactive(&["ENTER", "DOWN,DOWN,ENTER", "ESC"], &[]);
     assert!(
         output.stdout.contains("No ledgers found."),
         "Expected empty-ledger guard output:\n{}",

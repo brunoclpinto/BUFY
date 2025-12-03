@@ -10,6 +10,7 @@ pub mod error;
 pub mod forecast_service;
 pub mod ledger_service;
 pub mod simulation_service;
+pub mod storage;
 pub mod summary_service;
 pub mod transaction_service;
 
@@ -20,5 +21,6 @@ pub use error::CoreError;
 pub use forecast_service::*;
 pub use ledger_service::*;
 pub use simulation_service::*;
+pub use storage::*;
 pub use summary_service::*;
 pub use transaction_service::*;

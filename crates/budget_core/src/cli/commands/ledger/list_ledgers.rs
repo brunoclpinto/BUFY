@@ -5,7 +5,7 @@ use crate::cli::ui::detail_view::DetailView;
 use crate::cli::ui::list_selector::{ListSelectionResult, ListSelector};
 use crate::cli::ui::table_renderer::{Alignment, Table, TableColumn};
 use crate::cli::ui::test_mode;
-use crate::storage::LedgerMetadata;
+use bufy_storage_json::LedgerMetadata;
 
 enum RowSelection {
     Index(usize),

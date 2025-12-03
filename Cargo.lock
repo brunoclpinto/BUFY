@@ -176,8 +176,9 @@ dependencies = [
 name = "bufy-storage-json"
 version = "0.1.0"
 dependencies = [
+ "bufy-core",
  "bufy-domain",
- "serde",
+ "chrono",
  "serde_json",
 ]
 

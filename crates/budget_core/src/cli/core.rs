@@ -3,7 +3,7 @@
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
-    fs, io,
+    io,
     path::{Path, PathBuf},
     sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
 };
@@ -21,6 +21,7 @@ use crate::{
         AccountService, CategoryBudgetStatus, CategoryBudgetSummary, CategoryService, ServiceError,
         SummaryService, TransactionService,
     },
+    core::utils::PathResolver,
     ledger::{
         account::AccountKind, category::CategoryKind, Account, BudgetPeriod, BudgetScope,
         BudgetStatus, BudgetSummary, Category, DateWindow, ForecastReport, Ledger, LedgerExt,
@@ -28,11 +29,12 @@ use crate::{
         ScheduledStatus, SimulationBudgetImpact, SimulationChange, SimulationTransactionPatch,
         TimeInterval, TimeUnit, Transaction, TransactionStatus,
     },
-    storage::json_backend::{JsonStorage, LedgerMetadata},
 };
+use bufy_core::storage::LedgerStorage;
 use bufy_domain::currency::{
     format_currency_value, format_currency_value_with_precision, format_date,
 };
+use bufy_storage_json::{load_ledger_from_path, JsonLedgerStorage as JsonStorage, LedgerMetadata};
 
 use bufy_domain::BudgetPeriod as CategoryBudgetPeriod;
 
@@ -126,7 +128,7 @@ impl ShellContext {
     pub(crate) fn list_ledger_metadata(&self) -> Result<Vec<LedgerMetadata>, CommandError> {
         self.storage
             .list_ledger_metadata()
-            .map_err(CommandError::from_core)
+            .map_err(CommandError::from)
     }
 
     pub(crate) fn persist_config(&self) -> Result<(), CommandError> {
@@ -148,7 +150,13 @@ impl ShellContext {
         let mut registry = CommandRegistry::new();
         commands::register_all(&mut registry);
 
-        let storage = JsonStorage::new_default().map_err(CliError::from)?;
+        let base_dir = PathResolver::base_dir();
+        let storage = JsonStorage::new(
+            PathResolver::ledger_dir_in(&base_dir),
+            PathResolver::backup_dir_in(&base_dir),
+        )
+        .map_err(BudgetError::from)
+        .map_err(CliError::from)?;
         let manager = Arc::new(RwLock::new(LedgerManager::new(Box::new(storage.clone()))));
         let config_manager_raw = ConfigManager::new().map_err(CliError::from)?;
         let config = config_manager_raw.load().map_err(CliError::from)?;
@@ -1227,10 +1235,8 @@ impl ShellContext {
     }
 
     pub(crate) fn edit_ledger(&mut self, meta: &LedgerMetadata) -> CommandResult {
-        let mut ledger = self
-            .storage
-            .load_from_path(&meta.path)
-            .map_err(CommandError::from_core)?;
+        let mut ledger =
+            load_ledger_from_path(&meta.path).map_err(|err| CommandError::from(err))?;
         let response =
             cli_io::prompt_text("Ledger name", Some(&ledger.name)).map_err(CommandError::from)?;
         let Some(name_input) = response else {
@@ -1267,7 +1273,7 @@ impl ShellContext {
         let updated = ledger.clone();
         self.storage
             .save_to_path(&ledger, &meta.path)
-            .map_err(CommandError::from_core)?;
+            .map_err(CommandError::from)?;
         if is_active_path {
             self.set_ledger(
                 updated.clone(),
@@ -1281,9 +1287,9 @@ impl ShellContext {
     }
 
     pub(crate) fn delete_ledger(&mut self, meta: &LedgerMetadata) -> CommandResult {
-        if meta.path.exists() {
-            fs::remove_file(&meta.path).map_err(CommandError::from)?;
-        }
+        self.storage
+            .delete_ledger(&meta.slug)
+            .map_err(CommandError::from)?;
         let matches_active_path = self
             .ledger_path
             .as_ref()
@@ -1562,18 +1568,18 @@ impl ShellContext {
             };
             backups
                 .get(index)
+                .map(|entry| entry.id.clone())
                 .ok_or_else(|| {
                     CommandError::InvalidArguments(format!(
                         "backup index {} out of range",
                         reference
                     ))
                 })?
-                .clone()
         } else {
             backups
                 .iter()
-                .find(|candidate| candidate.contains(reference))
-                .cloned()
+                .find(|candidate| candidate.id.contains(reference))
+                .map(|entry| entry.id.clone())
                 .ok_or_else(|| {
                     CommandError::InvalidArguments(format!(
                         "no backup matches reference `{}`",
@@ -3662,19 +3668,23 @@ impl From<ServiceError> for CommandError {
             ServiceError::TransactionNotFound(id) => {
                 CommandError::InvalidArguments(format!("transaction {} not found", id))
             }
+            other => CommandError::from_core(other),
         }
     }
 }
 
 impl From<bufy_domain::ledger::DateWindowError> for CommandError {
     fn from(err: bufy_domain::ledger::DateWindowError) -> Self {
-        CommandError::from_core(err.into())
+        CommandError::from_core(BudgetError::from(err))
     }
 }
 
 impl CommandError {
-    pub(crate) fn from_core(error: BudgetError) -> Self {
-        CommandError::Core(error)
+    pub(crate) fn from_core<E>(error: E) -> Self
+    where
+        E: Into<BudgetError>,
+    {
+        CommandError::Core(error.into())
     }
 }
 
@@ -3736,7 +3746,7 @@ mod tests {
     use crate::core::ledger_manager::LedgerManager;
     use crate::ledger::{AccountKind, CategoryKind, TimeInterval, TimeUnit};
     use crate::ledger::{Simulation, SimulationStatus};
-    use crate::storage::json_backend::JsonStorage;
+    use bufy_storage_json::JsonLedgerStorage as JsonStorage;
     use chrono::{NaiveDate, Utc};
     use once_cell::sync::Lazy;
     use std::sync::{Arc, Mutex, MutexGuard, RwLock};
@@ -3965,7 +3975,12 @@ mod tests {
     #[test]
     fn ledger_backup_selection_paths() {
         let temp = tempdir().unwrap();
-        let storage = JsonStorage::new(Some(temp.path().to_path_buf()), Some(5)).unwrap();
+        let storage = JsonStorage::with_retention(
+            temp.path().join("ledgers"),
+            temp.path().join("backups"),
+            5,
+        )
+        .unwrap();
         let mut context = ShellContext::new(CliMode::Script).unwrap();
         context.storage = storage.clone();
         context.ledger_manager = Arc::new(RwLock::new(LedgerManager::new(Box::new(storage))));
@@ -3976,7 +3991,7 @@ mod tests {
             .list_backups("sample")
             .unwrap()
             .first()
-            .cloned()
+            .map(|entry| entry.id.clone())
             .expect("backup created");
 
         let outcome = SelectionManager::new(LedgerBackupSelectionProvider::new(&context))

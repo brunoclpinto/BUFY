@@ -14,6 +14,7 @@ use crate::core::{
     utils::{ensure_dir, PathResolver},
 };
 
+pub const CONFIG_BACKUP_SCHEMA_VERSION: u32 = 1;
 const BACKUP_EXTENSION: &str = "json";
 const BACKUP_TIMESTAMP_FORMAT: &str = "%Y%m%d_%H%M";
 const TMP_SUFFIX: &str = "tmp";
@@ -66,8 +67,6 @@ impl Config {
 }
 
 /// Handles persistence and backup management for [`Config`].
-///
-/// See also: [`crate::storage::json_backend::JsonStorage`] for ledger persistence.
 pub struct ConfigManager {
     path: PathBuf,
     backups_dir: PathBuf,

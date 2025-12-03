@@ -16,38 +16,32 @@ pub fn show(context: &ShellContext) -> Result<Option<String>, MenuError> {
     renderer.show(&menu)
 }
 
-fn main_menu_items(state: &MenuContextState) -> Vec<MenuUIItem> {
+fn main_menu_items(_state: &MenuContextState) -> Vec<MenuUIItem> {
     vec![
         MenuUIItem::new(
             "ledger",
             "ledger",
             "Ledger operations (new, load, save, backup, restore...)",
         ),
-        MenuUIItem::new("account", "account", "Manage accounts via wizard flows")
-            .with_enabled(state.has_loaded_ledger),
-        MenuUIItem::new("category", "category", "Manage categories and budgets")
-            .with_enabled(state.has_loaded_ledger),
+        MenuUIItem::new("account", "account", "Manage accounts via wizard flows"),
+        MenuUIItem::new("category", "category", "Manage categories and budgets"),
         MenuUIItem::new(
             "transaction",
             "transaction",
             "Manage transactions via wizard flows",
-        )
-        .with_enabled(state.has_loaded_ledger),
+        ),
         MenuUIItem::new(
             "simulation",
             "simulation",
             "Manage simulations and what-if scenarios",
-        )
-        .with_enabled(state.has_loaded_ledger),
-        MenuUIItem::new("forecast", "forecast", "Forecast upcoming activity")
-            .with_enabled(state.has_loaded_ledger),
+        ),
+        MenuUIItem::new("forecast", "forecast", "Forecast upcoming activity"),
         MenuUIItem::new(
             "list",
             "list",
             "List accounts, categories, transactions, simulations...",
         ),
-        MenuUIItem::new("summary", "summary", "Show ledger summary")
-            .with_enabled(state.has_loaded_ledger),
+        MenuUIItem::new("summary", "summary", "Show ledger summary"),
         MenuUIItem::new("config", "config", "Global CLI preferences"),
         MenuUIItem::new("help", "help", "Show available commands"),
         MenuUIItem::new("version", "version", "Show build metadata"),

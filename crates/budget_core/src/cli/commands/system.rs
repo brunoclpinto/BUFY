@@ -2,9 +2,9 @@ use crate::cli::core::{CommandError, CommandResult, ShellContext};
 use crate::cli::help;
 use crate::cli::registry::CommandEntry;
 use crate::cli::ui::formatting::Formatter;
-use bufy_domain::CURRENT_SCHEMA_VERSION;
-use crate::storage::CONFIG_BACKUP_SCHEMA_VERSION;
+use crate::config::CONFIG_BACKUP_SCHEMA_VERSION;
 use crate::utils::build_info;
+use bufy_domain::CURRENT_SCHEMA_VERSION;
 
 pub(crate) fn definitions() -> Vec<CommandEntry> {
     vec![

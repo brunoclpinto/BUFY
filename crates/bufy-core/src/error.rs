@@ -1,3 +1,5 @@
+use std::io;
+
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -19,4 +21,10 @@ pub enum CoreError {
     InvalidOperation(String),
     #[error("Validation failed: {0}")]
     Validation(String),
+    #[error("Storage error: {0}")]
+    Storage(String),
+    #[error("I/O error: {0}")]
+    Io(#[from] io::Error),
+    #[error("Serialization error: {0}")]
+    Serde(String),
 }

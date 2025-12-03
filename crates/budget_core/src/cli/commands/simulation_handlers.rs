@@ -104,11 +104,7 @@ pub fn handle_apply(context: &mut ShellContext, args: &[&str]) -> CommandResult 
                 CommandError::InvalidArguments(format!("simulation `{}` not found", name))
             })
     })?;
-    context.with_ledger_mut(|ledger| {
-        ledger
-            .apply_simulation(&name)
-            .map_err(CommandError::from)
-    })?;
+    context.with_ledger_mut(|ledger| ledger.apply_simulation(&name).map_err(CommandError::from))?;
     if context
         .active_simulation_name()
         .map(|active| active.eq_ignore_ascii_case(&name))
@@ -153,11 +149,8 @@ pub fn handle_discard(context: &mut ShellContext, args: &[&str]) -> CommandResul
             return Ok(());
         }
     }
-    context.with_ledger_mut(|ledger| {
-        ledger
-            .discard_simulation(&name)
-            .map_err(CommandError::from)
-    })?;
+    context
+        .with_ledger_mut(|ledger| ledger.discard_simulation(&name).map_err(CommandError::from))?;
     if was_active {
         context.clear_active_simulation();
     }

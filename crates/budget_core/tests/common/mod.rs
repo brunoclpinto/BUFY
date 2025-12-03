@@ -1,8 +1,7 @@
 use std::sync::Mutex;
 
-use budget_core::{
-    config::ConfigManager, core::ledger_manager::LedgerManager, storage::json_backend::JsonStorage,
-};
+use budget_core::{config::ConfigManager, core::ledger_manager::LedgerManager};
+use bufy_storage_json::JsonLedgerStorage as JsonStorage;
 use once_cell::sync::Lazy;
 use tempfile::TempDir;
 
@@ -15,8 +14,8 @@ pub fn setup_test_env() -> (LedgerManager, ConfigManager) {
     let base = temp.path().to_path_buf();
     TEST_DIRS.lock().expect("lock temp dir registry").push(temp);
 
-    let storage =
-        JsonStorage::new(Some(base.join("ledgers")), Some(3)).expect("create json storage backend");
+    let storage = JsonStorage::with_retention(base.join("ledgers"), base.join("backups"), 3)
+        .expect("create json storage backend");
     let ledger_manager = LedgerManager::new(Box::new(storage));
     let config_manager =
         ConfigManager::with_base_dir(base).expect("create config manager for temp dir");

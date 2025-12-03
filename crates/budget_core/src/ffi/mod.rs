@@ -18,9 +18,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use crate::{
     core::errors::BudgetError,
     ledger::{BudgetPeriod, Ledger},
-    storage::json_backend::{
-        load_ledger_from_path as load_ledger_from_file, save_ledger_to_path as save_ledger_to_file,
-    },
+};
+use bufy_storage_json::{
+    load_ledger_from_path as load_ledger_from_file, save_ledger_to_path as save_ledger_to_file,
 };
 
 const CORE_VERSION_STR: &str = env!("CARGO_PKG_VERSION");

@@ -1,11 +1,9 @@
 use assert_cmd::Command;
-use budget_core::{
-    ledger::{
-        transaction::{Recurrence, RecurrenceMode},
-        Account, AccountKind, BudgetPeriod, Ledger, TimeInterval, TimeUnit, Transaction,
-    },
-    storage::json_backend::save_ledger_to_path,
+use budget_core::ledger::{
+    transaction::{Recurrence, RecurrenceMode},
+    Account, AccountKind, BudgetPeriod, Ledger, TimeInterval, TimeUnit, Transaction,
 };
+use bufy_storage_json::save_ledger_to_path;
 use chrono::NaiveDate;
 use predicates::{prelude::PredicateBooleanExt, str::contains};
 use std::path::PathBuf;
