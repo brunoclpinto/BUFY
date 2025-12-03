@@ -9,3 +9,6 @@ path = "src/lib.rs"
 
 [dependencies]
 bufy-domain = { path = "../bufy-domain" }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "1.0"
+uuid = { version = "1.4", features = ["serde", "v4"] }

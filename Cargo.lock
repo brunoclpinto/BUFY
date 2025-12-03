@@ -150,6 +150,9 @@ name = "bufy-core"
 version = "0.1.0"
 dependencies = [
  "bufy-domain",
+ "chrono",
+ "thiserror",
+ "uuid",
 ]
 
 [[package]]
