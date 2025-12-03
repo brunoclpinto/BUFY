@@ -9,8 +9,11 @@ pub mod recurring;
 pub mod time_interval;
 pub mod transaction;
 
-pub use crate::core::services::{CategoryBudgetAssignment, CategoryBudgetStatus};
-pub use crate::core::simulation::types::{
+pub use bufy_domain::{
+    CategoryBudgetAssignment, CategoryBudgetStatus, CategoryBudgetSummary,
+    CategoryBudgetSummaryKind,
+};
+pub use bufy_domain::simulation::{
     Simulation, SimulationBudgetImpact, SimulationChange, SimulationStatus,
     SimulationTransactionPatch,
 };

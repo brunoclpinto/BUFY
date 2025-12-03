@@ -11,7 +11,7 @@ use crate::cli::ui::list_selector::{ListSelectionResult, ListSelector};
 use crate::cli::ui::table_renderer::{Alignment, Table, TableColumn};
 use crate::cli::ui::test_mode;
 use crate::core::services::TransactionService;
-use crate::domain::transaction::TransactionStatus;
+use bufy_domain::transaction::TransactionStatus;
 
 const NO_VALUE: &str = "—";
 

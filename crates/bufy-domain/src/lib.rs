@@ -2,7 +2,17 @@
 //!
 //! Pure domain models (Ledger, Account, Category, Transaction, Simulation, etc.).
 //! No I/O, no CLI, no storage. Only data types and core enums.
-//!
-//! In Phase W1 this is just a placeholder; real models will move here in Phase W2.
 
-pub fn placeholder() {}
+pub mod account;
+pub mod category;
+pub mod common;
+pub mod ledger;
+pub mod simulation;
+pub mod transaction;
+
+pub use account::*;
+pub use category::*;
+pub use common::*;
+pub use ledger::*;
+pub use simulation::*;
+pub use transaction::*;

@@ -3,7 +3,7 @@
 use uuid::Uuid;
 
 use crate::core::services::{ServiceError, ServiceResult};
-use crate::domain::account::Account;
+use bufy_domain::account::Account;
 use crate::ledger::Ledger;
 
 /// Provides validated mutations for [`Account`] entities.
@@ -96,7 +96,7 @@ impl AccountService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{
+    use bufy_domain::{
         account::{Account, AccountKind},
         category::{Category, CategoryKind},
     };

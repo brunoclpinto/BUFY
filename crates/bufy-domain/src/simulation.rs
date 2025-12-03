@@ -6,8 +6,11 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::core::services::CategoryBudgetSummary;
-use crate::ledger::{transaction::Transaction, BudgetSummary, BudgetTotalsDelta};
+use crate::{
+    ledger::{BudgetSummary, BudgetTotalsDelta},
+    transaction::Transaction,
+    CategoryBudgetSummary,
+};
 
 fn default_simulation_id() -> Uuid {
     Uuid::new_v4()

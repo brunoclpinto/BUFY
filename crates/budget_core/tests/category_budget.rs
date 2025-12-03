@@ -1,4 +1,4 @@
-use budget_core::domain::{
+use bufy_domain::{
     category::{Category, CategoryBudgetDefinition, CategoryKind},
     BudgetPeriod,
 };

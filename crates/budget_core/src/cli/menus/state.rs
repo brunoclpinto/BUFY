@@ -1,6 +1,5 @@
 use crate::cli::core::ShellContext;
-use crate::core::simulation::types::SimulationStatus;
-use crate::domain::transaction::TransactionStatus;
+use bufy_domain::{simulation::SimulationStatus, transaction::TransactionStatus};
 
 pub(crate) struct MenuContextState {
     pub has_loaded_ledger: bool,

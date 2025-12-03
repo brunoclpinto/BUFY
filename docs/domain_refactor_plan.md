@@ -46,13 +46,13 @@ src/
   - Abstract currency/policy interactions behind small interfaces to avoid pulling in `crate::currency`.
     - Introduce traits in `common.rs` if needed (e.g., `CurrencyFormatter`).
   - Keep persistence-friendly structs (`BudgetTotals`, `Simulation`) colocated.
-  - Ensure methods stay pure (business logic only) and signal errors via `domain::error` (later step).
+  - Ensure methods stay pure (business logic only) and signal errors via `bufy_domain::error` (later step).
 
 ## 2. Dependency Rules
 
 - `/domain` **must not** depend on `crate::cli`, `utils::persistence`, or file/network I/O.
 - `/domain` may depend on foundational crates: `serde`, `uuid`, `chrono`, `thiserror` (for domain errors).
-- Higher layers (CLI, persistence, simulation) import through `domain::*` re-exports.
+- Higher layers (CLI, persistence, simulation) import through `bufy_domain::*` re-exports.
 - Currency formatting & policy logic should be injected or handled via traits to prevent circular deps.
 
 ## 3. Migration Strategy
@@ -64,18 +64,18 @@ src/
 
 2. **Move Simple Entities**
    - Relocate `Account`, `Category` modules first (minimal dependencies).
-   - Update all `use crate::ledger::Account` imports to `crate::domain::account::Account`.
+   - Update all `use crate::ledger::Account` imports to `bufy_domain::account::Account`.
    - Confirm `cargo check`.
 
 3. **Transfer Transaction + Recurrence**
    - Migrate transaction data and recurrence helpers.
-   - Move `time_interval` utilities into `domain::common` or a dedicated module.
+   - Move `time_interval` utilities into `bufy_domain::common` or a dedicated module.
    - Adjust call sites (ledger, CLI forms) to new paths.
 
 4. **Refactor Ledger Aggregate**
    - Move `Ledger` and related budgeting/simulation structs.
    - Extract currency-dependent logic into injectable traits or helper structs outside `/domain`.
-   - Update persistence layer to use `crate::domain::ledger::Ledger`.
+   - Update persistence layer to use `bufy_domain::ledger::Ledger`.
 
 5. **Clean Up & Document**
    - Remove legacy `src/ledger` directory once all references migrate.
@@ -93,4 +93,3 @@ src/
 1. Scaffold `src/domain/{mod,common}.rs` with trait definitions and stub re-exports.
 2. Move `Account`/`Category` modules following the plan above.
 3. Document any new trait implementations or helper functions required for CLI/Persistence integration.
-

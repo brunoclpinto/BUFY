@@ -1,18 +1,15 @@
 use crate::core::services::TransactionService;
-use crate::domain::transaction::{Transaction, TransactionStatus};
+use bufy_domain::{
+    account::{Account, AccountKind},
+    transaction::{Transaction, TransactionStatus},
+};
 use crate::ledger::{BudgetPeriod, Ledger};
 
 #[test]
 fn add_transaction_returns_id() {
     let mut ledger = Ledger::new("Test", BudgetPeriod::monthly());
-    let from = ledger.add_account(crate::domain::account::Account::new(
-        "Checking",
-        crate::domain::account::AccountKind::Bank,
-    ));
-    let to = ledger.add_account(crate::domain::account::Account::new(
-        "Savings",
-        crate::domain::account::AccountKind::Savings,
-    ));
+    let from = ledger.add_account(Account::new("Checking", AccountKind::Bank));
+    let to = ledger.add_account(Account::new("Savings", AccountKind::Savings));
     let txn = Transaction::new(
         from,
         to,
@@ -29,14 +26,8 @@ fn add_transaction_returns_id() {
 #[test]
 fn update_transaction_mutates_struct() {
     let mut ledger = Ledger::new("Test", BudgetPeriod::monthly());
-    let from = ledger.add_account(crate::domain::account::Account::new(
-        "Checking",
-        crate::domain::account::AccountKind::Bank,
-    ));
-    let to = ledger.add_account(crate::domain::account::Account::new(
-        "Savings",
-        crate::domain::account::AccountKind::Savings,
-    ));
+    let from = ledger.add_account(Account::new("Checking", AccountKind::Bank));
+    let to = ledger.add_account(Account::new("Savings", AccountKind::Savings));
     let txn = Transaction::new(
         from,
         to,
@@ -60,14 +51,8 @@ fn update_transaction_mutates_struct() {
 #[test]
 fn remove_transaction_deletes_entry() {
     let mut ledger = Ledger::new("Test", BudgetPeriod::monthly());
-    let from = ledger.add_account(crate::domain::account::Account::new(
-        "Checking",
-        crate::domain::account::AccountKind::Bank,
-    ));
-    let to = ledger.add_account(crate::domain::account::Account::new(
-        "Savings",
-        crate::domain::account::AccountKind::Savings,
-    ));
+    let from = ledger.add_account(Account::new("Checking", AccountKind::Bank));
+    let to = ledger.add_account(Account::new("Savings", AccountKind::Savings));
     let txn = Transaction::new(
         from,
         to,

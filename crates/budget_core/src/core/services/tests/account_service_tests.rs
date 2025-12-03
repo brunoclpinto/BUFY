@@ -1,5 +1,5 @@
 use crate::core::services::{AccountService, ServiceError};
-use crate::domain::account::{Account, AccountKind};
+use bufy_domain::account::{Account, AccountKind};
 use crate::ledger::{BudgetPeriod, Ledger};
 
 #[test]

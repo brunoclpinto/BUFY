@@ -1,5 +1,5 @@
+use bufy_domain::BudgetPeriod as CategoryBudgetPeriod;
 use budget_core::{
-    domain::BudgetPeriod as CategoryBudgetPeriod,
     ledger::{Account, AccountKind, BudgetPeriod, Category, CategoryKind, Ledger, Transaction},
     storage::{json_backend::JsonStorage, StorageBackend},
 };

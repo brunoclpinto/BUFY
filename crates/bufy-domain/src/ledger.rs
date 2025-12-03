@@ -6,11 +6,7 @@ use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::domain::common::*;
-use crate::{
-    core::errors::BudgetError,
-    currency::{policy_date, ValuationPolicy},
-};
+use crate::{category::CategoryBudgetDefinition, common::*};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 /// Defines a reporting window for budget summaries.
@@ -20,11 +16,9 @@ pub struct DateWindow {
 }
 
 impl DateWindow {
-    pub fn new(start: NaiveDate, end: NaiveDate) -> Result<Self, BudgetError> {
+    pub fn new(start: NaiveDate, end: NaiveDate) -> Result<Self, DateWindowError> {
         if end <= start {
-            return Err(BudgetError::InvalidInput(
-                "window end must be after start".into(),
-            ));
+            return Err(DateWindowError::InvalidRange);
         }
         Ok(Self { start, end })
     }
@@ -54,6 +48,24 @@ impl DateWindow {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Errors that can occur when constructing [`DateWindow`] values.
+pub enum DateWindowError {
+    InvalidRange,
+}
+
+impl fmt::Display for DateWindowError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DateWindowError::InvalidRange => {
+                f.write_str("date window end must be after start")
+            }
+        }
+    }
+}
+
+impl std::error::Error for DateWindowError {}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 /// Identifies how a date window maps to the active budgeting period.
@@ -184,15 +196,69 @@ pub struct BudgetTotalsDelta {
     pub variance: f64,
 }
 
-#[derive(Debug, Clone)]
-/// Supplies valuation context for currency conversions.
-pub struct ConversionContext {
-    pub policy: ValuationPolicy,
-    pub report_date: NaiveDate,
+/// Mirrors the budgeting cadence used for a category budget definition.
+pub type CategoryBudgetPeriod = BudgetPeriod;
+
+/// Snapshot describing a category with an explicit budget definition.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CategoryBudgetAssignment {
+    pub category_id: Uuid,
+    pub name: String,
+    pub budget: CategoryBudgetDefinition,
 }
 
-impl ConversionContext {
-    pub fn effective_date(&self, txn_date: NaiveDate) -> NaiveDate {
-        policy_date(&self.policy, txn_date, self.report_date)
+/// Combines spending totals with the category's configured budget.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CategoryBudgetStatus {
+    pub category_id: Uuid,
+    pub name: String,
+    pub budget: Option<CategoryBudgetDefinition>,
+    pub totals: BudgetTotals,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum CategoryBudgetSummaryKind {
+    Actual,
+    Projected,
+    Simulated,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CategoryBudgetSummary {
+    pub category_id: Uuid,
+    pub name: String,
+    pub budget_amount: f64,
+    pub spent_amount: f64,
+    pub remaining_amount: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub utilization_percent: Option<f64>,
+    pub status: BudgetStatus,
+    pub period: CategoryBudgetPeriod,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_date: Option<NaiveDate>,
+    pub kind: CategoryBudgetSummaryKind,
+}
+
+impl CategoryBudgetSummary {
+    pub fn from_definition(
+        category_id: Uuid,
+        name: String,
+        budget: &CategoryBudgetDefinition,
+        spent: f64,
+        kind: CategoryBudgetSummaryKind,
+    ) -> Self {
+        let totals = BudgetTotals::from_parts(budget.amount, spent, false);
+        Self {
+            category_id,
+            name,
+            budget_amount: budget.amount,
+            spent_amount: spent,
+            remaining_amount: budget.amount - spent,
+            utilization_percent: totals.percent_used,
+            status: totals.status,
+            period: budget.period.clone(),
+            reference_date: budget.reference_date,
+            kind,
+        }
     }
 }

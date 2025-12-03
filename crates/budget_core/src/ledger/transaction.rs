@@ -1,1 +1,1 @@
-pub use crate::domain::transaction::*;
+pub use bufy_domain::transaction::*;

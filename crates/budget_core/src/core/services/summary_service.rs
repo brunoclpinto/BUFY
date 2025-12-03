@@ -6,12 +6,12 @@ use crate::core::services::{
     BudgetService, CategoryBudgetAssignment, CategoryBudgetStatus, CategoryBudgetSummary,
     CategoryBudgetSummaryKind, ServiceError, ServiceResult,
 };
-use crate::domain::ledger::{BudgetScope, BudgetSummary, DateWindow};
+use bufy_domain::ledger::{BudgetScope, BudgetSummary, DateWindow};
 use crate::ledger::{ForecastReport, Ledger, SimulationBudgetImpact};
 
 /// Aggregates ledger data for summary and forecasting scenarios.
 ///
-/// See also: [`crate::domain::ledger::BudgetSummary`] for the returned data model.
+/// See also: [`bufy_domain::ledger::BudgetSummary`] for the returned data model.
 pub struct SummaryService;
 
 impl SummaryService {
@@ -90,7 +90,7 @@ impl SummaryService {
 #[cfg(test)]
 mod tests {
     use crate::core::services::{CategoryBudgetSummaryKind, SummaryService};
-    use crate::domain::{
+    use bufy_domain::{
         account::{Account, AccountKind},
         category::{Category, CategoryKind},
         ledger::{BudgetScope, DateWindow},

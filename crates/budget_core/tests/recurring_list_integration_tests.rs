@@ -8,7 +8,7 @@ use budget_core::cli::ui::test_mode::{
 };
 use budget_core::config::{Config, ConfigManager};
 use budget_core::core::ledger_manager::LedgerManager;
-use budget_core::domain::{
+use bufy_domain::{
     account::{Account, AccountKind},
     category::{Category, CategoryKind},
     transaction::Transaction,
@@ -64,13 +64,13 @@ fn ledger_with_recurrence() -> Ledger {
         NaiveDate::from_ymd_opt(2024, 5, 1).unwrap(),
         42.0,
     );
-    txn.set_recurrence(Some(budget_core::domain::transaction::Recurrence::new(
+    txn.set_recurrence(Some(bufy_domain::transaction::Recurrence::new(
         NaiveDate::from_ymd_opt(2024, 5, 1).unwrap(),
-        budget_core::domain::common::TimeInterval {
+        bufy_domain::common::TimeInterval {
             every: 1,
-            unit: budget_core::domain::common::TimeUnit::Month,
+            unit: bufy_domain::common::TimeUnit::Month,
         },
-        budget_core::domain::transaction::RecurrenceMode::FixedSchedule,
+        bufy_domain::transaction::RecurrenceMode::FixedSchedule,
     )));
     ledger.add_transaction(txn);
     ledger

@@ -6,7 +6,7 @@ use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::domain::common::*;
+use crate::common::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Transaction {

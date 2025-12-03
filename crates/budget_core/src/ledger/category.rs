@@ -1,1 +1,1 @@
-pub use crate::domain::category::*;
+pub use bufy_domain::category::*;

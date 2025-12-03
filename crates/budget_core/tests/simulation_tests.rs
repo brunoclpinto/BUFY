@@ -1,10 +1,10 @@
 use budget_core::{
     core::services::{SummaryService, TransactionService},
-    domain::{
-        account::{Account, AccountKind},
-        ledger::{BudgetScope, DateWindow},
-    },
     ledger::{BudgetPeriod, Ledger, Simulation, SimulationChange, SimulationStatus, Transaction},
+};
+use bufy_domain::{
+    account::{Account, AccountKind},
+    ledger::{BudgetScope, DateWindow},
 };
 use chrono::NaiveDate;
 use uuid::Uuid;

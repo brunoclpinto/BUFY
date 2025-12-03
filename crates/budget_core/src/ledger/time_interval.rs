@@ -1,1 +1,1 @@
-pub use crate::domain::common::{TimeInterval, TimeUnit};
+pub use bufy_domain::common::{TimeInterval, TimeUnit};

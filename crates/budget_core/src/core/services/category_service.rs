@@ -3,7 +3,7 @@
 use uuid::Uuid;
 
 use crate::core::services::{ServiceError, ServiceResult};
-use crate::domain::category::Category;
+use bufy_domain::category::Category;
 use crate::ledger::Ledger;
 
 /// Provides validated operations for [`Category`] entities.
@@ -110,7 +110,7 @@ impl CategoryService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::category::{Category, CategoryKind};
+    use bufy_domain::category::{Category, CategoryKind};
     use crate::ledger::{BudgetPeriod, Ledger};
 
     fn sample_ledger() -> Ledger {

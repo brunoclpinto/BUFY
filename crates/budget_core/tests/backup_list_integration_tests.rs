@@ -8,7 +8,7 @@ use budget_core::cli::ui::test_mode::{
 };
 use budget_core::config::{Config, ConfigManager};
 use budget_core::core::ledger_manager::LedgerManager;
-use budget_core::domain::account::{Account, AccountKind};
+use bufy_domain::account::{Account, AccountKind};
 use budget_core::ledger::{BudgetPeriod, Ledger};
 use budget_core::storage::json_backend::JsonStorage;
 use crossterm::event::KeyCode;

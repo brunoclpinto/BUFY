@@ -3,7 +3,7 @@
 use uuid::Uuid;
 
 use crate::core::services::{ServiceError, ServiceResult};
-use crate::domain::transaction::Transaction;
+use bufy_domain::transaction::Transaction;
 use crate::ledger::Ledger;
 
 /// Provides validated CRUD helpers for [`Transaction`] entities.
@@ -46,7 +46,7 @@ impl TransactionService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::transaction::Transaction;
+    use bufy_domain::transaction::Transaction;
     use crate::ledger::{BudgetPeriod, Ledger};
     use chrono::NaiveDate;
 

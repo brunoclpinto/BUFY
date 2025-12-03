@@ -1,5 +1,5 @@
 use crate::core::services::{CategoryService, ServiceError};
-use crate::domain::category::{Category, CategoryKind};
+use bufy_domain::category::{Category, CategoryKind};
 use crate::ledger::{BudgetPeriod, Ledger};
 
 #[test]

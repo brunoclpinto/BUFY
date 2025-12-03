@@ -22,7 +22,6 @@ use crate::{
         SummaryService, TransactionService,
     },
     currency::{format_currency_value, format_currency_value_with_precision, format_date},
-    domain::BudgetPeriod as CategoryBudgetPeriod,
     ledger::{
         account::AccountKind, category::CategoryKind, Account, BudgetPeriod, BudgetScope,
         BudgetStatus, BudgetSummary, Category, DateWindow, ForecastReport, Ledger, Recurrence,
@@ -32,6 +31,8 @@ use crate::{
     },
     storage::json_backend::{JsonStorage, LedgerMetadata},
 };
+
+use bufy_domain::BudgetPeriod as CategoryBudgetPeriod;
 
 use crate::cli::forms::{
     AccountFormData, AccountInitialData, AccountWizard, CategoryFormData, CategoryInitialData,
@@ -2427,7 +2428,7 @@ impl ShellContext {
                 }
                 let start = parse_date(args[1])?;
                 let end = parse_date(args[2])?;
-                let window = DateWindow::new(start, end).map_err(CommandError::from_core)?;
+                let window = DateWindow::new(start, end).map_err(CommandError::from)?;
                 Ok((window, BudgetScope::Custom))
             }
             other => Err(CommandError::InvalidArguments(format!(
@@ -2444,7 +2445,7 @@ impl ShellContext {
     ) -> Result<DateWindow, CommandError> {
         if args.is_empty() {
             let end = today + Duration::days(90);
-            return DateWindow::new(today, end).map_err(CommandError::from_core);
+            return DateWindow::new(today, end).map_err(CommandError::from);
         }
         if matches!(args[0].to_lowercase().as_str(), "custom" | "range") {
             if args.len() < 3 {
@@ -2454,7 +2455,7 @@ impl ShellContext {
             }
             let start = parse_date(args[1])?;
             let end = parse_date(args[2])?;
-            return DateWindow::new(start, end).map_err(CommandError::from_core);
+            return DateWindow::new(start, end).map_err(CommandError::from);
         }
         let mut tokens = args;
         if !tokens.is_empty() && tokens[0].eq_ignore_ascii_case("next") {
@@ -2468,7 +2469,7 @@ impl ShellContext {
         let interval_expr = tokens.join(" ");
         let interval = parse_time_interval_str(&interval_expr)?;
         let end = interval.add_to(today, 1);
-        DateWindow::new(today, end).map_err(CommandError::from_core)
+        DateWindow::new(today, end).map_err(CommandError::from)
     }
 
     fn print_budget_summary(
@@ -3652,6 +3653,12 @@ impl From<ServiceError> for CommandError {
             ServiceError::Core(err) => CommandError::Core(err),
             ServiceError::Invalid(message) => CommandError::InvalidArguments(message),
         }
+    }
+}
+
+impl From<bufy_domain::ledger::DateWindowError> for CommandError {
+    fn from(err: bufy_domain::ledger::DateWindowError) -> Self {
+        CommandError::from_core(err.into())
     }
 }
 

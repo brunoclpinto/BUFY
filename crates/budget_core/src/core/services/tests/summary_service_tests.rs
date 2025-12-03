@@ -1,7 +1,7 @@
 use chrono::NaiveDate;
 
 use crate::core::services::SummaryService;
-use crate::domain::{
+use bufy_domain::{
     account::{Account, AccountKind},
     transaction::Transaction,
 };

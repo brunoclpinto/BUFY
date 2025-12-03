@@ -2,9 +2,9 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-pub use crate::domain::ledger::{
+pub use bufy_domain::ledger::{
     AccountBudget, BudgetScope, BudgetStatus, BudgetSummary, BudgetTotals, BudgetTotalsDelta,
-    CategoryBudget, ConversionContext, DateWindow,
+    CategoryBudget, DateWindow,
 };
 
 #[derive(Debug, Clone)]
@@ -13,6 +13,18 @@ pub struct ForecastReport {
     pub forecast: ForecastResult,
     pub summary: BudgetSummary,
     pub category_budgets: Vec<CategoryBudgetSummary>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConversionContext {
+    pub policy: ValuationPolicy,
+    pub report_date: NaiveDate,
+}
+
+impl ConversionContext {
+    pub fn effective_date(&self, txn_date: NaiveDate) -> NaiveDate {
+        policy_date(&self.policy, txn_date, self.report_date)
+    }
 }
 use super::{
     account::Account,
@@ -39,7 +51,9 @@ use crate::{
             },
         },
     },
-    currency::{ConvertedAmount, CurrencyCode, FormatOptions, LocaleConfig, ValuationPolicy},
+    currency::{
+        policy_date, ConvertedAmount, CurrencyCode, FormatOptions, LocaleConfig, ValuationPolicy,
+    },
 };
 
 pub const CURRENT_SCHEMA_VERSION: u8 = 4;

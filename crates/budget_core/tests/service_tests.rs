@@ -1,11 +1,11 @@
 use budget_core::{
     core::services::{AccountService, CategoryService, SummaryService, TransactionService},
-    domain::{
-        account::{Account, AccountKind},
-        category::{Category, CategoryKind},
-        ledger::{BudgetScope, DateWindow},
-    },
     ledger::{BudgetPeriod, Ledger, Transaction},
+};
+use bufy_domain::{
+    account::{Account, AccountKind},
+    category::{Category, CategoryKind},
+    ledger::{BudgetScope, DateWindow},
 };
 use chrono::NaiveDate;
 

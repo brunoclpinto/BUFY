@@ -47,3 +47,9 @@ impl From<serde_json::Error> for BudgetError {
         BudgetError::StorageError(err.to_string())
     }
 }
+
+impl From<bufy_domain::ledger::DateWindowError> for BudgetError {
+    fn from(err: bufy_domain::ledger::DateWindowError) -> Self {
+        BudgetError::InvalidInput(err.to_string())
+    }
+}

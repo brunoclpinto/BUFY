@@ -10,7 +10,7 @@ use crate::cli::ui::list_selector::{ListSelectionResult, ListSelector};
 use crate::cli::ui::table_renderer::{Alignment, Table, TableColumn};
 use crate::cli::ui::test_mode;
 use crate::core::services::{BudgetService, CategoryService};
-use crate::domain::category::{CategoryBudgetDefinition, CategoryKind};
+use bufy_domain::category::{CategoryBudgetDefinition, CategoryKind};
 
 const NO_VALUE: &str = "—";
 
@@ -161,8 +161,8 @@ fn format_budget_text(definition: Option<&CategoryBudgetDefinition>) -> String {
     }
 }
 
-fn format_budget_period(period: &crate::domain::common::BudgetPeriod) -> String {
-    use crate::domain::common::BudgetPeriod::*;
+fn format_budget_period(period: &bufy_domain::common::BudgetPeriod) -> String {
+    use bufy_domain::common::BudgetPeriod::*;
     match period {
         Daily => "Daily".into(),
         Weekly => "Weekly".into(),

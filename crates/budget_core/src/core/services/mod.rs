@@ -5,8 +5,9 @@ pub mod summary_service;
 pub mod transaction_service;
 
 pub use account_service::AccountService;
-pub use budget_service::{
-    BudgetService, CategoryBudgetAssignment, CategoryBudgetStatus, CategoryBudgetSummary,
+pub use budget_service::BudgetService;
+pub use bufy_domain::{
+    CategoryBudgetAssignment, CategoryBudgetStatus, CategoryBudgetSummary,
     CategoryBudgetSummaryKind,
 };
 pub use category_service::CategoryService;

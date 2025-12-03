@@ -6,7 +6,7 @@ use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::domain::common::*;
+use crate::common::*;
 
 /// Categorises ledger activity for budgeting and reporting.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

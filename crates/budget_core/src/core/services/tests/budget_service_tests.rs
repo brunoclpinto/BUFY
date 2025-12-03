@@ -1,7 +1,7 @@
 use chrono::NaiveDate;
 
 use crate::core::services::BudgetService;
-use crate::domain::{
+use bufy_domain::{
     account::{Account, AccountKind},
     category::{Category, CategoryKind},
     BudgetPeriod as CategoryBudgetPeriod,

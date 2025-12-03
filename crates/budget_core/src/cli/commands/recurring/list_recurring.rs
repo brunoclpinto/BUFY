@@ -10,7 +10,7 @@ use crate::cli::ui::detail_view::DetailView;
 use crate::cli::ui::list_selector::{ListSelectionResult, ListSelector};
 use crate::cli::ui::table_renderer::{Alignment, Table, TableColumn};
 use crate::cli::ui::test_mode;
-use crate::domain::transaction::Recurrence;
+use bufy_domain::transaction::Recurrence;
 use crate::ledger::recurring::snapshot_recurrences;
 use crate::ledger::RecurrenceSnapshot;
 use crate::ledger::{Account, Ledger, Transaction};
