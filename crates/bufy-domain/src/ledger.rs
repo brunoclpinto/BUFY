@@ -58,9 +58,7 @@ pub enum DateWindowError {
 impl fmt::Display for DateWindowError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            DateWindowError::InvalidRange => {
-                f.write_str("date window end must be after start")
-            }
+            DateWindowError::InvalidRange => f.write_str("date window end must be after start"),
         }
     }
 }
@@ -197,7 +195,7 @@ pub struct BudgetTotalsDelta {
 }
 
 /// Mirrors the budgeting cadence used for a category budget definition.
-pub type CategoryBudgetPeriod = BudgetPeriod;
+pub type CategoryBudgetPeriod = crate::common::BudgetPeriod;
 
 /// Snapshot describing a category with an explicit budget definition.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -1,6 +1,6 @@
 use budget_core::ledger::{
     account::AccountKind, category::CategoryKind, Account, BudgetPeriod, DateWindow, Ledger,
-    TimeInterval, TimeUnit, Transaction,
+    LedgerExt, TimeInterval, TimeUnit, Transaction,
 };
 use budget_core::storage::{json_backend::JsonStorage, StorageBackend};
 use chrono::{Duration, NaiveDate};

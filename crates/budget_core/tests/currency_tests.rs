@@ -1,4 +1,7 @@
-use bufy_domain::currency::{format_currency_value, CurrencyCode, CurrencyDisplay, FormatOptions, LocaleConfig, NegativeStyle};
+use bufy_domain::currency::{
+    format_currency_value, CurrencyCode, CurrencyDisplay, FormatOptions, LocaleConfig,
+    NegativeStyle,
+};
 
 #[test]
 fn formats_currency_with_locale() {

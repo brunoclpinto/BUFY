@@ -1,7 +1,8 @@
 use budget_core::ledger::{
     account::AccountKind, category::CategoryKind, Account, BudgetPeriod, BudgetScope, BudgetStatus,
-    Category, Ledger, TimeInterval, TimeUnit, Transaction,
+    Category, DateWindow, Ledger, TimeInterval, TimeUnit, Transaction,
 };
+use bufy_core::BudgetService;
 use chrono::NaiveDate;
 
 fn sample_date(y: i32, m: u32, d: u32) -> NaiveDate {
@@ -54,7 +55,7 @@ fn summarizes_budgeted_vs_real_by_period() {
     txn3.actual_amount = Some(140.0);
     ledger.add_transaction(txn3);
 
-    let january = ledger.summarize_period_containing(sample_date(2025, 1, 15));
+    let january = BudgetService::summarize_period_containing(&ledger, sample_date(2025, 1, 15));
     assert_eq!(january.totals.budgeted, 350.0);
     assert_eq!(january.totals.real, 180.0);
     assert!(january.totals.incomplete);
@@ -62,7 +63,7 @@ fn summarizes_budgeted_vs_real_by_period() {
     assert_eq!(january.per_category.len(), 1);
     assert_eq!(january.per_category[0].totals.budgeted, 350.0);
 
-    let february = ledger.summarize_period_containing(sample_date(2025, 2, 10));
+    let february = BudgetService::summarize_period_containing(&ledger, sample_date(2025, 2, 10));
     assert_eq!(february.totals.budgeted, 120.0);
     assert_eq!(february.totals.real, 140.0);
     assert_eq!(february.totals.status, BudgetStatus::OverBudget);
@@ -84,9 +85,9 @@ fn summarizes_custom_range() {
     txn.actual_amount = Some(55.0);
     ledger.add_transaction(txn);
 
-    let summary = ledger
-        .summarize_range(sample_date(2025, 3, 1), sample_date(2025, 3, 31))
-        .unwrap();
+    let window =
+        DateWindow::new(sample_date(2025, 3, 1), sample_date(2025, 3, 31)).expect("valid window");
+    let summary = BudgetService::summarize_window_scope(&ledger, window, BudgetScope::Custom);
     assert_eq!(summary.totals.budgeted, 50.0);
     assert_eq!(summary.totals.real, 55.0);
     assert_eq!(summary.scope, BudgetScope::Custom);

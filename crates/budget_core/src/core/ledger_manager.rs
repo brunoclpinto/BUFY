@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::core::errors::BudgetError;
-use crate::ledger::ledger::CURRENT_SCHEMA_VERSION;
+use bufy_domain::CURRENT_SCHEMA_VERSION;
 use crate::ledger::Ledger;
 use crate::storage::json_backend::ledger_warnings;
 use crate::storage::StorageBackend;

@@ -10,10 +10,10 @@ use crate::cli::ui::detail_view::DetailView;
 use crate::cli::ui::list_selector::{ListSelectionResult, ListSelector};
 use crate::cli::ui::table_renderer::{Alignment, Table, TableColumn};
 use crate::cli::ui::test_mode;
-use bufy_domain::transaction::Recurrence;
 use crate::ledger::recurring::snapshot_recurrences;
 use crate::ledger::RecurrenceSnapshot;
 use crate::ledger::{Account, Ledger, Transaction};
+use bufy_domain::transaction::Recurrence;
 
 pub fn run_list_recurring(context: &mut ShellContext) -> CommandResult {
     {

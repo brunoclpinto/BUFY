@@ -1,6 +1,6 @@
 use budget_core::ledger::{
-    account::AccountKind, category::CategoryKind, Account, BudgetPeriod, Ledger, SimulationStatus,
-    TimeInterval, TimeUnit, Transaction,
+    account::AccountKind, category::CategoryKind, Account, BudgetPeriod, Ledger, LedgerExt,
+    SimulationStatus, TimeInterval, TimeUnit, Transaction,
 };
 use chrono::NaiveDate;
 

@@ -18,7 +18,9 @@ use crate::{
     },
     ledger::{BudgetPeriod, Ledger},
 };
-use bufy_domain::currency::{CurrencyCode, CurrencyDisplay, LocaleConfig, NegativeStyle, ValuationPolicy};
+use bufy_domain::currency::{
+    CurrencyCode, CurrencyDisplay, LocaleConfig, NegativeStyle, ValuationPolicy,
+};
 
 use super::{Result, StorageBackend};
 

@@ -8,9 +8,9 @@ use budget_core::cli::ui::test_mode::{
 };
 use budget_core::config::{Config, ConfigManager};
 use budget_core::core::ledger_manager::LedgerManager;
-use bufy_domain::account::{Account, AccountKind};
 use budget_core::ledger::{BudgetPeriod, Ledger};
 use budget_core::storage::json_backend::JsonStorage;
+use bufy_domain::account::{Account, AccountKind};
 use crossterm::event::KeyCode;
 use dialoguer::theme::ColorfulTheme;
 use once_cell::sync::Lazy;

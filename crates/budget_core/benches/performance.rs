@@ -66,7 +66,7 @@ fn bench_ledger_summaries(c: &mut Criterion) {
 
     c.bench_function("budget_summary_current", |b| {
         b.iter(|| {
-            let summary = ledger.summarize_period_containing(reference);
+            let summary = bufy_core::BudgetService::summarize_period_containing(&ledger, reference);
             black_box(summary);
         })
     });
@@ -75,10 +75,14 @@ fn bench_ledger_summaries(c: &mut Criterion) {
         b.iter_batched(
             || ledger.clone(),
             |ledger_clone| {
-                let window = ledger_clone.budget_window_for(reference);
-                let report = ledger_clone
-                    .forecast_window_report(window, reference, None)
-                    .expect("forecast");
+                let window = ledger_clone.budget_window_containing(reference);
+                let report = bufy_core::ForecastService::window_report(
+                    &ledger_clone,
+                    window,
+                    reference,
+                    None,
+                )
+                .expect("forecast");
                 black_box(report);
             },
             BatchSize::SmallInput,

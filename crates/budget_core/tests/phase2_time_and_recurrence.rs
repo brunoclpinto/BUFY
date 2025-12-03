@@ -1,3 +1,4 @@
+use budget_core::ledger::LedgerExt;
 use budget_core::ledger::{
     transaction::{Recurrence, RecurrenceMode},
     Account, AccountKind, BudgetPeriod, DateWindow, Ledger, TimeInterval, TimeUnit, Transaction,

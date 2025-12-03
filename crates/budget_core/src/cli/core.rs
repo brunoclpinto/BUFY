@@ -23,14 +23,16 @@ use crate::{
     },
     ledger::{
         account::AccountKind, category::CategoryKind, Account, BudgetPeriod, BudgetScope,
-        BudgetStatus, BudgetSummary, Category, DateWindow, ForecastReport, Ledger, Recurrence,
-        RecurrenceEnd, RecurrenceMode, RecurrenceSnapshot, RecurrenceStatus, ScheduledStatus,
-        SimulationBudgetImpact, SimulationChange, SimulationTransactionPatch, TimeInterval,
-        TimeUnit, Transaction, TransactionStatus,
+        BudgetStatus, BudgetSummary, Category, DateWindow, ForecastReport, Ledger, LedgerExt,
+        Recurrence, RecurrenceEnd, RecurrenceMode, RecurrenceSnapshot, RecurrenceStatus,
+        ScheduledStatus, SimulationBudgetImpact, SimulationChange, SimulationTransactionPatch,
+        TimeInterval, TimeUnit, Transaction, TransactionStatus,
     },
     storage::json_backend::{JsonStorage, LedgerMetadata},
 };
-use bufy_domain::currency::{format_currency_value, format_currency_value_with_precision, format_date};
+use bufy_domain::currency::{
+    format_currency_value, format_currency_value_with_precision, format_date,
+};
 
 use bufy_domain::BudgetPeriod as CategoryBudgetPeriod;
 
@@ -901,7 +903,7 @@ impl ShellContext {
             self.with_ledger_mut(|ledger| {
                 ledger
                     .add_simulation_transaction(name, transaction)
-                    .map_err(CommandError::from_core)
+                    .map_err(CommandError::from)
             })?;
             cli_io::print_success(format!(
                 "Transaction saved to simulation `{}`: {}",
@@ -2003,7 +2005,7 @@ impl ShellContext {
             self.with_ledger_mut(|ledger| {
                 ledger
                     .add_simulation_transaction(&sim_name, transaction)
-                    .map_err(CommandError::from_core)
+                    .map_err(CommandError::from)
             })?;
             cli_io::print_success(format!(
                 "Transaction saved to simulation `{}`: {}",
@@ -3141,7 +3143,7 @@ impl ShellContext {
         self.with_ledger_mut(|ledger| {
             ledger
                 .exclude_transaction_in_simulation(sim_name, txn_id)
-                .map_err(CommandError::from_core)
+                .map_err(CommandError::from)
         })?;
         cli_io::print_success(format!("Transaction {} excluded in `{}`", txn_id, sim_name));
         Ok(())
@@ -3180,7 +3182,7 @@ impl ShellContext {
         self.with_ledger_mut(|ledger| {
             ledger
                 .modify_transaction_in_simulation(sim_name, patch)
-                .map_err(CommandError::from_core)
+                .map_err(CommandError::from)
         })?;
         cli_io::print_success(format!("Transaction {} modified in `{}`", txn_id, sim_name));
         Ok(())
@@ -3650,8 +3652,16 @@ pub enum CommandError {
 impl From<ServiceError> for CommandError {
     fn from(err: ServiceError) -> Self {
         match err {
-            ServiceError::Core(err) => CommandError::Core(err),
-            ServiceError::Invalid(message) => CommandError::InvalidArguments(message),
+            ServiceError::LedgerNotLoaded => CommandError::LedgerNotLoaded,
+            ServiceError::LedgerNotFound(message)
+            | ServiceError::AccountNotFound(message)
+            | ServiceError::CategoryNotFound(message)
+            | ServiceError::SimulationNotFound(message)
+            | ServiceError::Validation(message)
+            | ServiceError::InvalidOperation(message) => CommandError::InvalidArguments(message),
+            ServiceError::TransactionNotFound(id) => {
+                CommandError::InvalidArguments(format!("transaction {} not found", id))
+            }
         }
     }
 }

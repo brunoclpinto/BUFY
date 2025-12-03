@@ -2,7 +2,7 @@ use chrono::Local;
 
 use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
 use crate::cli::io;
-use crate::ledger::SimulationStatus;
+use crate::ledger::{LedgerExt, SimulationStatus};
 
 pub fn handle_create(context: &mut ShellContext, args: &[&str]) -> CommandResult {
     let name = if let Some(name) = args.first() {
@@ -41,7 +41,7 @@ pub fn handle_create(context: &mut ShellContext, args: &[&str]) -> CommandResult
         ledger
             .create_simulation(name.clone(), notes.clone())
             .map(|_| ())
-            .map_err(CommandError::from_core)
+            .map_err(CommandError::from)
     })?;
     io::print_success(format!("Simulation `{}` created.", name));
     Ok(())
@@ -107,7 +107,7 @@ pub fn handle_apply(context: &mut ShellContext, args: &[&str]) -> CommandResult 
     context.with_ledger_mut(|ledger| {
         ledger
             .apply_simulation(&name)
-            .map_err(CommandError::from_core)
+            .map_err(CommandError::from)
     })?;
     if context
         .active_simulation_name()
@@ -156,7 +156,7 @@ pub fn handle_discard(context: &mut ShellContext, args: &[&str]) -> CommandResul
     context.with_ledger_mut(|ledger| {
         ledger
             .discard_simulation(&name)
-            .map_err(CommandError::from_core)
+            .map_err(CommandError::from)
     })?;
     if was_active {
         context.clear_active_simulation();

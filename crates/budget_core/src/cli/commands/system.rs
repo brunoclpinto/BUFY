@@ -2,7 +2,7 @@ use crate::cli::core::{CommandError, CommandResult, ShellContext};
 use crate::cli::help;
 use crate::cli::registry::CommandEntry;
 use crate::cli::ui::formatting::Formatter;
-use crate::ledger::ledger::CURRENT_SCHEMA_VERSION;
+use bufy_domain::CURRENT_SCHEMA_VERSION;
 use crate::storage::CONFIG_BACKUP_SCHEMA_VERSION;
 use crate::utils::build_info;
 

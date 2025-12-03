@@ -1,8 +1,8 @@
-use bufy_domain::BudgetPeriod as CategoryBudgetPeriod;
 use budget_core::{
     ledger::{Account, AccountKind, BudgetPeriod, Category, CategoryKind, Ledger, Transaction},
     storage::{json_backend::JsonStorage, StorageBackend},
 };
+use bufy_domain::BudgetPeriod as CategoryBudgetPeriod;
 use chrono::NaiveDate;
 use std::fs;
 use std::path::Path;
