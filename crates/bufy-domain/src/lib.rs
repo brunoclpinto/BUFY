@@ -10,6 +10,7 @@ pub mod currency;
 pub mod ledger;
 pub mod simulation;
 pub mod transaction;
+pub mod recurring;
 
 pub use account::*;
 pub use category::*;
@@ -18,3 +19,4 @@ pub use currency::*;
 pub use ledger::*;
 pub use simulation::*;
 pub use transaction::*;
+pub use recurring::*;
