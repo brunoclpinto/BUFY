@@ -5,7 +5,7 @@ use chrono::{NaiveDate, Weekday};
 use crate::cli::core::{CommandError, CommandResult, ShellContext};
 use crate::cli::io;
 use crate::cli::registry::CommandEntry;
-use crate::currency::{
+use bufy_domain::currency::{
     CurrencyCode, DateFormatStyle, LocaleConfig, NegativeStyle, ValuationPolicy,
 };
 

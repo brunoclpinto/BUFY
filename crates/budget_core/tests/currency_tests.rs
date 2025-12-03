@@ -1,4 +1,4 @@
-use budget_core::currency::{format_currency_value, CurrencyCode, FormatOptions, LocaleConfig};
+use bufy_domain::currency::{format_currency_value, CurrencyCode, CurrencyDisplay, FormatOptions, LocaleConfig, NegativeStyle};
 
 #[test]
 fn formats_currency_with_locale() {
@@ -8,8 +8,8 @@ fn formats_currency_with_locale() {
         ..LocaleConfig::default()
     };
     let options = FormatOptions {
-        currency_display: budget_core::currency::CurrencyDisplay::Symbol,
-        negative_style: budget_core::currency::NegativeStyle::Parentheses,
+        currency_display: CurrencyDisplay::Symbol,
+        negative_style: NegativeStyle::Parentheses,
         screen_reader_mode: false,
         high_contrast_mode: false,
     };

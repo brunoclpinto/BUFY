@@ -16,9 +16,9 @@ use crate::{
         services::BudgetService,
         utils::{ensure_dir, PathResolver},
     },
-    currency::{CurrencyCode, CurrencyDisplay, LocaleConfig, NegativeStyle, ValuationPolicy},
     ledger::{BudgetPeriod, Ledger},
 };
+use bufy_domain::currency::{CurrencyCode, CurrencyDisplay, LocaleConfig, NegativeStyle, ValuationPolicy};
 
 use super::{Result, StorageBackend};
 

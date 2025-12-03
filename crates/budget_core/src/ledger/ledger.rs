@@ -51,10 +51,8 @@ use crate::{
             },
         },
     },
-    currency::{
-        policy_date, ConvertedAmount, CurrencyCode, FormatOptions, LocaleConfig, ValuationPolicy,
-    },
 };
+use bufy_domain::currency::{policy_date, ConvertedAmount, CurrencyCode, FormatOptions, LocaleConfig, ValuationPolicy};
 
 pub const CURRENT_SCHEMA_VERSION: u8 = 4;
 
