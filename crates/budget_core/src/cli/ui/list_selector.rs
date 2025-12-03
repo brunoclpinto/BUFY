@@ -7,12 +7,12 @@ use crossterm::{
     ExecutableCommand,
 };
 
+use crate::cli::ui::style::style;
+use crate::cli::ui::table_renderer::{horizontal_rule, visible_width, Table};
 use crate::cli::{
     io::write_line,
     ui::navigation::{navigation_loop, NavKey},
 };
-use crate::cli::ui::style::style;
-use crate::cli::ui::table_renderer::{horizontal_rule, visible_width, Table};
 
 const DEFAULT_HIGHLIGHT: &str = "> ";
 const DEFAULT_NORMAL: &str = "  ";

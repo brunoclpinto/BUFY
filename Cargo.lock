@@ -109,6 +109,10 @@ version = "0.0.1"
 dependencies = [
  "assert_cmd",
  "assert_fs",
+ "bufy-config",
+ "bufy-core",
+ "bufy-domain",
+ "bufy-storage-json",
  "cbindgen",
  "chrono",
  "colored",
@@ -131,6 +135,45 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "bufy-config"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "bufy-core"
+version = "0.1.0"
+dependencies = [
+ "bufy-domain",
+]
+
+[[package]]
+name = "bufy-domain"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "bufy-ffi"
+version = "0.1.0"
+dependencies = [
+ "bufy-core",
+ "bufy-domain",
+]
+
+[[package]]
+name = "bufy-storage-json"
+version = "0.1.0"
+dependencies = [
+ "bufy-domain",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

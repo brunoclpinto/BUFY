@@ -1,0 +1,12 @@
+[package]
+name = "bufy-ffi"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "bufy_ffi"
+path = "src/lib.rs"
+
+[dependencies]
+bufy-core = { path = "../bufy-core" }
+bufy-domain = { path = "../bufy-domain" }

@@ -1,0 +1,51 @@
+[package]
+name = "budget_core"
+version = "0.0.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[features]
+default = []
+ffi = []
+
+[dependencies]
+bufy-config = { path = "../bufy-config" }
+bufy-core = { path = "../bufy-core" }
+bufy-domain = { path = "../bufy-domain" }
+bufy-storage-json = { path = "../bufy-storage-json" }
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+uuid = { version = "1.4", features = ["serde", "v4"] }
+colored = "2.1"
+crossterm = "0.27"
+dialoguer = "0.11"
+rustyline = { version = "14", features = ["custom-bindings"] }
+strsim = "0.11"
+shell-words = "1.1"
+dirs = "5.0"
+once_cell = "1.19"
+
+[build-dependencies]
+cbindgen = "0.26"
+chrono = { version = "0.4", features = ["clock"] }
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dev-dependencies]
+assert_fs = "1.1"
+tempfile = "3.8"
+assert_cmd = "2.0"
+predicates = "3.1"
+libloading = "0.8"
+criterion = { version = "0.5", features = ["html_reports"] }
+insta = { version = "1.34", features = ["glob"] }
+regex = "1.10"
+
+[[bin]]
+name = "budget_core_cli"
+path = "src/bin/budget_core_cli.rs"

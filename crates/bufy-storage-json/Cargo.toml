@@ -1,0 +1,13 @@
+[package]
+name = "bufy-storage-json"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "bufy_storage_json"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bufy-domain = { path = "../bufy-domain" }

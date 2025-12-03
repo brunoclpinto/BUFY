@@ -7,11 +7,11 @@ use crossterm::{
     ExecutableCommand,
 };
 
+use crate::cli::ui::style::{format_header, style};
 use crate::cli::{
     io::write_line,
     ui::navigation::{navigation_loop, NavKey},
 };
-use crate::cli::ui::style::{format_header, style};
 
 const FOOTER_TEXT: &str = "Press ↑ ↓ to select an action, Enter to execute, ESC to go back.";
 
