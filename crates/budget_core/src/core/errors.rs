@@ -1,5 +1,6 @@
 use std::result::Result as StdResult;
 
+use bufy_config::ConfigError as CliConfigError;
 use bufy_core::CoreError as ServiceCoreError;
 use thiserror::Error;
 
@@ -72,5 +73,20 @@ impl From<ServiceCoreError> for BudgetError {
             | ServiceCoreError::Validation(message) => BudgetError::InvalidInput(message),
             ServiceCoreError::Io(err) => BudgetError::StorageError(err.to_string()),
         }
+    }
+}
+
+impl From<CliConfigError> for BudgetError {
+    fn from(err: CliConfigError) -> Self {
+        match err {
+            CliConfigError::Io(io) => BudgetError::StorageError(io.to_string()),
+            CliConfigError::Serde(message) => BudgetError::ConfigError(message),
+        }
+    }
+}
+
+impl From<CliConfigError> for CliError {
+    fn from(err: CliConfigError) -> Self {
+        CliError::from(BudgetError::from(err))
     }
 }

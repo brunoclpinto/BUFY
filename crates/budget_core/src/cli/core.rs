@@ -14,7 +14,7 @@ use strsim::levenshtein;
 use uuid::Uuid;
 
 use crate::{
-    config::{Config, ConfigManager},
+    config::{self, Config, ConfigManager},
     core::errors::BudgetError,
     core::ledger_manager::LedgerManager,
     core::services::{
@@ -158,7 +158,7 @@ impl ShellContext {
         .map_err(BudgetError::from)
         .map_err(CliError::from)?;
         let manager = Arc::new(RwLock::new(LedgerManager::new(Box::new(storage.clone()))));
-        let config_manager_raw = ConfigManager::new().map_err(CliError::from)?;
+        let config_manager_raw = config::default_manager().map_err(CliError::from)?;
         let config = config_manager_raw.load().map_err(CliError::from)?;
         cli_io::apply_config(&config);
         let config = Arc::new(RwLock::new(config));
