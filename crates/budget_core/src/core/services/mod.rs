@@ -4,7 +4,7 @@ pub use crate::ledger::{
 };
 pub use bufy_core::{
     AccountService, BudgetService, CategoryService, ForecastService, LedgerService,
-    SimulationService, SummaryService, TransactionService,
+    RecurrenceService, SimulationService, SummaryService, TransactionService,
 };
 
 pub type ServiceError = bufy_core::CoreError;

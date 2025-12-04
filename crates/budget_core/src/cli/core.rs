@@ -19,7 +19,8 @@ use crate::{
     core::ledger_manager::LedgerManager,
     core::services::{
         AccountService, CategoryBudgetStatus, CategoryBudgetSummary, CategoryService,
-        LedgerService, ServiceError, SimulationService, SummaryService, TransactionService,
+        LedgerService, RecurrenceService, ServiceError, SimulationService, SummaryService,
+        TransactionService,
     },
     core::utils::PathResolver,
     ledger::{
@@ -2910,21 +2911,16 @@ impl ShellContext {
 
     pub(crate) fn recurrence_edit(&mut self, index: usize) -> CommandResult {
         self.ensure_base_mode("Recurrence editing")?;
-        let (scheduled_date, existing) = self.with_ledger(|ledger| {
+        let (transaction_id, scheduled_date, existing) = self.with_ledger(|ledger| {
             let txn = ledger.transactions.get(index).ok_or_else(|| {
                 CommandError::InvalidArguments("transaction index out of range".into())
             })?;
-            Ok((txn.scheduled_date, txn.recurrence.clone()))
+            Ok((txn.id, txn.scheduled_date, txn.recurrence.clone()))
         })?;
         let recurrence = self.prompt_recurrence(scheduled_date, existing.as_ref())?;
         self.with_ledger_mut(|ledger| {
-            let txn = ledger.transactions.get_mut(index).ok_or_else(|| {
-                CommandError::InvalidArguments("transaction index out of range".into())
-            })?;
-            txn.set_recurrence(Some(recurrence));
-            ledger.refresh_recurrence_metadata();
-            ledger.touch();
-            Ok(())
+            RecurrenceService::set_rule(ledger, transaction_id, recurrence)
+                .map_err(CommandError::from)
         })?;
         cli_io::print_success(format!("Recurrence updated for transaction {}.", index));
         Ok(())
@@ -2932,23 +2928,20 @@ impl ShellContext {
 
     pub(crate) fn recurrence_clear(&mut self, index: usize) -> CommandResult {
         self.ensure_base_mode("Recurrence removal")?;
-        let mut removed = false;
-        self.with_ledger_mut(|ledger| {
-            let txn = ledger.transactions.get_mut(index).ok_or_else(|| {
-                CommandError::InvalidArguments("transaction index out of range".into())
-            })?;
-            if txn.recurrence.is_none() {
-                cli_io::print_warning("Transaction has no recurrence defined.");
-                return Ok(());
-            }
-            removed = true;
-            txn.set_recurrence(None);
-            txn.recurrence_series_id = None;
-            ledger.refresh_recurrence_metadata();
-            ledger.touch();
-            Ok(())
+        let transaction_id = self.with_ledger(|ledger| {
+            ledger
+                .transactions
+                .get(index)
+                .map(|txn| txn.id)
+                .ok_or_else(|| {
+                    CommandError::InvalidArguments("transaction index out of range".into())
+                })
+        })?;
+        let removed = self.with_ledger_mut(|ledger| {
+            RecurrenceService::clear_rule(ledger, transaction_id).map_err(CommandError::from)
         })?;
         if !removed {
+            cli_io::print_warning("Transaction has no recurrence defined.");
             return Ok(());
         }
         cli_io::print_success(format!("Recurrence removed from transaction {}.", index));
@@ -2961,17 +2954,18 @@ impl ShellContext {
         status: RecurrenceStatus,
     ) -> CommandResult {
         self.ensure_base_mode("Recurrence status change")?;
+        let transaction_id = self.with_ledger(|ledger| {
+            ledger
+                .transactions
+                .get(index)
+                .map(|txn| txn.id)
+                .ok_or_else(|| {
+                    CommandError::InvalidArguments("transaction index out of range".into())
+                })
+        })?;
         self.with_ledger_mut(|ledger| {
-            let txn = ledger.transactions.get_mut(index).ok_or_else(|| {
-                CommandError::InvalidArguments("transaction index out of range".into())
-            })?;
-            let recurrence = txn.recurrence.as_mut().ok_or_else(|| {
-                CommandError::InvalidArguments("transaction has no recurrence".into())
-            })?;
-            recurrence.status = status.clone();
-            ledger.refresh_recurrence_metadata();
-            ledger.touch();
-            Ok(())
+            RecurrenceService::set_status(ledger, transaction_id, status.clone())
+                .map_err(CommandError::from)
         })?;
         cli_io::print_success(format!(
             "Recurrence status set to {:?} for transaction {}.",
@@ -2982,29 +2976,19 @@ impl ShellContext {
 
     pub(crate) fn recurrence_skip_date(&mut self, index: usize, date: NaiveDate) -> CommandResult {
         self.ensure_base_mode("Recurrence exception editing")?;
-        let mut skipped = false;
-        self.with_ledger_mut(|ledger| {
-            let txn = ledger.transactions.get_mut(index).ok_or_else(|| {
-                CommandError::InvalidArguments("transaction index out of range".into())
-            })?;
-            let recurrence = txn.recurrence.as_mut().ok_or_else(|| {
-                CommandError::InvalidArguments("transaction has no recurrence".into())
-            })?;
-            if recurrence.exceptions.contains(&date) {
-                cli_io::print_info(format!(
-                    "Date {} already marked as skipped for this recurrence.",
-                    date
-                ));
-                return Ok(());
-            }
-            skipped = true;
-            recurrence.exceptions.push(date);
-            recurrence.exceptions.sort();
-            ledger.refresh_recurrence_metadata();
-            ledger.touch();
-            Ok(())
+        let transaction_id = self.with_ledger(|ledger| {
+            ledger
+                .transactions
+                .get(index)
+                .map(|txn| txn.id)
+                .ok_or_else(|| {
+                    CommandError::InvalidArguments("transaction index out of range".into())
+                })
         })?;
-        if !skipped {
+        let added = self.with_ledger_mut(|ledger| {
+            RecurrenceService::skip_date(ledger, transaction_id, date).map_err(CommandError::from)
+        })?;
+        if !added {
             return Ok(());
         }
         cli_io::print_success(format!(
