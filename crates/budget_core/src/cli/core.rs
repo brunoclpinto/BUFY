@@ -1816,14 +1816,8 @@ impl ShellContext {
         };
 
         self.with_ledger_mut(|ledger| {
-            let category = ledger.category_mut(category_id).ok_or_else(|| {
-                CommandError::InvalidArguments(format!(
-                    "category `{}` no longer exists.",
-                    category_name
-                ))
-            })?;
-            category.set_budget(amount, period.clone(), None);
-            Ok(())
+            CategoryService::set_budget(ledger, category_id, amount, period.clone(), None)
+                .map_err(CommandError::from)
         })?;
 
         let budget_label = self.with_ledger(|ledger| {
@@ -1863,17 +1857,7 @@ impl ShellContext {
         };
 
         let removed = self.with_ledger_mut(|ledger| {
-            let category = ledger.category_mut(category_id).ok_or_else(|| {
-                CommandError::InvalidArguments(format!(
-                    "category `{}` no longer exists.",
-                    category_name
-                ))
-            })?;
-            let had_budget = category.budget.is_some();
-            if had_budget {
-                category.clear_budget();
-            }
-            Ok(had_budget)
+            CategoryService::clear_budget(ledger, category_id).map_err(CommandError::from)
         })?;
 
         if removed {
@@ -2012,8 +1996,7 @@ impl ShellContext {
 
         if let Some(sim_name) = sim {
             self.with_ledger_mut(|ledger| {
-                ledger
-                    .add_simulation_transaction(&sim_name, transaction)
+                SimulationService::add_transaction(ledger, &sim_name, transaction)
                     .map_err(CommandError::from)
             })?;
             cli_io::print_success(format!(

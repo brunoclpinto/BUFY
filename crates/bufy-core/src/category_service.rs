@@ -1,8 +1,9 @@
 //! Business logic helpers for category management.
 
+use chrono::NaiveDate;
 use uuid::Uuid;
 
-use bufy_domain::{category::Category, Ledger};
+use bufy_domain::{category::Category, BudgetPeriod, Ledger};
 
 use crate::CoreError;
 
@@ -65,6 +66,35 @@ impl CategoryService {
         }
         ledger.touch();
         Ok(())
+    }
+
+    /// Assigns a budget definition to the given category.
+    pub fn set_budget(
+        ledger: &mut Ledger,
+        id: Uuid,
+        amount: f64,
+        period: BudgetPeriod,
+        reference_date: Option<NaiveDate>,
+    ) -> Result<(), CoreError> {
+        let category = ledger
+            .category_mut(id)
+            .ok_or_else(|| CoreError::CategoryNotFound(id.to_string()))?;
+        category.set_budget(amount, period, reference_date);
+        ledger.touch();
+        Ok(())
+    }
+
+    /// Clears the budget assigned to a category, returning whether it existed.
+    pub fn clear_budget(ledger: &mut Ledger, id: Uuid) -> Result<bool, CoreError> {
+        let category = ledger
+            .category_mut(id)
+            .ok_or_else(|| CoreError::CategoryNotFound(id.to_string()))?;
+        let had_budget = category.has_budget();
+        category.clear_budget();
+        if had_budget {
+            ledger.touch();
+        }
+        Ok(had_budget)
     }
 
     /// Returns a snapshot of all categories.
