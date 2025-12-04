@@ -2,10 +2,16 @@
 
 pub mod list_ledgers;
 
-use crate::cli::commands::ledger_handlers;
+use std::path::PathBuf;
+
+use chrono::Utc;
+
+use crate::cli::commands::backup::list_backups;
 use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
+use crate::cli::io;
 use crate::cli::menus::{ledger_menu, menu_error_to_command_error};
 use crate::cli::registry::CommandEntry;
+use crate::core::services::SummaryService;
 
 pub(crate) fn definitions() -> Vec<CommandEntry> {
     vec![
@@ -48,14 +54,14 @@ fn cmd_ledger(context: &mut ShellContext, args: &[&str]) -> CommandResult {
 
 fn dispatch_action(context: &mut ShellContext, subcommand: &str, args: &[&str]) -> CommandResult {
     match subcommand.to_ascii_lowercase().as_str() {
-        "new" => ledger_handlers::handle_new(context, args),
-        "load" => ledger_handlers::handle_load(context, args),
-        "load-ledger" | "load-named" => ledger_handlers::handle_load_named(context, args),
-        "save" => ledger_handlers::handle_save(context, args),
-        "save-ledger" | "save-named" => ledger_handlers::handle_save_named(context, args),
-        "backup" | "backup-ledger" => ledger_handlers::handle_backup(context, args),
-        "list-backups" | "backups" => ledger_handlers::handle_list_backups(context, args),
-        "restore" | "restore-ledger" => ledger_handlers::handle_restore(context, args),
+        "new" => handle_new(context, args),
+        "load" => handle_load(context, args),
+        "load-ledger" | "load-named" => handle_load_named(context, args),
+        "save" => handle_save(context, args),
+        "save-ledger" | "save-named" => handle_save_named(context, args),
+        "backup" | "backup-ledger" => handle_backup(context, args),
+        "list-backups" | "backups" => handle_list_backups(context),
+        "restore" | "restore-ledger" => handle_restore(context, args),
         other => Err(CommandError::InvalidArguments(format!(
             "unknown ledger subcommand `{}`. Available: new, load, load-ledger, save, save-ledger, backup, list-backups, restore",
             other
@@ -67,13 +73,13 @@ fn run_ledger_menu(context: &mut ShellContext) -> CommandResult {
     let selection = ledger_menu::show(context).map_err(menu_error_to_command_error)?;
     if let Some(action) = selection {
         match action.as_str() {
-            "new" => ledger_handlers::handle_new(context, &[]),
-            "load" => ledger_handlers::handle_load(context, &[]),
-            "save" => ledger_handlers::handle_save(context, &[]),
-            "backup" => ledger_handlers::handle_backup(context, &[]),
-            "restore" => ledger_handlers::handle_restore(context, &[]),
-            "list" => ledger_handlers::handle_overview(context),
-            "delete" => ledger_handlers::handle_delete(context),
+            "new" => handle_new(context, &[]),
+            "load" => handle_load(context, &[]),
+            "save" => handle_save(context, &[]),
+            "backup" => handle_backup(context, &[]),
+            "restore" => handle_restore(context, &[]),
+            "list" => handle_overview(context),
+            "delete" => handle_delete(context),
             _ => Ok(()),
         }
     } else {
@@ -82,9 +88,191 @@ fn run_ledger_menu(context: &mut ShellContext) -> CommandResult {
 }
 
 fn cmd_summary(context: &mut ShellContext, args: &[&str]) -> CommandResult {
-    ledger_handlers::handle_summary(context, args)
+    handle_summary(context, args)
 }
 
 fn cmd_forecast(context: &mut ShellContext, args: &[&str]) -> CommandResult {
-    ledger_handlers::handle_forecast(context, args)
+    handle_forecast(context, args)
+}
+
+fn handle_new(context: &mut ShellContext, args: &[&str]) -> CommandResult {
+    match context.mode() {
+        CliMode::Interactive => context.run_new_ledger_interactive(),
+        CliMode::Script => context.run_new_ledger_script(args),
+    }
+}
+
+fn handle_load(context: &mut ShellContext, args: &[&str]) -> CommandResult {
+    if let Some(path) = args.first() {
+        let path = PathBuf::from(path);
+        context.load_ledger(&path)
+    } else if context.mode() == CliMode::Interactive {
+        let response = io::prompt_text("Path to ledger JSON", None).map_err(CommandError::from)?;
+        let Some(text) = response else {
+            io::print_info("Operation cancelled.");
+            return Ok(());
+        };
+        context.load_ledger(&PathBuf::from(text.trim()))
+    } else {
+        Err(CommandError::InvalidArguments(
+            "usage: ledger load <path>".into(),
+        ))
+    }
+}
+
+fn handle_load_named(context: &mut ShellContext, args: &[&str]) -> CommandResult {
+    let name = if let Some(name) = args.first() {
+        (*name).to_string()
+    } else if context.mode() == CliMode::Interactive {
+        let response = io::prompt_text("Ledger name to load", None).map_err(CommandError::from)?;
+        let Some(text) = response else {
+            io::print_info("Operation cancelled.");
+            return Ok(());
+        };
+        text
+    } else {
+        return Err(CommandError::InvalidArguments(
+            "usage: ledger load-ledger <name>".into(),
+        ));
+    };
+    let name = name.trim().to_string();
+    context.load_named_ledger(&name)
+}
+
+fn handle_save(context: &mut ShellContext, args: &[&str]) -> CommandResult {
+    if let Some(path) = args.first() {
+        let path = PathBuf::from(path);
+        context.save_to_path(&path)
+    } else if let Some(name) = context.ledger_name().map(|s| s.to_string()) {
+        context.save_named_ledger(&name)
+    } else if let Some(path) = context.ledger_path() {
+        context.save_to_path(&path)
+    } else if context.mode() == CliMode::Interactive {
+        let suggested = if let Some(name) = context.ledger_name() {
+            name
+        } else {
+            context.with_ledger(|ledger| Ok(ledger.name.clone()))?
+        };
+        let choice =
+            io::prompt_select_index("Choose save method", &["Name in store", "Custom path"])
+                .map_err(CommandError::from)?;
+        if choice == 0 {
+            let response = io::prompt_text("Ledger name", Some(suggested.as_str()))
+                .map_err(CommandError::from)?;
+            let Some(name) = response else {
+                io::print_info("Operation cancelled.");
+                return Ok(());
+            };
+            context.save_named_ledger(&name)
+        } else {
+            let response =
+                io::prompt_text("Save ledger to path", None).map_err(CommandError::from)?;
+            let Some(path) = response else {
+                io::print_info("Operation cancelled.");
+                return Ok(());
+            };
+            context.save_to_path(&PathBuf::from(path.trim()))
+        }
+    } else {
+        Err(CommandError::InvalidArguments(
+            "usage: ledger save <path>".into(),
+        ))
+    }
+}
+
+fn handle_save_named(context: &mut ShellContext, args: &[&str]) -> CommandResult {
+    let name = if let Some(name) = args.first() {
+        (*name).to_string()
+    } else if let Some(existing) = context.ledger_name().map(|s| s.to_string()) {
+        existing
+    } else if context.mode() == CliMode::Interactive {
+        let response = io::prompt_text("Ledger name", None).map_err(CommandError::from)?;
+        let Some(name) = response else {
+            io::print_info("Operation cancelled.");
+            return Ok(());
+        };
+        name
+    } else {
+        return Err(CommandError::InvalidArguments(
+            "usage: ledger save-ledger <name>".into(),
+        ));
+    };
+    let name = name.trim().to_string();
+    context.save_named_ledger(&name)
+}
+
+fn handle_backup(context: &mut ShellContext, args: &[&str]) -> CommandResult {
+    let name = if let Some(name) = args.first() {
+        (*name).to_string()
+    } else {
+        context.require_named_ledger()?
+    };
+    context.create_backup(&name)
+}
+
+fn handle_list_backups(context: &mut ShellContext) -> CommandResult {
+    list_backups::run_list_backups(context)
+}
+
+fn handle_restore(context: &mut ShellContext, args: &[&str]) -> CommandResult {
+    match args.len() {
+        0 => {
+            if !context.can_prompt() {
+                return Err(CommandError::InvalidArguments(
+                    "usage: ledger restore <backup_reference> [name]".into(),
+                ));
+            }
+            let name = {
+                let named = context.require_named_ledger()?;
+                named.to_string()
+            };
+            let selection = context.select_ledger_backup("Select a backup to restore:")?;
+            let Some(backup_name) = selection else {
+                io::print_info("Operation cancelled.");
+                return Ok(());
+            };
+            context.restore_backup_from_name(&name, backup_name)
+        }
+        1 => {
+            let reference = args[0];
+            let name = context.require_named_ledger()?;
+            context.restore_backup(&name, reference)
+        }
+        2 => {
+            let reference = args[0];
+            let name = args[1].to_string();
+            context.restore_backup(&name, reference)
+        }
+        _ => Err(CommandError::InvalidArguments(
+            "usage: ledger restore <backup_reference> [name]".into(),
+        )),
+    }
+}
+
+fn handle_overview(context: &mut ShellContext) -> CommandResult {
+    list_ledgers::run_list_ledgers(context)
+}
+
+fn handle_delete(context: &mut ShellContext) -> CommandResult {
+    list_ledgers::run_list_ledgers(context)
+}
+
+fn handle_summary(context: &mut ShellContext, args: &[&str]) -> CommandResult {
+    context.show_budget_summary(args)
+}
+
+fn handle_forecast(context: &mut ShellContext, args: &[&str]) -> CommandResult {
+    context.with_ledger(|ledger| {
+        let today = Utc::now().date_naive();
+        let (simulation, remainder) = if !args.is_empty() && ledger.simulation(args[0]).is_some() {
+            (Some(args[0]), &args[1..])
+        } else {
+            (None, args)
+        };
+        let window = context.resolve_forecast_window(remainder, today)?;
+        let report = SummaryService::forecast_window(ledger, window, today, simulation)
+            .map_err(CommandError::from)?;
+        context.print_forecast_report(ledger, simulation, &report);
+        Ok(())
+    })
 }

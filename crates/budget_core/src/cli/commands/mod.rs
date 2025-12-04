@@ -3,7 +3,6 @@ pub mod backup;
 pub mod category;
 pub mod config;
 pub mod ledger;
-pub mod ledger_handlers;
 pub mod list;
 pub mod recurring;
 pub mod simulation;
