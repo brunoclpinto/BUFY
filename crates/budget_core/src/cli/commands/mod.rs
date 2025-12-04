@@ -10,7 +10,6 @@ pub mod simulation;
 pub mod simulation_handlers;
 pub mod system;
 pub mod transaction;
-pub mod transaction_handlers;
 
 use crate::cli::registry::{CommandEntry, CommandRegistry};
 
