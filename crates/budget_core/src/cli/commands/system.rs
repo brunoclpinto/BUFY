@@ -1,7 +1,7 @@
 use crate::cli::core::{CommandError, CommandResult, ShellContext};
 use crate::cli::help;
 use crate::cli::registry::CommandEntry;
-use crate::cli::ui::formatting::Formatter;
+use crate::cli::ui::{Table, TableColumn, TableRenderer};
 use crate::config::CONFIG_BACKUP_SCHEMA_VERSION;
 use crate::utils::build_info;
 use bufy_domain::CURRENT_SCHEMA_VERSION;
@@ -21,31 +21,37 @@ pub(crate) fn definitions() -> Vec<CommandEntry> {
 
 fn cmd_version(_context: &mut ShellContext, _args: &[&str]) -> CommandResult {
     let meta = build_info::current();
-    let formatter = Formatter::new();
-    formatter.print_header(format!("Budget Core {}", meta.version));
-    let rows = vec![
-        ("CLI version", build_info::CLI_VERSION.to_string()),
-        ("Schema ver", format!("v{}", CURRENT_SCHEMA_VERSION)),
-        (
-            "Config schema",
-            format!("v{}", CONFIG_BACKUP_SCHEMA_VERSION),
-        ),
-        (
-            "Build hash",
-            format!("{} ({})", meta.git_hash, meta.git_status),
-        ),
-        ("Built at", meta.timestamp.to_string()),
-        ("Target", meta.target.to_string()),
-        ("Profile", meta.profile.to_string()),
-        ("Rustc", meta.rustc.to_string()),
-        #[cfg(feature = "ffi")]
-        ("FFI version", crate::ffi::FFI_VERSION.to_string()),
-    ];
-    let borrowed: Vec<_> = rows
-        .iter()
-        .map(|(label, value)| (*label, value.as_str()))
-        .collect();
-    formatter.print_two_column(&borrowed);
+    let mut table = Table::new(
+        Some(format!("Budget Core {}", meta.version)),
+        vec![TableColumn::new("FIELD", 18), TableColumn::new("VALUE", 32)],
+    );
+    table.add_row(vec![
+        "CLI version".to_string(),
+        build_info::CLI_VERSION.to_string(),
+    ]);
+    table.add_row(vec![
+        "Schema ver".to_string(),
+        format!("v{}", CURRENT_SCHEMA_VERSION),
+    ]);
+    table.add_row(vec![
+        "Config schema".to_string(),
+        format!("v{}", CONFIG_BACKUP_SCHEMA_VERSION),
+    ]);
+    table.add_row(vec![
+        "Build hash".to_string(),
+        format!("{} ({})", meta.git_hash, meta.git_status),
+    ]);
+    table.add_row(vec!["Built at".to_string(), meta.timestamp.to_string()]);
+    table.add_row(vec!["Target".to_string(), meta.target.to_string()]);
+    table.add_row(vec!["Profile".to_string(), meta.profile.to_string()]);
+    table.add_row(vec!["Rustc".to_string(), meta.rustc.to_string()]);
+    #[cfg(feature = "ffi")]
+    table.add_row(vec![
+        "FFI version".to_string(),
+        crate::ffi::FFI_VERSION.to_string(),
+    ]);
+
+    TableRenderer::render(&table);
     Ok(())
 }
 
