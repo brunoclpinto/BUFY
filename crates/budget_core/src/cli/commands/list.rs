@@ -1,11 +1,35 @@
 use std::collections::HashMap;
 
-use crate::cli::core::ShellContext;
+use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
 use crate::cli::io as cli_io;
+use crate::cli::menus::{list_menu, menu_error_to_command_error};
+use crate::cli::registry::CommandEntry;
 use crate::cli::ui::{Table, TableColumn, TableRenderer};
 use crate::core::errors::CliError;
 use crate::core::services::BudgetService;
 use crate::ledger::{Ledger, TimeInterval, Transaction};
+
+pub(crate) fn definitions() -> Vec<CommandEntry> {
+    vec![CommandEntry::new(
+        "list",
+        "List accounts, categories, transactions, simulations, ledgers...",
+        "list <accounts|categories|transactions|simulations|ledgers|backups|recurring>",
+        cmd_list,
+    )]
+}
+
+fn cmd_list(context: &mut ShellContext, args: &[&str]) -> CommandResult {
+    if context.mode() == CliMode::Interactive && args.is_empty() {
+        let selection = list_menu::show(context).map_err(menu_error_to_command_error)?;
+        if let Some(action) = selection {
+            handle_list_command(context, &[action.as_str()]).map_err(CommandError::from)
+        } else {
+            Ok(())
+        }
+    } else {
+        handle_list_command(context, args).map_err(CommandError::from)
+    }
+}
 
 pub fn handle_list_command(context: &ShellContext, args: &[&str]) -> Result<(), CliError> {
     let target = args

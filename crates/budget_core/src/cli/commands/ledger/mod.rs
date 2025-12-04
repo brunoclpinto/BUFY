@@ -2,9 +2,9 @@
 
 pub mod list_ledgers;
 
-use crate::cli::commands::{ledger_handlers, list, list_handlers};
+use crate::cli::commands::ledger_handlers;
 use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
-use crate::cli::menus::{ledger_menu, list_menu, menu_error_to_command_error};
+use crate::cli::menus::{ledger_menu, menu_error_to_command_error};
 use crate::cli::registry::CommandEntry;
 
 pub(crate) fn definitions() -> Vec<CommandEntry> {
@@ -14,12 +14,6 @@ pub(crate) fn definitions() -> Vec<CommandEntry> {
             "Ledger operations (new, load, save, backup, restore...)",
             "ledger <new|load|load-ledger|save|save-ledger|backup|list-backups|restore>",
             cmd_ledger,
-        ),
-        CommandEntry::new(
-            "list",
-            "List accounts, categories, transactions, simulations, ledgers...",
-            "list <accounts|categories|transactions|simulations|ledgers|backups>",
-            cmd_list,
         ),
         CommandEntry::new(
             "summary",
@@ -84,19 +78,6 @@ fn run_ledger_menu(context: &mut ShellContext) -> CommandResult {
         }
     } else {
         Ok(())
-    }
-}
-
-fn cmd_list(context: &mut ShellContext, args: &[&str]) -> CommandResult {
-    if context.mode() == CliMode::Interactive && args.is_empty() {
-        let selection = list_menu::show(context).map_err(menu_error_to_command_error)?;
-        if let Some(action) = selection {
-            list_handlers::dispatch(context, action.as_str())
-        } else {
-            Ok(())
-        }
-    } else {
-        list::handle_list_command(context, args).map_err(CommandError::from)
     }
 }
 

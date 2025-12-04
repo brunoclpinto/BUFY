@@ -7,7 +7,6 @@ pub mod config;
 pub mod ledger;
 pub mod ledger_handlers;
 pub mod list;
-pub mod list_handlers;
 pub mod recurring;
 pub mod simulation;
 pub mod simulation_handlers;
@@ -35,6 +34,7 @@ const ROOT_COMMAND_ORDER: &[&str] = &[
 pub(crate) fn all_entries() -> Vec<CommandEntry> {
     let mut commands = Vec::new();
     commands.extend(ledger::definitions());
+    commands.extend(list::definitions());
     commands.extend(account::definitions());
     commands.extend(category::definitions());
     commands.extend(transaction::definitions());
