@@ -1,5 +1,4 @@
 pub mod account;
-pub mod account_handlers;
 pub mod backup;
 pub mod category;
 pub mod category_handlers;

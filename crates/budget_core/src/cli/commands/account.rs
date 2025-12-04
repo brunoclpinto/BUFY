@@ -1,7 +1,7 @@
 pub mod list_accounts;
 
-use crate::cli::commands::account_handlers;
 use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
+use crate::cli::io;
 use crate::cli::menus::{account_menu, menu_error_to_command_error};
 use crate::cli::registry::CommandEntry;
 
@@ -42,14 +42,54 @@ fn dispatch_account_action(
     args: &[&str],
 ) -> CommandResult {
     match action.to_lowercase().as_str() {
-        "add" => account_handlers::handle_add(context, args),
-        "edit" => account_handlers::handle_edit(context, args),
-        "list" => account_handlers::handle_list(context),
-        "remove" => account_handlers::handle_remove(context),
-        "show" => account_handlers::handle_show(context),
+        "add" => handle_add(context, args),
+        "edit" => handle_edit(context, args),
+        "list" => handle_list(context),
+        "remove" => handle_remove(context),
+        "show" => handle_show(context),
         other => Err(CommandError::InvalidArguments(format!(
             "unknown account subcommand `{}`",
             other
         ))),
     }
+}
+
+fn handle_add(context: &mut ShellContext, args: &[&str]) -> CommandResult {
+    if context.mode() == CliMode::Interactive && args.is_empty() {
+        context.run_account_add_wizard()
+    } else {
+        context.add_account_script(args)
+    }
+}
+
+fn handle_edit(context: &mut ShellContext, args: &[&str]) -> CommandResult {
+    if context.mode() != CliMode::Interactive {
+        return Err(CommandError::InvalidArguments(
+            "account edit is only available in interactive mode".into(),
+        ));
+    }
+    let index = if let Some(value) = args.first() {
+        value
+            .parse::<usize>()
+            .map_err(|_| CommandError::InvalidArguments("account index must be numeric".into()))?
+    } else {
+        match context.select_account_index("Select an account to edit:")? {
+            Some(index) => index,
+            None => return Ok(()),
+        }
+    };
+    context.run_account_edit_wizard(index)
+}
+
+fn handle_list(context: &mut ShellContext) -> CommandResult {
+    list_accounts::run_list_accounts(context)
+}
+
+fn handle_show(context: &mut ShellContext) -> CommandResult {
+    list_accounts::run_list_accounts(context)
+}
+
+fn handle_remove(_context: &mut ShellContext) -> CommandResult {
+    io::print_warning("Account removal is not available yet.");
+    Ok(())
 }
