@@ -1,10 +1,9 @@
 use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
 use crate::cli::io as cli_io;
-use crate::cli::ui::detail_actions::{DetailAction, DetailActionResult, DetailActionsMenu};
+use crate::cli::ui::detail_actions::DetailAction;
 use crate::cli::ui::detail_view::DetailView;
-use crate::cli::ui::list_selector::{ListSelectionResult, ListSelector};
+use crate::cli::ui::run_selectable_table;
 use crate::cli::ui::table_renderer::{Alignment, Table, TableColumn};
-use crate::cli::ui::test_mode;
 use bufy_storage_json::BackupMetadata;
 
 pub fn run_list_backups(context: &mut ShellContext) -> CommandResult {
@@ -16,26 +15,23 @@ pub fn run_list_backups(context: &mut ShellContext) -> CommandResult {
         }
     };
 
-    loop {
-        let entries = gather_entries(context, &ledger_name)?;
-        if entries.is_empty() {
-            cli_io::print_warning("No backups found.");
-            return Ok(());
-        }
-
-        let table = build_table(&entries);
-        match select_row(context, &table, entries.len()) {
-            RowSelection::Exit => return Ok(()),
-            RowSelection::Index(index) => {
-                let entry = &entries[index];
-                let _ = cli_io::println_text("");
-                let detail = build_detail_view(entry).render();
-                let _ = cli_io::println_text(&detail);
-                handle_actions(context, &ledger_name, entry)?;
-                let _ = cli_io::println_text("");
-            }
-        }
-    }
+    let gather_name = ledger_name.clone();
+    let action_name = ledger_name.clone();
+    run_selectable_table(
+        context,
+        "backup_selector",
+        "backup_actions",
+        Some("No backups found."),
+        move |ctx| gather_entries(ctx, &gather_name),
+        build_table,
+        build_detail_view,
+        |_| build_actions(),
+        move |ctx, entry, action| match action.id.as_str() {
+            "restore" => restore_backup(ctx, &action_name, entry),
+            "delete" => delete_backup(ctx, &action_name, entry),
+            _ => Ok(()),
+        },
+    )
 }
 
 fn gather_entries(
@@ -103,6 +99,13 @@ fn build_detail_view(entry: &BackupMetadata) -> DetailView {
         .with_field("size_kb", format_size(entry.size_bytes))
 }
 
+fn build_actions() -> Vec<DetailAction> {
+    vec![
+        DetailAction::new("restore", "RESTORE", "Restore this backup"),
+        DetailAction::new("delete", "DELETE", "Delete this backup"),
+    ]
+}
+
 fn format_size(size_bytes: u64) -> String {
     let kb = (size_bytes as f64) / 1024.0;
     if kb < 1.0 {
@@ -110,58 +113,6 @@ fn format_size(size_bytes: u64) -> String {
     } else {
         format!("{:.1} KB", kb)
     }
-}
-
-enum RowSelection {
-    Index(usize),
-    Exit,
-}
-
-fn select_row(_context: &ShellContext, table: &Table, _len: usize) -> RowSelection {
-    if let Some(keys) = test_mode::next_selector_events("backup_selector") {
-        return match ListSelector::new(table).run_simulated(&keys) {
-            ListSelectionResult::Selected(index) => RowSelection::Index(index),
-            ListSelectionResult::Escaped | ListSelectionResult::Empty => RowSelection::Exit,
-        };
-    }
-
-    match ListSelector::new(table).run() {
-        ListSelectionResult::Selected(index) => RowSelection::Index(index),
-        ListSelectionResult::Escaped | ListSelectionResult::Empty => RowSelection::Exit,
-    }
-}
-
-fn handle_actions(
-    context: &mut ShellContext,
-    ledger_name: &str,
-    entry: &BackupMetadata,
-) -> CommandResult {
-    let actions = vec![
-        DetailAction::new("restore", "RESTORE", "Restore this backup"),
-        DetailAction::new("delete", "DELETE", "Delete this backup"),
-    ];
-
-    let action = match choose_action(context, &actions) {
-        DetailActionResult::Selected(action) => Some(action),
-        DetailActionResult::Escaped | DetailActionResult::Empty => None,
-    };
-
-    if let Some(action) = action {
-        match action.id.as_str() {
-            "restore" => restore_backup(context, ledger_name, entry)?,
-            "delete" => delete_backup(context, ledger_name, entry)?,
-            _ => {}
-        }
-    }
-    Ok(())
-}
-
-fn choose_action(_context: &ShellContext, actions: &[DetailAction]) -> DetailActionResult {
-    if let Some(keys) = test_mode::next_action_events("backup_actions") {
-        return DetailActionsMenu::new("Actions", actions.to_vec()).run_simulated(&keys);
-    }
-
-    DetailActionsMenu::new("Actions", actions.to_vec()).run()
 }
 
 fn restore_backup(

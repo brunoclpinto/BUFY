@@ -6,7 +6,7 @@ use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
 use crate::cli::io as cli_io;
 use crate::cli::ui::detail_actions::{DetailAction, DetailActionResult, DetailActionsMenu};
 use crate::cli::ui::detail_view::DetailView;
-use crate::cli::ui::list_selector::{ListSelectionResult, ListSelector};
+use crate::cli::ui::run_selectable_table;
 use crate::cli::ui::table_renderer::{Alignment, Table, TableColumn};
 use crate::cli::ui::test_mode;
 use crate::core::services::{BudgetService, CategoryService};
@@ -23,26 +23,17 @@ pub fn run_list_categories(context: &mut ShellContext) -> CommandResult {
         }
     }
 
-    loop {
-        let entries = gather_entries(context)?;
-        if entries.is_empty() {
-            cli_io::print_warning("No categories in this ledger.");
-            return Ok(());
-        }
-
-        let table = build_table(&entries);
-        match select_row(context, &table, entries.len()) {
-            RowSelection::Exit => return Ok(()),
-            RowSelection::Index(index) => {
-                let entry = &entries[index];
-                let _ = cli_io::println_text("");
-                let detail = build_detail_view(entry).render();
-                let _ = cli_io::println_text(&detail);
-                handle_actions(context, entry)?;
-                let _ = cli_io::println_text("");
-            }
-        }
-    }
+    run_selectable_table(
+        context,
+        "category_selector",
+        "category_actions",
+        Some("No categories in this ledger."),
+        |ctx| gather_entries(ctx),
+        build_table,
+        build_detail_view,
+        |_| build_actions(),
+        |ctx, entry, action| execute_action(ctx, entry, action.id.as_str()),
+    )
 }
 
 struct CategoryEntry {
@@ -218,46 +209,6 @@ fn build_actions() -> Vec<DetailAction> {
         DetailAction::new("delete", "DELETE", "Delete this category"),
         DetailAction::new("budget", "BUDGET", "Adjust category budget"),
     ]
-}
-
-enum RowSelection {
-    Index(usize),
-    Exit,
-}
-
-fn select_row(_context: &ShellContext, table: &Table, _len: usize) -> RowSelection {
-    if let Some(keys) = test_mode::next_selector_events("category_selector") {
-        return match ListSelector::new(table).run_simulated(&keys) {
-            ListSelectionResult::Selected(index) => RowSelection::Index(index),
-            ListSelectionResult::Escaped | ListSelectionResult::Empty => RowSelection::Exit,
-        };
-    }
-
-    match ListSelector::new(table).run() {
-        ListSelectionResult::Selected(index) => RowSelection::Index(index),
-        ListSelectionResult::Escaped | ListSelectionResult::Empty => RowSelection::Exit,
-    }
-}
-
-fn handle_actions(context: &mut ShellContext, entry: &CategoryEntry) -> CommandResult {
-    let actions = build_actions();
-    let action = match choose_action(context, &actions) {
-        DetailActionResult::Selected(action) => Some(action),
-        DetailActionResult::Escaped | DetailActionResult::Empty => None,
-    };
-
-    if let Some(action) = action {
-        execute_action(context, entry, action.id.as_str())?;
-    }
-    Ok(())
-}
-
-fn choose_action(_context: &ShellContext, actions: &[DetailAction]) -> DetailActionResult {
-    if let Some(keys) = test_mode::next_action_events("category_actions") {
-        return DetailActionsMenu::new("Actions", actions.to_vec()).run_simulated(&keys);
-    }
-
-    DetailActionsMenu::new("Actions", actions.to_vec()).run()
 }
 
 fn execute_action(
