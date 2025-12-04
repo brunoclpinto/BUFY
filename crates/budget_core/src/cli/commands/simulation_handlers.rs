@@ -39,7 +39,7 @@ pub fn handle_create(context: &mut ShellContext, args: &[&str]) -> CommandResult
     };
     context.with_ledger_mut(|ledger| {
         ledger
-            .create_simulation(name.clone(), notes.clone())
+            .create_simulation(name.clone(), notes.clone(), context.clock.as_ref())
             .map(|_| ())
             .map_err(CommandError::from)
     })?;
@@ -104,7 +104,11 @@ pub fn handle_apply(context: &mut ShellContext, args: &[&str]) -> CommandResult 
                 CommandError::InvalidArguments(format!("simulation `{}` not found", name))
             })
     })?;
-    context.with_ledger_mut(|ledger| ledger.apply_simulation(&name).map_err(CommandError::from))?;
+    context.with_ledger_mut(|ledger| {
+        ledger
+            .apply_simulation(&name, context.clock.as_ref())
+            .map_err(CommandError::from)
+    })?;
     if context
         .active_simulation_name()
         .map(|active| active.eq_ignore_ascii_case(&name))

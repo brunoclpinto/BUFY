@@ -2,13 +2,16 @@ use std::sync::{Arc, RwLock};
 
 use budget_core::cli::commands::simulation::list_simulations;
 use budget_core::cli::core::{CliMode, ShellContext};
+use budget_core::cli::formatters::CliFormatters;
 use budget_core::cli::registry::CommandRegistry;
+use budget_core::cli::system_clock::SystemClock;
 use budget_core::cli::ui::test_mode::{
     install_action_events, install_selector_events, reset_action_events, reset_selector_events,
 };
 use budget_core::config::{Config, ConfigManager};
 use budget_core::core::ledger_manager::LedgerManager;
 use budget_core::ledger::{BudgetPeriod, Ledger, LedgerExt};
+use bufy_core::Clock;
 use bufy_storage_json::JsonLedgerStorage as JsonStorage;
 use chrono::Utc;
 use crossterm::event::KeyCode;
@@ -26,12 +29,16 @@ fn build_context(temp: &TempDir) -> ShellContext {
         ConfigManager::with_base_dir(temp.path().to_path_buf()).unwrap(),
     ));
     let config = Arc::new(RwLock::new(Config::default()));
+    let formatters = CliFormatters::new(config.clone());
+    let clock: Arc<dyn Clock> = Arc::new(SystemClock::default());
     ShellContext {
         mode: CliMode::Script,
         registry: CommandRegistry::new(),
         ledger_manager: manager,
         theme: ColorfulTheme::default(),
         storage,
+        clock,
+        formatters,
         config_manager,
         config,
         ledger_path: None,
@@ -44,8 +51,9 @@ fn build_context(temp: &TempDir) -> ShellContext {
 
 fn sample_ledger_with_simulations() -> Ledger {
     let mut ledger = Ledger::new("Demo", BudgetPeriod::monthly());
-    ledger.create_simulation("Alpha", None).unwrap();
-    ledger.create_simulation("Beta", None).unwrap();
+    let clock = SystemClock;
+    ledger.create_simulation("Alpha", None, &clock).unwrap();
+    ledger.create_simulation("Beta", None, &clock).unwrap();
     for sim in ledger.simulations.iter_mut() {
         sim.updated_at = Utc::now();
     }

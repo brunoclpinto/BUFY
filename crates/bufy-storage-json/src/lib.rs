@@ -7,7 +7,7 @@ use std::{
 
 use bufy_core::{
     storage::{LedgerBackupInfo, LedgerStorage},
-    BudgetService, CoreError,
+    BudgetService, Clock, CoreError,
 };
 use bufy_domain::{Ledger, LedgerBudgetPeriod};
 use chrono::{DateTime, NaiveDateTime, Utc};
@@ -55,9 +55,10 @@ impl JsonLedgerStorage {
 
     pub fn list_ledger_metadata(&self) -> Result<Vec<LedgerMetadata>, CoreError> {
         let mut entries = Vec::new();
+        let clock = StorageClock;
         for slug in self.list_ledgers()? {
             let ledger = self.load_ledger(&slug)?;
-            let summary = BudgetService::summarize_current_period(&ledger);
+            let summary = BudgetService::summarize_current_period(&ledger, &clock);
             let path = self.ledger_path(&slug);
             entries.push(LedgerMetadata {
                 slug: slug.clone(),
@@ -173,6 +174,15 @@ impl JsonLedgerStorage {
             let _ = fs::remove_file(entry.path);
         }
         Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct StorageClock;
+
+impl Clock for StorageClock {
+    fn now(&self) -> chrono::DateTime<Utc> {
+        Utc::now()
     }
 }
 

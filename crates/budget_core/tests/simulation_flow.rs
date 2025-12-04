@@ -1,3 +1,4 @@
+use budget_core::cli::system_clock::SystemClock;
 use budget_core::ledger::{
     account::AccountKind, category::CategoryKind, Account, BudgetPeriod, Ledger, LedgerExt,
     SimulationStatus, TimeInterval, TimeUnit, Transaction,
@@ -27,8 +28,9 @@ fn simulation_round_trip_and_apply() {
     let txn = Transaction::new(checking, savings, None, date(2025, 1, 5), 100.0);
     ledger.add_transaction(txn);
 
+    let clock = SystemClock;
     ledger
-        .create_simulation("WhatIf", Some("Test".into()))
+        .create_simulation("WhatIf", Some("Test".into()), &clock)
         .unwrap();
     let simulated = Transaction::new(checking, savings, None, date(2025, 1, 10), 250.0);
     ledger
@@ -43,7 +45,7 @@ fn simulation_round_trip_and_apply() {
         .expect("impact");
     assert!(impact.simulated.totals.budgeted > impact.base.totals.budgeted);
 
-    ledger.apply_simulation("WhatIf").unwrap();
+    ledger.apply_simulation("WhatIf", &clock).unwrap();
     let sim = ledger.simulation("WhatIf").unwrap();
     assert_eq!(sim.status, SimulationStatus::Applied);
     assert!(
@@ -64,7 +66,8 @@ fn simulations_survive_serialization() {
             unit: TimeUnit::Month,
         }),
     );
-    ledger.create_simulation("PlanA", None).unwrap();
+    let clock = SystemClock;
+    ledger.create_simulation("PlanA", None, &clock).unwrap();
     let json = serde_json::to_string(&ledger).unwrap();
     let roundtrip: Ledger = serde_json::from_str(&json).unwrap();
     assert!(roundtrip
@@ -91,7 +94,8 @@ fn simulation_exclusion_updates_budget_impact() {
     let txn = Transaction::new(from, to, Some(housing_category), date(2025, 1, 5), 200.0);
     let txn_id = ledger.add_transaction(txn);
 
-    ledger.create_simulation("Trim", None).unwrap();
+    let clock = SystemClock;
+    ledger.create_simulation("Trim", None, &clock).unwrap();
     ledger
         .exclude_transaction_in_simulation("Trim", txn_id)
         .unwrap();

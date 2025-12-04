@@ -1,3 +1,4 @@
+use budget_core::cli::system_clock::SystemClock;
 use budget_core::ledger::{
     account::AccountKind, category::CategoryKind, Account, BudgetPeriod, DateWindow, Ledger,
     LedgerExt, TimeInterval, TimeUnit, Transaction,
@@ -84,8 +85,9 @@ fn stress_repeated_save_load_and_forecast_cycles() {
     let mut ledger = seed_ledger();
 
     // Simulation with an additional expense to exercise overlay calculations.
+    let clock = SystemClock;
     ledger
-        .create_simulation("Scenario", Some("Stress overlay".into()))
+        .create_simulation("Scenario", Some("Stress overlay".into()), &clock)
         .unwrap();
     let scenario_txn = Transaction::new(
         ledger.accounts[1].id, // checking
@@ -134,7 +136,7 @@ fn stress_repeated_save_load_and_forecast_cycles() {
             "forecast should respect max occurrence bound"
         );
 
-        if let Ok(impact) = ledger.summarize_simulation_current("Scenario") {
+        if let Ok(impact) = ledger.summarize_simulation_current("Scenario", &clock) {
             assert_eq!(impact.simulation_name, "Scenario");
             assert!(
                 impact.simulated.totals.budgeted >= impact.base.totals.budgeted - 200.0,

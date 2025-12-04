@@ -2,13 +2,16 @@ use std::sync::{Arc, RwLock};
 
 use budget_core::cli::commands::transaction::list_transactions;
 use budget_core::cli::core::{CliMode, ShellContext};
+use budget_core::cli::formatters::CliFormatters;
 use budget_core::cli::registry::CommandRegistry;
+use budget_core::cli::system_clock::SystemClock;
 use budget_core::cli::ui::test_mode::{
     install_action_events, install_selector_events, reset_action_events, reset_selector_events,
 };
 use budget_core::config::{Config, ConfigManager};
 use budget_core::core::ledger_manager::LedgerManager;
 use budget_core::ledger::{BudgetPeriod, Ledger};
+use bufy_core::Clock;
 use bufy_domain::{
     account::{Account, AccountKind},
     category::{Category, CategoryKind},
@@ -31,12 +34,16 @@ fn build_context(temp: &TempDir) -> ShellContext {
         ConfigManager::with_base_dir(temp.path().to_path_buf()).unwrap(),
     ));
     let config = Arc::new(RwLock::new(Config::default()));
+    let formatters = CliFormatters::new(config.clone());
+    let clock: Arc<dyn Clock> = Arc::new(SystemClock::default());
     ShellContext {
         mode: CliMode::Script,
         registry: CommandRegistry::new(),
         ledger_manager: manager,
         theme: ColorfulTheme::default(),
         storage,
+        clock,
+        formatters,
         config_manager,
         config,
         ledger_path: None,

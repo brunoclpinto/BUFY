@@ -12,9 +12,10 @@ use crate::{
     core::ledger_manager::LedgerManager,
     ledger::Simulation,
 };
+use bufy_core::Clock;
 use bufy_storage_json::JsonLedgerStorage as JsonStorage;
 
-use super::registry::CommandRegistry;
+use super::{formatters::CliFormatters, registry::CommandRegistry};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CliMode {
@@ -28,6 +29,8 @@ pub struct ShellContext {
     pub ledger_manager: Arc<RwLock<LedgerManager>>,
     pub theme: ColorfulTheme,
     pub storage: JsonStorage,
+    pub clock: Arc<dyn Clock>,
+    pub formatters: CliFormatters,
     pub config_manager: Arc<RwLock<ConfigManager>>,
     pub config: Arc<RwLock<Config>>,
     pub ledger_path: Option<PathBuf>,

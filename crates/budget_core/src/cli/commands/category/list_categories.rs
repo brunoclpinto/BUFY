@@ -62,7 +62,7 @@ fn gather_entries(context: &ShellContext) -> Result<Vec<CategoryEntry>, CommandE
         if ledger.categories.is_empty() {
             return Ok(Vec::new());
         }
-        let summary = BudgetService::summarize_current_period(ledger);
+        let summary = BudgetService::summarize_current_period(ledger, context.clock.as_ref());
         let spent_map: HashMap<Uuid, f64> = summary
             .per_category
             .iter()

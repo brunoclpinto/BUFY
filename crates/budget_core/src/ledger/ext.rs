@@ -10,13 +10,15 @@ use bufy_domain::{
     ForecastReport, Ledger,
 };
 
-use bufy_core::{BudgetService, CoreError, ForecastService, SimulationService, SummaryService};
+use bufy_core::{
+    BudgetService, Clock, CoreError, ForecastService, SimulationService, SummaryService,
+};
 
 /// Provides higher-level helpers that previously lived on [`Ledger`].
 pub trait LedgerExt {
     fn budget_window_for(&self, reference: NaiveDate) -> DateWindow;
     fn summarize_period_containing(&self, date: NaiveDate) -> BudgetSummary;
-    fn category_budget_statuses_current(&self) -> Vec<CategoryBudgetStatus>;
+    fn category_budget_statuses_current(&self, clock: &dyn Clock) -> Vec<CategoryBudgetStatus>;
     fn forecast_window_report(
         &self,
         window: DateWindow,
@@ -32,11 +34,13 @@ pub trait LedgerExt {
     fn summarize_simulation_current(
         &self,
         simulation_name: &str,
+        clock: &dyn Clock,
     ) -> Result<SimulationBudgetImpact, CoreError>;
     fn create_simulation(
         &mut self,
         name: impl Into<String>,
         notes: Option<String>,
+        clock: &dyn Clock,
     ) -> Result<&Simulation, CoreError>;
     fn add_simulation_transaction(
         &mut self,
@@ -53,7 +57,7 @@ pub trait LedgerExt {
         sim_name: &str,
         patch: SimulationTransactionPatch,
     ) -> Result<(), CoreError>;
-    fn apply_simulation(&mut self, sim_name: &str) -> Result<(), CoreError>;
+    fn apply_simulation(&mut self, sim_name: &str, clock: &dyn Clock) -> Result<(), CoreError>;
     fn discard_simulation(&mut self, sim_name: &str) -> Result<(), CoreError>;
     fn simulation_changes(&self, sim_name: &str) -> Result<&[SimulationChange], CoreError>;
 }
@@ -67,8 +71,8 @@ impl LedgerExt for Ledger {
         BudgetService::summarize_period_containing(self, date)
     }
 
-    fn category_budget_statuses_current(&self) -> Vec<CategoryBudgetStatus> {
-        SummaryService::current_category_budget_statuses(self)
+    fn category_budget_statuses_current(&self, clock: &dyn Clock) -> Vec<CategoryBudgetStatus> {
+        SummaryService::current_category_budget_statuses(self, clock)
     }
 
     fn forecast_window_report(
@@ -92,8 +96,9 @@ impl LedgerExt for Ledger {
     fn summarize_simulation_current(
         &self,
         simulation_name: &str,
+        clock: &dyn Clock,
     ) -> Result<SimulationBudgetImpact, CoreError> {
-        let today = chrono::Utc::now().date_naive();
+        let today = clock.today();
         let window = self.budget_window_containing(today);
         let scope = window.scope(today);
         SimulationService::summarize_in_window(self, simulation_name, window, scope)
@@ -103,8 +108,9 @@ impl LedgerExt for Ledger {
         &mut self,
         name: impl Into<String>,
         notes: Option<String>,
+        clock: &dyn Clock,
     ) -> Result<&Simulation, CoreError> {
-        SimulationService::create(self, name, notes)
+        SimulationService::create(self, name, notes, clock)
     }
 
     fn add_simulation_transaction(
@@ -131,8 +137,8 @@ impl LedgerExt for Ledger {
         SimulationService::modify_transaction(self, sim_name, patch)
     }
 
-    fn apply_simulation(&mut self, sim_name: &str) -> Result<(), CoreError> {
-        SimulationService::apply(self, sim_name)
+    fn apply_simulation(&mut self, sim_name: &str, clock: &dyn Clock) -> Result<(), CoreError> {
+        SimulationService::apply(self, sim_name, clock)
     }
 
     fn discard_simulation(&mut self, sim_name: &str) -> Result<(), CoreError> {

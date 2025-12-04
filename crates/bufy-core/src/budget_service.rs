@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use chrono::{Duration, NaiveDate, Utc};
+use chrono::{Duration, NaiveDate};
 use uuid::Uuid;
 
 use bufy_domain::{
@@ -18,13 +18,15 @@ use bufy_domain::{
     Ledger,
 };
 
+use crate::Clock;
+
 /// Stateless budgeting utilities that operate over [`Ledger`] snapshots.
 pub struct BudgetService;
 
 impl BudgetService {
     /// Summarizes the ledger's current budget period.
-    pub fn summarize_current_period(ledger: &Ledger) -> BudgetSummary {
-        let today = Utc::now().date_naive();
+    pub fn summarize_current_period(ledger: &Ledger, clock: &dyn Clock) -> BudgetSummary {
+        let today = clock.today();
         Self::summarize_period_containing(ledger, today)
     }
 

@@ -1,6 +1,5 @@
 //! Simulation orchestration helpers built on top of the domain ledger.
 
-use chrono::Utc;
 use uuid::Uuid;
 
 use bufy_domain::{
@@ -13,18 +12,18 @@ use bufy_domain::{
     Ledger,
 };
 
-use crate::budget_service::BudgetService;
-use crate::CoreError;
+use crate::{budget_service::BudgetService, Clock, CoreError};
 
 pub struct SimulationService;
 
 impl SimulationService {
     /// Creates a new simulation within the ledger.
-    pub fn create(
-        ledger: &mut Ledger,
+    pub fn create<'a>(
+        ledger: &'a mut Ledger,
         name: impl Into<String>,
         notes: Option<String>,
-    ) -> Result<&Simulation, CoreError> {
+        clock: &dyn Clock,
+    ) -> Result<&'a Simulation, CoreError> {
         let name = name.into();
         if ledger
             .simulations()
@@ -36,7 +35,7 @@ impl SimulationService {
                 name
             )));
         }
-        let now = Utc::now();
+        let now = clock.now();
         ledger.simulations.push(Simulation {
             id: Uuid::new_v4(),
             name,
@@ -117,14 +116,14 @@ impl SimulationService {
     }
 
     /// Applies a simulation, mutating the ledger transactions.
-    pub fn apply(ledger: &mut Ledger, sim_name: &str) -> Result<(), CoreError> {
+    pub fn apply(ledger: &mut Ledger, sim_name: &str, clock: &dyn Clock) -> Result<(), CoreError> {
         let index = ledger
             .simulations()
             .iter()
             .position(|sim| sim.name.eq_ignore_ascii_case(sim_name))
             .ok_or_else(|| CoreError::SimulationNotFound(sim_name.into()))?;
         let mut simulation = ledger.simulations.remove(index);
-        SimulationEngine::apply(ledger, &mut simulation)?;
+        SimulationEngine::apply(ledger, &mut simulation, clock)?;
         ledger.simulations.insert(index, simulation);
         ledger.touch();
         Ok(())
@@ -207,7 +206,11 @@ impl SimulationEngine {
         clone
     }
 
-    fn apply(ledger: &mut Ledger, simulation: &mut Simulation) -> Result<(), CoreError> {
+    fn apply(
+        ledger: &mut Ledger,
+        simulation: &mut Simulation,
+        clock: &dyn Clock,
+    ) -> Result<(), CoreError> {
         if simulation.status != SimulationStatus::Pending {
             return Err(CoreError::InvalidOperation(format!(
                 "simulation `{}` is not pending",
@@ -218,7 +221,7 @@ impl SimulationEngine {
         Self::apply_changes(&mut ledger.transactions, &simulation.changes)?;
         ledger.refresh_recurrence_metadata();
 
-        let now = Utc::now();
+        let now = clock.now();
         simulation.status = SimulationStatus::Applied;
         simulation.applied_at = Some(now);
         simulation.updated_at = now;

@@ -30,7 +30,7 @@ use crate::{
         TimeInterval, TimeUnit, Transaction, TransactionStatus,
     },
 };
-use bufy_core::storage::LedgerStorage;
+use bufy_core::{storage::LedgerStorage, Clock};
 use bufy_domain::currency::{
     format_currency_value, format_currency_value_with_precision, format_date,
 };
@@ -38,6 +38,7 @@ use bufy_storage_json::{load_ledger_from_path, JsonLedgerStorage as JsonStorage,
 
 use bufy_domain::BudgetPeriod as CategoryBudgetPeriod;
 
+use crate::cli::formatters::CliFormatters;
 use crate::cli::forms::{
     AccountFormData, AccountInitialData, AccountWizard, CategoryFormData, CategoryInitialData,
     CategoryWizard, FormEngine, FormResult, TransactionFormData, TransactionInitialData,
@@ -59,6 +60,7 @@ use super::io as cli_io;
 use super::output::render_table as output_table;
 use super::registry::{CommandEntry, CommandRegistry};
 pub use crate::cli::shell_context::{CliMode, ShellContext};
+use crate::cli::system_clock::SystemClock;
 use crate::cli::ui::banner::Banner;
 use crate::cli::ui::formatting::Formatter;
 use crate::cli::ui::prompts;
@@ -158,10 +160,12 @@ impl ShellContext {
         .map_err(BudgetError::from)
         .map_err(CliError::from)?;
         let manager = Arc::new(RwLock::new(LedgerManager::new(Box::new(storage.clone()))));
+        let clock: Arc<dyn Clock> = Arc::new(SystemClock::default());
         let config_manager_raw = config::default_manager().map_err(CliError::from)?;
         let config = config_manager_raw.load().map_err(CliError::from)?;
         cli_io::apply_config(&config);
         let config = Arc::new(RwLock::new(config));
+        let formatters = CliFormatters::new(config.clone());
         let config_manager = Arc::new(RwLock::new(config_manager_raw));
 
         let mut app = ShellContext {
@@ -170,6 +174,8 @@ impl ShellContext {
             ledger_manager: manager,
             theme: ColorfulTheme::default(),
             storage,
+            clock,
+            formatters,
             config_manager,
             config,
             ledger_path: None,
@@ -1896,7 +1902,7 @@ impl ShellContext {
             .filter(|value| !value.is_empty());
         let data = self.with_ledger(|ledger| {
             let mut statuses: Vec<CategoryBudgetStatus> = ledger
-                .category_budget_statuses_current()
+                .category_budget_statuses_current(self.clock.as_ref())
                 .into_iter()
                 .filter(|status| status.budget.is_some())
                 .collect();

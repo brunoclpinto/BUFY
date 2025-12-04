@@ -1,6 +1,6 @@
 //! Aggregation helpers for budgeting summaries and forecasts.
 
-use chrono::{NaiveDate, Utc};
+use chrono::NaiveDate;
 
 use bufy_domain::{
     ledger::{
@@ -13,7 +13,7 @@ use bufy_domain::{
 
 use crate::{
     budget_service::BudgetService, forecast_service::ForecastService,
-    simulation_service::SimulationService, CoreError,
+    simulation_service::SimulationService, Clock, CoreError,
 };
 
 /// Aggregates ledger data for summary and forecasting scenarios.
@@ -21,8 +21,8 @@ pub struct SummaryService;
 
 impl SummaryService {
     /// Summarizes the ledger's current budget window.
-    pub fn current_totals(ledger: &Ledger) -> BudgetSummary {
-        BudgetService::summarize_current_period(ledger)
+    pub fn current_totals(ledger: &Ledger, clock: &dyn Clock) -> BudgetSummary {
+        BudgetService::summarize_current_period(ledger, clock)
     }
 
     /// Summarizes the supplied window and scope against the ledger.
@@ -44,8 +44,11 @@ impl SummaryService {
     }
 
     /// Returns category budget usage for the ledger's current budgeting period.
-    pub fn current_category_budget_statuses(ledger: &Ledger) -> Vec<CategoryBudgetStatus> {
-        let today = Utc::now().date_naive();
+    pub fn current_category_budget_statuses(
+        ledger: &Ledger,
+        clock: &dyn Clock,
+    ) -> Vec<CategoryBudgetStatus> {
+        let today = clock.today();
         let window = ledger.budget_window_containing(today);
         let scope = window.scope(today);
         BudgetService::category_budget_statuses(ledger, window, scope)
