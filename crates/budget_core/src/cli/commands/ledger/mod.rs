@@ -2,7 +2,7 @@
 
 pub mod list_ledgers;
 
-use crate::cli::commands::{ledger_handlers, list_handlers};
+use crate::cli::commands::{ledger_handlers, list, list_handlers};
 use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
 use crate::cli::menus::{ledger_menu, list_menu, menu_error_to_command_error};
 use crate::cli::registry::CommandEntry;
@@ -95,12 +95,8 @@ fn cmd_list(context: &mut ShellContext, args: &[&str]) -> CommandResult {
         } else {
             Ok(())
         }
-    } else if let Some(target) = args.first() {
-        list_handlers::dispatch(context, target)
     } else {
-        Err(CommandError::InvalidArguments(
-            "usage: list <accounts|categories|transactions|simulations|ledgers|backups>".into(),
-        ))
+        list::handle_list_command(context, args).map_err(CommandError::from)
     }
 }
 

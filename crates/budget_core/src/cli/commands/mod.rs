@@ -6,6 +6,7 @@ pub mod category_handlers;
 pub mod config;
 pub mod ledger;
 pub mod ledger_handlers;
+pub mod list;
 pub mod list_handlers;
 pub mod recurring;
 pub mod simulation;
