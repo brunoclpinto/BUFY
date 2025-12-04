@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
+use crate::cli::formatters::CliFormatters;
 use crate::cli::io as cli_io;
 use crate::cli::menus::{list_menu, menu_error_to_command_error};
 use crate::cli::registry::CommandEntry;
@@ -8,6 +9,7 @@ use crate::cli::ui::{Table, TableColumn, TableRenderer};
 use crate::core::errors::CliError;
 use crate::core::services::BudgetService;
 use crate::ledger::{Ledger, TimeInterval, Transaction};
+use bufy_core::{CurrencyFormatter, DateFormatter};
 
 pub(crate) fn definitions() -> Vec<CommandEntry> {
     vec![CommandEntry::new(
@@ -61,23 +63,25 @@ fn list_ledgers(context: &ShellContext) -> Result<(), CliError> {
         vec![
             TableColumn::new("NAME", 20),
             TableColumn::new("UPDATED", 24),
-            TableColumn::new("BUDGETED", 12),
-            TableColumn::new("AVAILABLE", 12),
+            TableColumn::new("BUDGETED", 14),
+            TableColumn::new("AVAILABLE", 14),
         ],
     );
+    let formatters = context.formatters.clone();
+    let style = context.ui_style.clone();
     for entry in metadata {
-        table.add_row(vec![
-            entry.name,
-            entry.updated_at.to_rfc3339(),
-            format!("{:.2}", entry.total_budgeted),
-            format!("{:.2}", entry.total_available),
-        ]);
+        let updated = formatters.format_date(entry.updated_at.date_naive());
+        let budgeted = formatters.format_amount(entry.total_budgeted, "");
+        let available = formatters.format_amount(entry.total_available, "");
+        table.add_row(vec![entry.name, updated, budgeted, available]);
     }
-    TableRenderer::render(&table);
+    TableRenderer::render(&table, &style);
     Ok(())
 }
 
 fn list_accounts(context: &ShellContext) -> Result<(), CliError> {
+    let style = context.ui_style.clone();
+    let formatters = context.formatters.clone();
     context
         .with_ledger(|ledger| {
             if ledger.accounts.is_empty() {
@@ -116,18 +120,20 @@ fn list_accounts(context: &ShellContext) -> Result<(), CliError> {
                     account.name.clone(),
                     account.kind.to_string(),
                     category,
-                    format!("{:.2}", totals.0),
-                    format!("{:.2}", totals.1),
+                    formatters.format_amount(totals.0, ""),
+                    formatters.format_amount(totals.1, ""),
                 ]);
             }
 
-            TableRenderer::render(&table);
+            TableRenderer::render(&table, &style);
             Ok(())
         })
         .map_err(CliError::from)
 }
 
 fn list_categories(context: &ShellContext) -> Result<(), CliError> {
+    let style = context.ui_style.clone();
+    let formatters = context.formatters.clone();
     context
         .with_ledger(|ledger| {
             if ledger.categories.is_empty() {
@@ -156,12 +162,12 @@ fn list_categories(context: &ShellContext) -> Result<(), CliError> {
                 let budget = category
                     .budget
                     .as_ref()
-                    .map(|budget| format!("{:.2}", budget.amount))
+                    .map(|budget| formatters.format_amount(budget.amount, ""))
                     .unwrap_or_else(|| "—".into());
                 let spent = totals
                     .get(&category.id)
-                    .map(|entry| format!("{:.2}", entry.real))
-                    .unwrap_or_else(|| "0.00".into());
+                    .map(|entry| formatters.format_amount(entry.real, ""))
+                    .unwrap_or_else(|| formatters.format_amount(0.0, ""));
                 table.add_row(vec![
                     category.name.clone(),
                     category.kind.to_string(),
@@ -170,13 +176,15 @@ fn list_categories(context: &ShellContext) -> Result<(), CliError> {
                 ]);
             }
 
-            TableRenderer::render(&table);
+            TableRenderer::render(&table, &style);
             Ok(())
         })
         .map_err(CliError::from)
 }
 
 fn list_transactions(context: &ShellContext) -> Result<(), CliError> {
+    let style = context.ui_style.clone();
+    let formatters = context.formatters.clone();
     context
         .with_ledger(|ledger| {
             if ledger.transactions.is_empty() {
@@ -201,9 +209,9 @@ fn list_transactions(context: &ShellContext) -> Result<(), CliError> {
                 ],
             );
             for txn in &ledger.transactions {
-                table.add_row(transaction_row(txn, ledger, &account_names));
+                table.add_row(transaction_row(txn, ledger, &account_names, &formatters));
             }
-            TableRenderer::render(&table);
+            TableRenderer::render(&table, &style);
             Ok(())
         })
         .map_err(CliError::from)
@@ -213,9 +221,10 @@ fn transaction_row(
     txn: &Transaction,
     ledger: &Ledger,
     account_names: &HashMap<uuid::Uuid, String>,
+    formatters: &CliFormatters,
 ) -> Vec<String> {
     vec![
-        txn.scheduled_date.to_string(),
+        formatters.format_date(txn.scheduled_date),
         account_names
             .get(&txn.from_account)
             .cloned()
@@ -228,12 +237,14 @@ fn transaction_row(
             .and_then(|id| ledger.category(id))
             .map(|cat| cat.name.clone())
             .unwrap_or_else(|| "—".into()),
-        format!("{:.2}", txn.budgeted_amount),
+        formatters.format_amount(txn.budgeted_amount, ""),
         txn.status.to_string(),
     ]
 }
 
 fn list_simulations(context: &ShellContext) -> Result<(), CliError> {
+    let style = context.ui_style.clone();
+    let formatters = context.formatters.clone();
     context
         .with_ledger(|ledger| {
             if ledger.simulations().is_empty() {
@@ -254,10 +265,10 @@ fn list_simulations(context: &ShellContext) -> Result<(), CliError> {
                     sim.name.clone(),
                     sim.status.to_string(),
                     sim.changes.len().to_string(),
-                    sim.updated_at.to_rfc3339(),
+                    formatters.format_date(sim.updated_at.date_naive()),
                 ]);
             }
-            TableRenderer::render(&table);
+            TableRenderer::render(&table, &style);
             Ok(())
         })
         .map_err(CliError::from)
@@ -282,21 +293,26 @@ fn list_backups(context: &ShellContext) -> Result<(), CliError> {
             TableColumn::new("SIZE", 10),
         ],
     );
+    let style = context.ui_style.clone();
+    let formatters = context.formatters.clone();
     for backup in backups {
+        let created = backup
+            .created_at
+            .map(|ts| formatters.format_date(ts.date_naive()))
+            .unwrap_or_else(|| "—".into());
         table.add_row(vec![
             backup.name.clone(),
-            backup
-                .created_at
-                .map(|ts| ts.to_rfc3339())
-                .unwrap_or_else(|| "—".into()),
+            created,
             format_size(backup.size_bytes),
         ]);
     }
-    TableRenderer::render(&table);
+    TableRenderer::render(&table, &style);
     Ok(())
 }
 
 fn list_recurring(context: &ShellContext) -> Result<(), CliError> {
+    let style = context.ui_style.clone();
+    let formatters = context.formatters.clone();
     context
         .with_ledger(|ledger| {
             let recurring: Vec<_> = ledger
@@ -342,11 +358,11 @@ fn list_recurring(context: &ShellContext) -> Result<(), CliError> {
                     format_interval(&recurrence.interval),
                     recurrence
                         .next_scheduled
-                        .map(|date| date.to_string())
+                        .map(|date| formatters.format_date(date))
                         .unwrap_or_else(|| "—".into()),
                 ]);
             }
-            TableRenderer::render(&table);
+            TableRenderer::render(&table, &style);
             Ok(())
         })
         .map_err(CliError::from)

@@ -17,6 +17,8 @@ pub struct UiStyle {
     pub color_header: Option<Color>,
     pub color_highlight: Option<Color>,
     pub highlight_marker: String,
+    pub plain_mode: bool,
+    pub use_icons: bool,
 }
 
 static STYLE: OnceLock<RwLock<UiStyle>> = OnceLock::new();
@@ -44,13 +46,11 @@ impl UiStyle {
         let prefs = current_preferences();
         let stdout_tty = std::io::stdout().is_terminal();
         let no_color = std::env::var_os("NO_COLOR").is_some();
-        let use_color = stdout_tty
-            && prefs.color_enabled
-            && !prefs.plain_mode
-            && !prefs.screen_reader_mode
-            && !no_color;
+        let plain_mode = prefs.plain_mode || prefs.screen_reader_mode;
+        let use_color = stdout_tty && prefs.color_enabled && !plain_mode && !no_color;
+        let use_icons = !plain_mode;
 
-        let header_prefix = if prefs.plain_mode || prefs.screen_reader_mode {
+        let header_prefix = if plain_mode {
             "> ".into()
         } else {
             "⮞ ".into()
@@ -69,6 +69,8 @@ impl UiStyle {
             },
             color_highlight: if use_color { Some(Color::Cyan) } else { None },
             highlight_marker: ">".into(),
+            plain_mode,
+            use_icons,
         }
     }
 

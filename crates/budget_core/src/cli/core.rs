@@ -14,7 +14,7 @@ use strsim::levenshtein;
 use uuid::Uuid;
 
 use crate::{
-    config::{self, Config, ConfigManager},
+    config::{self, Config, ConfigManager, Theme},
     core::errors::BudgetError,
     core::ledger_manager::LedgerManager,
     core::services::{
@@ -141,6 +141,11 @@ impl ShellContext {
             .map_err(CommandError::from_core)
     }
 
+    pub(crate) fn apply_cli_preferences(&self) {
+        let config = self.config_read();
+        cli_io::apply_config(&config);
+    }
+
     fn update_last_opened(&mut self, name: Option<&str>) -> CommandResult {
         {
             let mut config = self.config_write();
@@ -168,6 +173,7 @@ impl ShellContext {
         let config = Arc::new(RwLock::new(config));
         let formatters = CliFormatters::new(config.clone());
         let config_manager = Arc::new(RwLock::new(config_manager_raw));
+        let ui_style = crate::cli::ui::style::style();
 
         let mut app = ShellContext {
             mode,
@@ -184,6 +190,7 @@ impl ShellContext {
             current_simulation: None,
             last_command: None,
             running: true,
+            ui_style,
         };
 
         app.auto_load_last()?;
@@ -299,17 +306,26 @@ impl ShellContext {
         Formatter::new().print_header("Configuration");
         cli_io::print_info(format!("  Locale: {}", config.locale));
         cli_io::print_info(format!("  Currency: {}", config.currency));
-        cli_io::print_info(format!(
-            "  Theme: {}",
-            config.theme.as_deref().unwrap_or("default")
-        ));
+        cli_io::print_info(format!("  Theme: {}", config.theme));
         cli_io::print_info(format!(
             "  Color output: {}",
             if config.ui_color_enabled { "on" } else { "off" }
         ));
         cli_io::print_info(format!(
-            "  UI style: {}",
-            config.ui_style.as_deref().unwrap_or("default")
+            "  Plain output: {}",
+            if config.accessibility.plain_output {
+                "on"
+            } else {
+                "off"
+            }
+        ));
+        cli_io::print_info(format!(
+            "  High contrast: {}",
+            if config.accessibility.high_contrast {
+                "on"
+            } else {
+                "off"
+            }
         ));
         cli_io::print_info(format!(
             "  Last opened ledger: {}",
@@ -362,15 +378,26 @@ impl ShellContext {
     pub(crate) fn set_config_value(&mut self, key: &str, value: &str) -> CommandResult {
         {
             let mut config = self.config_write();
+            let parse_bool = |raw: &str, label: &str| -> Result<bool, CommandError> {
+                let normalized = raw.trim().to_lowercase();
+                match normalized.as_str() {
+                    "on" | "true" | "yes" | "1" => Ok(true),
+                    "off" | "false" | "no" | "0" => Ok(false),
+                    "" => Ok(false),
+                    other => Err(CommandError::InvalidArguments(format!(
+                        "invalid {label} value `{other}`"
+                    ))),
+                }
+            };
             match key.to_lowercase().as_str() {
                 "locale" => config.locale = value.to_string(),
                 "currency" => config.currency = value.to_string(),
-                "theme" => {
-                    if value.eq_ignore_ascii_case("none") || value.is_empty() {
-                        config.theme = None;
-                    } else {
-                        config.theme = Some(value.to_string());
-                    }
+                "theme" => config.theme = Theme::from_str(value),
+                "plain_output" => {
+                    config.accessibility.plain_output = parse_bool(value, "plain_output")?;
+                }
+                "high_contrast" => {
+                    config.accessibility.high_contrast = parse_bool(value, "high_contrast")?;
                 }
                 "ui_color_enabled" => {
                     let normalized = value.trim().to_lowercase();
@@ -384,16 +411,6 @@ impl ShellContext {
                                 other
                             )))
                         }
-                    }
-                }
-                "ui_style" => {
-                    if value.eq_ignore_ascii_case("default")
-                        || value.eq_ignore_ascii_case("none")
-                        || value.is_empty()
-                    {
-                        config.ui_style = None;
-                    } else {
-                        config.ui_style = Some(value.to_string());
                     }
                 }
                 "last_opened_ledger" => {
@@ -433,8 +450,8 @@ impl ShellContext {
             }
         }
         self.persist_config()?;
-        let config = self.config_read();
-        cli_io::apply_config(&config);
+        self.apply_cli_preferences();
+        self.refresh_ui_style();
         cli_io::print_success("Configuration updated.");
         Ok(())
     }
@@ -1699,12 +1716,14 @@ impl ShellContext {
         let restored = manager
             .restore(&backup_name)
             .map_err(CommandError::from_core)?;
+        drop(manager);
         {
             let mut config = self.config_write();
             *config = restored;
-            cli_io::apply_config(&config);
         }
         self.persist_config()?;
+        self.apply_cli_preferences();
+        self.refresh_ui_style();
         cli_io::print_success(format!("Configuration restored from {}.", backup_name));
         Ok(())
     }

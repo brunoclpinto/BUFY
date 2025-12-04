@@ -19,7 +19,7 @@ pub(crate) fn definitions() -> Vec<CommandEntry> {
     ]
 }
 
-fn cmd_version(_context: &mut ShellContext, _args: &[&str]) -> CommandResult {
+fn cmd_version(context: &mut ShellContext, _args: &[&str]) -> CommandResult {
     let meta = build_info::current();
     let mut table = Table::new(
         Some(format!("Budget Core {}", meta.version)),
@@ -51,21 +51,21 @@ fn cmd_version(_context: &mut ShellContext, _args: &[&str]) -> CommandResult {
         crate::ffi::FFI_VERSION.to_string(),
     ]);
 
-    TableRenderer::render(&table);
+    TableRenderer::render(&table, &context.ui_style);
     Ok(())
 }
 
 fn cmd_help(context: &mut ShellContext, args: &[&str]) -> CommandResult {
     if let Some(command) = args.first().map(|name| name.to_lowercase()) {
         if let Some(command) = context.command(&command) {
-            help::print_command(command);
+            help::print_command(command, &context.ui_style);
         } else {
             context.suggest_command(args[0]);
         }
         return Ok(());
     }
 
-    help::print_overview(&context.registry);
+    help::print_overview(&context.registry, &context.ui_style);
     Ok(())
 }
 

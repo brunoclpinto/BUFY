@@ -1,16 +1,17 @@
-use serde::{Deserialize, Serialize};
+use serde::{de::Deserializer, Deserialize, Serialize};
+use std::fmt;
 
 /// Stores user-configurable CLI preferences and metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub locale: String,
     pub currency: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub theme: Option<String>,
+    #[serde(default)]
+    pub theme: Theme,
+    #[serde(default)]
+    pub accessibility: AccessibilitySettings,
     #[serde(default = "Config::default_ui_color_enabled")]
     pub ui_color_enabled: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ui_style: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_opened_ledger: Option<String>,
     #[serde(default)]
@@ -26,9 +27,9 @@ impl Default for Config {
         Self {
             locale: "en-US".into(),
             currency: "USD".into(),
-            theme: None,
+            theme: Theme::default(),
+            accessibility: AccessibilitySettings::default(),
             ui_color_enabled: Self::default_ui_color_enabled(),
-            ui_style: None,
             last_opened_ledger: None,
             audio_feedback: false,
             default_budget_period: Self::default_budget_period_value(),
@@ -44,5 +45,70 @@ impl Config {
 
     pub fn default_ui_color_enabled() -> bool {
         true
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    Plain,
+    Iconic,
+}
+
+impl Theme {
+    fn from_value(value: Option<String>) -> Self {
+        value
+            .map(|v| Theme::from_str(v.trim()))
+            .unwrap_or_else(Theme::default)
+    }
+
+    pub fn from_str(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "plain" => Theme::Plain,
+            _ => Theme::Iconic,
+        }
+    }
+}
+
+impl Default for Theme {
+    fn default() -> Self {
+        Theme::Iconic
+    }
+}
+
+impl fmt::Display for Theme {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let label = match self {
+            Theme::Plain => "plain",
+            Theme::Iconic => "iconic",
+        };
+        f.write_str(label)
+    }
+}
+
+impl<'de> Deserialize<'de> for Theme {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Option::<String>::deserialize(deserializer)?;
+        Ok(Theme::from_value(value))
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccessibilitySettings {
+    #[serde(default)]
+    pub plain_output: bool,
+    #[serde(default)]
+    pub high_contrast: bool,
+}
+
+impl Default for AccessibilitySettings {
+    fn default() -> Self {
+        Self {
+            plain_output: false,
+            high_contrast: false,
+        }
     }
 }

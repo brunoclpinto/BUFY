@@ -18,7 +18,7 @@ use crate::{
         prompts::{text_input, TextPromptResult},
         style::refresh_style,
     },
-    config::Config,
+    config::{Config, Theme as UiTheme},
 };
 
 static THEME: OnceLock<RwLock<Box<dyn Theme + Send + Sync>>> = OnceLock::new();
@@ -38,10 +38,8 @@ fn theme_guard() -> RwLockReadGuard<'static, Box<dyn Theme + Send + Sync>> {
 
 /// Configure IO behavior based on the active config (theme + locale).
 pub fn apply_config(config: &Config) {
-    let plain = config
-        .theme
-        .as_ref()
-        .is_some_and(|value| value.eq_ignore_ascii_case("plain"));
+    let plain_theme = matches!(config.theme, UiTheme::Plain);
+    let plain = config.accessibility.plain_output || plain_theme;
 
     {
         let mut guard = theme_lock()
@@ -64,7 +62,7 @@ pub fn apply_config(config: &Config) {
     output::set_preferences(OutputPreferences {
         plain_mode: plain,
         screen_reader_mode: plain,
-        high_contrast_mode: plain,
+        high_contrast_mode: config.accessibility.high_contrast,
         quiet_mode: false,
         audio_feedback: config.audio_feedback,
         color_enabled: config.ui_color_enabled,

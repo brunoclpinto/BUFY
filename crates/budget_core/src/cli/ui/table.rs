@@ -1,4 +1,4 @@
-use crate::cli::io;
+use crate::cli::{io, ui::style::UiStyle};
 
 /// Declarative description of a table column.
 #[derive(Debug, Clone)]
@@ -51,9 +51,11 @@ impl Table {
 pub struct TableRenderer;
 
 impl TableRenderer {
-    pub fn render(table: &Table) {
+    pub fn render(table: &Table, style: &UiStyle) {
         if let Some(title) = &table.title {
-            let _ = io::println_text(title);
+            let prefix = if style.use_icons { "📋 " } else { "" };
+            let header = format!("{prefix}{title}");
+            let _ = io::println_text(&style.apply_header_style(&header));
         }
 
         if !table.columns.is_empty() {
@@ -63,15 +65,20 @@ impl TableRenderer {
                 .map(|col| col.width + 1)
                 .sum::<usize>()
                 .max(1);
-            let _ = io::println_text(&"─".repeat(total_width));
+            if !style.plain_mode {
+                let _ = io::println_text(&style.horizontal_line(total_width));
+            }
 
             let header = table
                 .columns
                 .iter()
                 .map(|col| format!("{:width$} ", col.header, width = col.width))
                 .collect::<String>();
-            let _ = io::println_text(&header.trim_end().to_string());
-            let _ = io::println_text(&"─".repeat(total_width));
+            let header_line = style.apply_header_style(header.trim_end());
+            let _ = io::println_text(&header_line);
+            if !style.plain_mode {
+                let _ = io::println_text(&style.horizontal_line(total_width));
+            }
         }
 
         for row in &table.rows {

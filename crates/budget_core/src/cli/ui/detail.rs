@@ -1,17 +1,20 @@
-use crate::cli::io;
+use crate::cli::{io, ui::style::UiStyle};
 
 /// Renders JSON-like detail views for single entities.
 pub struct DetailViewRenderer;
 
 impl DetailViewRenderer {
-    pub fn render<T>(title: T, fields: &[DetailField])
+    pub fn render<T>(title: T, fields: &[DetailField], style: &UiStyle)
     where
         T: AsRef<str>,
     {
         let title = title.as_ref();
-        let underline = "─".repeat(title.len().max(4));
-        let _ = io::println_text(title);
-        let _ = io::println_text(&underline);
+        let prefix = if style.use_icons { "🔎 " } else { "" };
+        let heading = format!("{prefix}{title}");
+        let _ = io::println_text(&style.apply_header_style(&heading));
+        if !style.plain_mode {
+            let _ = io::println_text(&style.horizontal_line(title.len().max(4)));
+        }
         let _ = io::println_text("{");
         for (idx, field) in fields.iter().enumerate() {
             let comma = if idx + 1 == fields.len() { "" } else { "," };
@@ -19,6 +22,9 @@ impl DetailViewRenderer {
             let _ = io::println_text(&line);
         }
         let _ = io::println_text("}");
+        if !style.plain_mode {
+            let _ = io::println_text(&style.horizontal_line(title.len().max(4)));
+        }
     }
 }
 

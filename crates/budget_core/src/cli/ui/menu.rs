@@ -1,4 +1,4 @@
-use crate::cli::io;
+use crate::cli::{io, ui::style::UiStyle};
 
 /// Represents a single menu entry.
 #[derive(Debug, Clone)]
@@ -36,19 +36,32 @@ impl Menu {
 pub struct MenuRenderer;
 
 impl MenuRenderer {
-    pub fn render(menu: &Menu) {
-        let underline = "─".repeat(menu.title.len().max(4));
-        let _ = io::println_text(&menu.title);
-        let _ = io::println_text(&underline);
+    pub fn render(menu: &Menu, style: &UiStyle) {
+        let prefix = if style.use_icons { "📂 " } else { "" };
+        let heading = format!("{prefix}{}", menu.title);
+        let _ = io::println_text(&style.apply_header_style(&heading));
+        if !style.plain_mode {
+            let _ = io::println_text(&style.horizontal_line(menu.title.len().max(4)));
+        }
         for item in &menu.items {
-            let prefix = if item.enabled { "  •" } else { "  ×" };
+            let marker = if style.use_icons {
+                if item.enabled {
+                    "  •"
+                } else {
+                    "  ×"
+                }
+            } else if item.enabled {
+                "  *"
+            } else {
+                "  -"
+            };
             match &item.description {
                 Some(description) => {
-                    let line = format!("{prefix} {:<16} {description}", item.label);
+                    let line = format!("{marker} {:<16} {description}", item.label);
                     let _ = io::println_text(&line);
                 }
                 None => {
-                    let line = format!("{prefix} {}", item.label);
+                    let line = format!("{marker} {}", item.label);
                     let _ = io::println_text(&line);
                 }
             }

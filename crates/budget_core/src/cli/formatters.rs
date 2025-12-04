@@ -21,6 +21,13 @@ impl CliFormatters {
             .map(|value| value as usize)
             .unwrap_or(2)
     }
+
+    fn date_pattern(&self, locale: &str) -> &'static str {
+        match locale {
+            "en-GB" | "fr-FR" => "%d/%m/%Y",
+            _ => "%Y-%m-%d",
+        }
+    }
 }
 
 impl CurrencyFormatter for CliFormatters {
@@ -43,6 +50,8 @@ impl CurrencyFormatter for CliFormatters {
 
 impl DateFormatter for CliFormatters {
     fn format_date(&self, date: NaiveDate) -> String {
-        date.format("%Y-%m-%d").to_string()
+        let config = self.config.read().expect("config formatter lock poisoned");
+        let pattern = self.date_pattern(&config.locale);
+        date.format(pattern).to_string()
     }
 }

@@ -9,4 +9,4 @@ pub mod model;
 
 pub use error::ConfigError;
 pub use manager::ConfigManager;
-pub use model::Config;
+pub use model::{AccessibilitySettings, Config, Theme};

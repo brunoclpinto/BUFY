@@ -47,7 +47,7 @@ fn cmd_config(context: &mut ShellContext, args: &[&str]) -> CommandResult {
         "set" => {
             if args.len() < 3 {
                 return Err(CommandError::InvalidArguments(
-                    "usage: config set <locale|currency|theme|ui_color_enabled|ui_style|last_opened_ledger|default_budget_period|default_currency_precision> <value>".into(),
+                    "usage: config set <locale|currency|theme|ui_color_enabled|plain_output|high_contrast|last_opened_ledger|default_budget_period|default_currency_precision> <value>".into(),
                 ));
             }
             let key = args[1];
@@ -200,6 +200,8 @@ fn cmd_config(context: &mut ShellContext, args: &[&str]) -> CommandResult {
                 config.audio_feedback = enabled;
             }
             context.persist_config()?;
+            context.apply_cli_preferences();
+            context.refresh_ui_style();
             io::print_success(if enabled {
                 "Audio feedback enabled."
             } else {

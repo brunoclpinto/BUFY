@@ -16,6 +16,7 @@ use bufy_core::Clock;
 use bufy_storage_json::JsonLedgerStorage as JsonStorage;
 
 use super::{formatters::CliFormatters, registry::CommandRegistry};
+use crate::cli::ui::style::{self, UiStyle};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CliMode {
@@ -38,6 +39,7 @@ pub struct ShellContext {
     pub current_simulation: Option<Simulation>,
     pub last_command: Option<String>,
     pub running: bool,
+    pub ui_style: UiStyle,
 }
 
 impl ShellContext {
@@ -54,5 +56,9 @@ impl ShellContext {
                 .as_ref()
                 .map(|sim| sim.name.as_str())
         )
+    }
+
+    pub fn refresh_ui_style(&mut self) {
+        self.ui_style = style::style();
     }
 }
