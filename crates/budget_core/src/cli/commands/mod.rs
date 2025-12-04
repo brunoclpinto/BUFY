@@ -7,7 +7,6 @@ pub mod ledger_handlers;
 pub mod list;
 pub mod recurring;
 pub mod simulation;
-pub mod simulation_handlers;
 pub mod system;
 pub mod transaction;
 

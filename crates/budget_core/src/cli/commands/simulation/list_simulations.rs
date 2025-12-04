@@ -1,4 +1,4 @@
-use crate::cli::commands::simulation_handlers;
+use super::{handle_apply, handle_discard, handle_enter, handle_workflow_action};
 use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
 use crate::cli::io as cli_io;
 use crate::cli::ui::detail_actions::{DetailAction, DetailActionResult, DetailActionsMenu};
@@ -230,7 +230,7 @@ fn edit_simulation(context: &mut ShellContext, entry: &SimulationEntry) -> Comma
         cli_io::print_info("Simulation editing is only available in interactive mode.");
         return Ok(());
     }
-    simulation_handlers::handle_workflow_action(context, "modify", &[entry.name.as_str()])
+    handle_workflow_action(context, "modify", &[entry.name.as_str()])
 }
 
 fn discard_simulation(context: &mut ShellContext, entry: &SimulationEntry) -> CommandResult {
@@ -242,7 +242,7 @@ fn discard_simulation(context: &mut ShellContext, entry: &SimulationEntry) -> Co
             return Ok(());
         }
     }
-    simulation_handlers::handle_discard(context, &[entry.name.as_str()])
+    handle_discard(context, &[entry.name.as_str()])
 }
 
 fn apply_simulation(context: &mut ShellContext, entry: &SimulationEntry) -> CommandResult {
@@ -254,7 +254,7 @@ fn apply_simulation(context: &mut ShellContext, entry: &SimulationEntry) -> Comm
             return Ok(());
         }
     }
-    simulation_handlers::handle_apply(context, &[entry.name.as_str()])
+    handle_apply(context, &[entry.name.as_str()])
 }
 
 fn enter_simulation(context: &mut ShellContext, entry: &SimulationEntry) -> CommandResult {
@@ -262,5 +262,5 @@ fn enter_simulation(context: &mut ShellContext, entry: &SimulationEntry) -> Comm
         cli_io::print_info("Entering simulations is only available in interactive mode.");
         return Ok(());
     }
-    simulation_handlers::handle_enter(context, &[entry.name.as_str()])
+    handle_enter(context, &[entry.name.as_str()])
 }
