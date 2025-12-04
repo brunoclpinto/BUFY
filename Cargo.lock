@@ -172,6 +172,8 @@ version = "0.1.0"
 dependencies = [
  "bufy-core",
  "bufy-domain",
+ "chrono",
+ "uuid",
 ]
 
 [[package]]
