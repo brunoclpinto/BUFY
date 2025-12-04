@@ -32,3 +32,6 @@ pub use storage::*;
 pub use summary_service::*;
 pub use time::Clock;
 pub use transaction_service::*;
+
+#[cfg(test)]
+mod tests;

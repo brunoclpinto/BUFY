@@ -5,8 +5,11 @@ use budget_core::cli::core::{CliMode, ShellContext};
 use budget_core::cli::formatters::CliFormatters;
 use budget_core::cli::registry::CommandRegistry;
 use budget_core::cli::system_clock::SystemClock;
-use budget_core::cli::ui::test_mode::{
-    install_action_events, install_selector_events, reset_action_events, reset_selector_events,
+use budget_core::cli::ui::{
+    style,
+    test_mode::{
+        install_action_events, install_selector_events, reset_action_events, reset_selector_events,
+    },
 };
 use budget_core::config::{Config, ConfigManager};
 use budget_core::core::ledger_manager::LedgerManager;
@@ -45,6 +48,7 @@ fn build_context(temp: &TempDir) -> ShellContext {
         current_simulation: None,
         last_command: None,
         running: true,
+        ui_style: style::style(),
     }
 }
 
