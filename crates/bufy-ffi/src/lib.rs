@@ -8,10 +8,13 @@ use std::{
     ptr,
 };
 
-use chrono::{Datelike, Utc};
+use chrono::{Datelike, NaiveDate, Utc};
 use uuid::Uuid;
 
-use bufy_core::{api_add_account, api_create_ledger, api_ledger_summary, CoreError};
+use bufy_core::{
+    api_add_account, api_add_transaction, api_complete_transaction, api_create_ledger,
+    api_ledger_summary, CoreError,
+};
 use bufy_domain::{
     account::AccountKind,
     common::{TimeInterval, TimeUnit},
@@ -127,6 +130,146 @@ pub extern "C" fn bufy_ledger_add_account(
             }
             0
         }
+        Err(err) => {
+            unsafe {
+                write_core_error(out_error, err);
+            }
+            4
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn bufy_ledger_add_transaction(
+    handle: *mut LedgerHandle,
+    from_account_id: *const c_char,
+    to_account_id: *const c_char,
+    category_id: *const c_char,
+    scheduled_year: c_int,
+    scheduled_month: c_int,
+    scheduled_day: c_int,
+    budgeted_amount: c_double,
+    notes: *const c_char,
+    out_transaction_id: *mut *mut c_char,
+    out_error: *mut *mut c_char,
+) -> c_int {
+    clear_error(out_error);
+    if handle.is_null() {
+        unsafe {
+            write_error(out_error, "ledger handle is null");
+        }
+        return 1;
+    }
+    let ledger = unsafe { &mut (*handle).inner };
+    let from = match unsafe { parse_uuid_arg(from_account_id) } {
+        Ok(value) => value,
+        Err(err) => {
+            unsafe {
+                write_core_error(out_error, err);
+            }
+            return 2;
+        }
+    };
+    let to = match unsafe { parse_uuid_arg(to_account_id) } {
+        Ok(value) => value,
+        Err(err) => {
+            unsafe {
+                write_core_error(out_error, err);
+            }
+            return 3;
+        }
+    };
+    let category = match unsafe { parse_optional_uuid(category_id) } {
+        Ok(value) => value,
+        Err(err) => {
+            unsafe {
+                write_core_error(out_error, err);
+            }
+            return 4;
+        }
+    };
+    let scheduled_date = match parse_date(scheduled_year, scheduled_month, scheduled_day) {
+        Ok(value) => value,
+        Err(err) => {
+            unsafe {
+                write_core_error(out_error, err);
+            }
+            return 5;
+        }
+    };
+    let note_value = match unsafe { optional_string_argument(notes) } {
+        Ok(value) => value,
+        Err(err) => {
+            unsafe {
+                write_core_error(out_error, err);
+            }
+            return 6;
+        }
+    };
+
+    match api_add_transaction(
+        ledger,
+        from,
+        to,
+        category,
+        scheduled_date,
+        budgeted_amount as f64,
+        note_value,
+    ) {
+        Ok(tx_id) => {
+            unsafe {
+                write_string(out_transaction_id, tx_id.to_string());
+            }
+            0
+        }
+        Err(err) => {
+            unsafe {
+                write_core_error(out_error, err);
+            }
+            7
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn bufy_ledger_complete_transaction(
+    handle: *mut LedgerHandle,
+    transaction_id: *const c_char,
+    actual_year: c_int,
+    actual_month: c_int,
+    actual_day: c_int,
+    actual_amount: c_double,
+    out_error: *mut *mut c_char,
+) -> c_int {
+    clear_error(out_error);
+    if handle.is_null() {
+        unsafe {
+            write_error(out_error, "ledger handle is null");
+        }
+        return 1;
+    }
+    let ledger = unsafe { &mut (*handle).inner };
+    let txn = match unsafe { parse_uuid_arg(transaction_id) } {
+        Ok(value) => value,
+        Err(err) => {
+            unsafe {
+                write_core_error(out_error, err);
+            }
+            return 2;
+        }
+    };
+    let actual_date = match parse_date(actual_year, actual_month, actual_day) {
+        Ok(value) => value,
+        Err(err) => {
+            unsafe {
+                write_core_error(out_error, err);
+            }
+            return 3;
+        }
+    };
+
+    match api_complete_transaction(ledger, txn, actual_date, actual_amount as f64) {
+        Ok(()) => 0,
         Err(err) => {
             unsafe {
                 write_core_error(out_error, err);
@@ -267,4 +410,28 @@ unsafe fn parse_optional_uuid(ptr: *const c_char) -> Result<Option<Uuid>, CoreEr
     Uuid::parse_str(trimmed)
         .map(Some)
         .map_err(|err| CoreError::Validation(format!("invalid UUID: {err}")))
+}
+
+unsafe fn parse_uuid_arg(ptr: *const c_char) -> Result<Uuid, CoreError> {
+    let value = c_string_argument(ptr)?;
+    Uuid::parse_str(value.trim())
+        .map_err(|err| CoreError::Validation(format!("invalid UUID: {err}")))
+}
+
+fn parse_date(year: c_int, month: c_int, day: c_int) -> Result<NaiveDate, CoreError> {
+    NaiveDate::from_ymd_opt(year as i32, month as u32, day as u32).ok_or_else(|| {
+        CoreError::Validation(format!("invalid date: {year:04}-{month:02}-{day:02}"))
+    })
+}
+
+unsafe fn optional_string_argument(ptr: *const c_char) -> Result<Option<String>, CoreError> {
+    if ptr.is_null() {
+        return Ok(None);
+    }
+    let value = c_string_argument(ptr)?;
+    if value.trim().is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(value))
+    }
 }
