@@ -3000,8 +3000,9 @@ impl ShellContext {
 
     pub(crate) fn recurrence_sync(&mut self, reference: NaiveDate) -> CommandResult {
         self.ensure_base_mode("Recurrence synchronization")?;
-        let created =
-            self.with_ledger_mut(|ledger| Ok(ledger.materialize_due_recurrences(reference)))?;
+        let created = self.with_ledger_mut(|ledger| {
+            RecurrenceService::materialize_due(ledger, reference).map_err(CommandError::from)
+        })?;
         if created == 0 {
             cli_io::print_info("All due recurring instances already exist.");
         } else {

@@ -82,4 +82,10 @@ impl RecurrenceService {
         ledger.touch();
         Ok(true)
     }
+
+    /// Materializes due recurrence instances as transactions.
+    pub fn materialize_due(ledger: &mut Ledger, reference: NaiveDate) -> Result<usize, CoreError> {
+        let created = ledger.materialize_due_recurrences(reference);
+        Ok(created)
+    }
 }
