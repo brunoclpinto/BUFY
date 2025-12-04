@@ -18,8 +18,8 @@ use crate::{
     core::errors::BudgetError,
     core::ledger_manager::LedgerManager,
     core::services::{
-        AccountService, CategoryBudgetStatus, CategoryBudgetSummary, CategoryService, ServiceError,
-        SummaryService, TransactionService,
+        AccountService, CategoryBudgetStatus, CategoryBudgetSummary, CategoryService,
+        LedgerService, ServiceError, SimulationService, SummaryService, TransactionService,
     },
     core::utils::PathResolver,
     ledger::{
@@ -915,8 +915,7 @@ impl ShellContext {
 
         if let Some(name) = simulation {
             self.with_ledger_mut(|ledger| {
-                ledger
-                    .add_simulation_transaction(name, transaction)
+                SimulationService::add_transaction(ledger, name, transaction)
                     .map_err(CommandError::from)
             })?;
             cli_io::print_success(format!(
@@ -1234,7 +1233,7 @@ impl ShellContext {
             .map_err(CommandError::from)?;
 
         let period = self.prompt_budget_period()?;
-        let ledger = Ledger::new(name.clone(), period);
+        let ledger = LedgerService::create(name.clone(), period);
         self.set_ledger(ledger, None, Some(name));
         cli_io::print_success("New ledger created.");
         Ok(())
@@ -1482,7 +1481,7 @@ impl ShellContext {
             "monthly".to_string()
         };
         let period = parse_period(&period_str)?;
-        let ledger = Ledger::new(name.clone(), period);
+        let ledger = LedgerService::create(name.clone(), period);
         self.set_ledger(ledger, None, Some(name));
         cli_io::print_success("New ledger created.");
         Ok(())
@@ -1725,8 +1724,7 @@ impl ShellContext {
         let kind = parse_account_kind(args[1])?;
         let account = Account::new(name, kind);
         self.with_ledger_mut(|ledger| {
-            ledger.add_account(account);
-            Ok(())
+            AccountService::add(ledger, account).map_err(CommandError::from)
         })?;
         cli_io::print_success("Account added.");
         Ok(())
@@ -1748,8 +1746,7 @@ impl ShellContext {
         let kind = parse_category_kind(args[1])?;
         let category = Category::new(name, kind);
         self.with_ledger_mut(|ledger| {
-            ledger.add_category(category);
-            Ok(())
+            CategoryService::add(ledger, category).map_err(CommandError::from)
         })?;
         cli_io::print_success("Category added.");
         Ok(())
@@ -3153,8 +3150,7 @@ impl ShellContext {
     pub(crate) fn simulation_exclude_transaction(&mut self, sim_name: &str) -> CommandResult {
         let txn_id = self.select_transaction_id("Exclude which transaction?")?;
         self.with_ledger_mut(|ledger| {
-            ledger
-                .exclude_transaction_in_simulation(sim_name, txn_id)
+            SimulationService::exclude_transaction(ledger, sim_name, txn_id)
                 .map_err(CommandError::from)
         })?;
         cli_io::print_success(format!("Transaction {} excluded in `{}`", txn_id, sim_name));
@@ -3192,8 +3188,7 @@ impl ShellContext {
         }
 
         self.with_ledger_mut(|ledger| {
-            ledger
-                .modify_transaction_in_simulation(sim_name, patch)
+            SimulationService::modify_transaction(ledger, sim_name, patch)
                 .map_err(CommandError::from)
         })?;
         cli_io::print_success(format!("Transaction {} modified in `{}`", txn_id, sim_name));

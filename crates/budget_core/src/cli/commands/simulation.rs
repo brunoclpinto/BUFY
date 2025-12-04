@@ -6,7 +6,8 @@ use crate::cli::core::{CliMode, CommandError, CommandResult, ShellContext};
 use crate::cli::io;
 use crate::cli::menus::{menu_error_to_command_error, simulation_menu};
 use crate::cli::registry::CommandEntry;
-use crate::ledger::{LedgerExt, SimulationStatus};
+use crate::core::services::SimulationService;
+use crate::ledger::SimulationStatus;
 
 pub(crate) fn definitions() -> Vec<CommandEntry> {
     vec![CommandEntry::new(
@@ -89,8 +90,7 @@ fn handle_create(context: &mut ShellContext, args: &[&str]) -> CommandResult {
         None
     };
     context.with_ledger_mut(|ledger| {
-        ledger
-            .create_simulation(name.clone(), notes.clone(), context.clock.as_ref())
+        SimulationService::create(ledger, name.clone(), notes.clone(), context.clock.as_ref())
             .map(|_| ())
             .map_err(CommandError::from)
     })?;
@@ -156,9 +156,7 @@ pub(super) fn handle_apply(context: &mut ShellContext, args: &[&str]) -> Command
             })
     })?;
     context.with_ledger_mut(|ledger| {
-        ledger
-            .apply_simulation(&name, context.clock.as_ref())
-            .map_err(CommandError::from)
+        SimulationService::apply(ledger, &name, context.clock.as_ref()).map_err(CommandError::from)
     })?;
     if context
         .active_simulation_name()
@@ -204,8 +202,9 @@ pub(super) fn handle_discard(context: &mut ShellContext, args: &[&str]) -> Comma
             return Ok(());
         }
     }
-    context
-        .with_ledger_mut(|ledger| ledger.discard_simulation(&name).map_err(CommandError::from))?;
+    context.with_ledger_mut(|ledger| {
+        SimulationService::discard(ledger, &name).map_err(CommandError::from)
+    })?;
     if was_active {
         context.clear_active_simulation();
     }
