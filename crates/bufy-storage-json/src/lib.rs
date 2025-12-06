@@ -1,5 +1,6 @@
 use std::{
     cmp::Reverse,
+    collections::BTreeSet,
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
@@ -12,45 +13,50 @@ use bufy_core::{
 use bufy_domain::{Ledger, LedgerBudgetPeriod};
 use chrono::{DateTime, NaiveDateTime, Utc};
 
-const BACKUP_EXTENSION: &str = "json";
+const LEDGER_EXTENSION: &str = "bfy";
+const BACKUP_EXTENSION: &str = "bbfy";
+const LEGACY_EXTENSION: &str = "json";
+const BACKUP_SUFFIX: &str = ".bbfy";
+const LEGACY_SUFFIX: &str = ".json";
 const BACKUP_TIMESTAMP_FORMAT: &str = "%Y%m%d_%H%M";
 const TMP_SUFFIX: &str = "tmp";
 const DEFAULT_RETENTION: usize = 5;
 
 /// Filesystem-backed JSON persistence for ledgers and their backups.
 #[derive(Clone)]
+pub struct StoragePaths {
+    pub ledger_root: PathBuf,
+    pub backup_root: PathBuf,
+}
+
+#[derive(Clone)]
 pub struct JsonLedgerStorage {
-    ledgers_dir: PathBuf,
-    backups_dir: PathBuf,
+    paths: StoragePaths,
     retention: usize,
 }
 
 impl JsonLedgerStorage {
-    pub fn new(ledgers_dir: PathBuf, backups_dir: PathBuf) -> Result<Self, CoreError> {
-        Self::with_retention(ledgers_dir, backups_dir, DEFAULT_RETENTION)
+    pub fn new(paths: StoragePaths) -> Result<Self, CoreError> {
+        Self::with_retention(paths, DEFAULT_RETENTION)
     }
 
-    pub fn with_retention(
-        ledgers_dir: PathBuf,
-        backups_dir: PathBuf,
-        retention: usize,
-    ) -> Result<Self, CoreError> {
-        fs::create_dir_all(&ledgers_dir)?;
-        fs::create_dir_all(&backups_dir)?;
+    pub fn with_retention(paths: StoragePaths, retention: usize) -> Result<Self, CoreError> {
+        fs::create_dir_all(&paths.ledger_root)?;
+        fs::create_dir_all(&paths.backup_root)?;
         Ok(Self {
-            ledgers_dir,
-            backups_dir,
+            paths,
             retention: retention.max(1),
         })
     }
 
     pub fn ledger_path(&self, name: &str) -> PathBuf {
-        self.ledgers_dir
-            .join(format!("{}.{}", canonical_name(name), BACKUP_EXTENSION))
+        self.paths
+            .ledger_root
+            .join(format!("{}.{}", canonical_name(name), LEDGER_EXTENSION))
     }
 
     pub fn backup_path(&self, name: &str, backup: &str) -> PathBuf {
-        self.backup_dir(name).join(backup)
+        self.backup_dir_for_ledger(name).join(backup)
     }
 
     pub fn list_ledger_metadata(&self) -> Result<Vec<LedgerMetadata>, CoreError> {
@@ -59,7 +65,9 @@ impl JsonLedgerStorage {
         for slug in self.list_ledgers()? {
             let ledger = self.load_ledger(&slug)?;
             let summary = BudgetService::summarize_current_period(&ledger, &clock);
-            let path = self.ledger_path(&slug);
+            let path = self
+                .resolve_ledger_path(&slug)
+                .unwrap_or_else(|_| self.ledger_path(&slug));
             entries.push(LedgerMetadata {
                 slug: slug.clone(),
                 name: ledger.name.clone(),
@@ -98,7 +106,7 @@ impl JsonLedgerStorage {
     }
 
     pub fn save_to_path(&self, ledger: &Ledger, path: &Path) -> Result<(), CoreError> {
-        if path.starts_with(&self.ledgers_dir) {
+        if path.starts_with(&self.paths.ledger_root) {
             if let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) {
                 self.backup_existing_file(stem, path)?;
             }
@@ -118,8 +126,33 @@ impl JsonLedgerStorage {
         Ok(())
     }
 
-    fn backup_dir(&self, name: &str) -> PathBuf {
-        self.backups_dir.join(canonical_name(name))
+    fn backup_dir_for_ledger(&self, name: &str) -> PathBuf {
+        self.paths
+            .backup_root
+            .join(format!("{}-backups", canonical_name(name)))
+    }
+
+    fn ledger_file_candidates(&self, name: &str) -> Vec<PathBuf> {
+        let slug = canonical_name(name);
+        vec![
+            self.paths
+                .ledger_root
+                .join(format!("{}.{}", slug, LEDGER_EXTENSION)),
+            self.paths
+                .ledger_root
+                .join(format!("{}.{}", slug, LEGACY_EXTENSION)),
+        ]
+    }
+
+    fn find_existing_ledger_path(&self, name: &str) -> Option<PathBuf> {
+        self.ledger_file_candidates(name)
+            .into_iter()
+            .find(|path| path.exists())
+    }
+
+    fn resolve_ledger_path(&self, name: &str) -> Result<PathBuf, CoreError> {
+        self.find_existing_ledger_path(name)
+            .ok_or_else(|| CoreError::LedgerNotFound(canonical_name(name)))
     }
 
     fn write_backup_file(
@@ -128,7 +161,7 @@ impl JsonLedgerStorage {
         name: &str,
         note: Option<&str>,
     ) -> Result<LedgerBackupInfo, CoreError> {
-        let dir = self.backup_dir(name);
+        let dir = self.backup_dir_for_ledger(name);
         fs::create_dir_all(&dir)?;
         let timestamp = Utc::now().format(BACKUP_TIMESTAMP_FORMAT).to_string();
         let mut stem = format!("{}_{}", canonical_name(name), timestamp);
@@ -152,7 +185,7 @@ impl JsonLedgerStorage {
         if !path.exists() {
             return Ok(());
         }
-        let dir = self.backup_dir(name);
+        let dir = self.backup_dir_for_ledger(name);
         fs::create_dir_all(&dir)?;
         let timestamp = Utc::now().format(BACKUP_TIMESTAMP_FORMAT).to_string();
         let file_name = format!(
@@ -192,8 +225,8 @@ impl LedgerStorage for JsonLedgerStorage {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        if path.exists() {
-            self.backup_existing_file(name, &path)?;
+        if let Some(existing) = self.find_existing_ledger_path(name) {
+            self.backup_existing_file(name, &existing)?;
         }
         let tmp = tmp_path(&path);
         write_atomic(&tmp, &serialize_ledger(ledger)?)?;
@@ -202,35 +235,37 @@ impl LedgerStorage for JsonLedgerStorage {
     }
 
     fn load_ledger(&self, name: &str) -> Result<Ledger, CoreError> {
-        load_ledger_from_path(&self.ledger_path(name))
+        let path = self.resolve_ledger_path(name)?;
+        load_ledger_from_path(&path)
     }
 
     fn list_ledgers(&self) -> Result<Vec<String>, CoreError> {
-        if !self.ledgers_dir.exists() {
+        if !self.paths.ledger_root.exists() {
             return Ok(Vec::new());
         }
-        let mut names = Vec::new();
-        for entry in fs::read_dir(&self.ledgers_dir)? {
+        let mut names = BTreeSet::new();
+        for entry in fs::read_dir(&self.paths.ledger_root)? {
             let entry = entry?;
             let path = entry.path();
             if !path.is_file() {
                 continue;
             }
-            if path.extension().and_then(|ext| ext.to_str()) != Some(BACKUP_EXTENSION) {
+            let ext = path.extension().and_then(|ext| ext.to_str());
+            if ext != Some(LEDGER_EXTENSION) && ext != Some(LEGACY_EXTENSION) {
                 continue;
             }
             if let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) {
-                names.push(stem.to_string());
+                names.insert(stem.to_string());
             }
         }
-        names.sort();
-        Ok(names)
+        Ok(names.into_iter().collect())
     }
 
     fn delete_ledger(&self, name: &str) -> Result<(), CoreError> {
-        let path = self.ledger_path(name);
-        if path.exists() {
-            fs::remove_file(path)?;
+        for path in self.ledger_file_candidates(name) {
+            if path.exists() {
+                fs::remove_file(path)?;
+            }
         }
         Ok(())
     }
@@ -253,7 +288,7 @@ impl LedgerStorage for JsonLedgerStorage {
     }
 
     fn list_backups(&self, name: &str) -> Result<Vec<LedgerBackupInfo>, CoreError> {
-        let dir = self.backup_dir(name);
+        let dir = self.backup_dir_for_ledger(name);
         if !dir.exists() {
             return Ok(Vec::new());
         }
@@ -262,7 +297,11 @@ impl LedgerStorage for JsonLedgerStorage {
         for entry in fs::read_dir(dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some(BACKUP_EXTENSION) {
+            if !path.is_file() {
+                continue;
+            }
+            let ext = path.extension().and_then(|ext| ext.to_str());
+            if ext != Some(BACKUP_EXTENSION) && ext != Some(LEGACY_EXTENSION) {
                 continue;
             }
             if let Some(file_name) = path.file_name().and_then(|name| name.to_str()) {
@@ -380,7 +419,7 @@ fn sanitize_backup_note(note: Option<&str>) -> Option<String> {
 }
 
 fn parse_backup_timestamp(name: &str) -> Option<DateTime<Utc>> {
-    let trimmed = name.strip_suffix(&format!(".{}", BACKUP_EXTENSION))?;
+    let trimmed = strip_backup_extension(name)?;
     let mut segments = trimmed.split('_').collect::<Vec<_>>();
     if segments.len() < 2 {
         return None;
@@ -398,6 +437,16 @@ fn parse_backup_timestamp(name: &str) -> Option<DateTime<Utc>> {
 
 fn is_digits(value: &str, len: usize) -> bool {
     value.len() == len && value.chars().all(|c| c.is_ascii_digit())
+}
+
+fn strip_backup_extension(name: &str) -> Option<&str> {
+    if name.ends_with(BACKUP_SUFFIX) {
+        Some(&name[..name.len() - BACKUP_SUFFIX.len()])
+    } else if name.ends_with(LEGACY_SUFFIX) {
+        Some(&name[..name.len() - LEGACY_SUFFIX.len()])
+    } else {
+        None
+    }
 }
 
 fn tmp_path(path: &Path) -> PathBuf {

@@ -26,7 +26,7 @@ transaction add
 ledger save-ledger household
 ```
 
-Use `ledger save <path>` for ad-hoc JSON exports or `ledger save-ledger <name>` to store it under `~/.budget_core/ledgers/<name>.json`.
+Use `ledger save <path>` for ad-hoc JSON exports or `ledger save-ledger <name>` to store it under `~/Documents/Ledgers/<name>.bfy` (configurable root).
 
 ### Add Accounts & Categories
 
@@ -83,7 +83,7 @@ config backups
 config restore
 ```
 
-- Ledger backups live under `~/.budget_core/backups/<slug>/`.
+- Ledger backups live under `~/Documents/Ledger/<slug>-backups/` and carry the `.bbfy` extension.
 - Configuration backups live under `~/.budget_core/config/backups/`.
 - When restoring interactively, the CLI prints the timestamp and note before asking for confirmation.
 

@@ -31,7 +31,7 @@ experience accessible on any terminal.
 | Task | Command | Notes |
 | --- | --- | --- |
 | Create a ledger | `ledger new Household monthly` | Omitting arguments triggers interactive prompts. |
-| Save / load | `ledger save-ledger household`, `ledger load-ledger household` | Named ledgers live under `~/.budget_core/<name>.json`. |
+| Save / load | `ledger save-ledger household`, `ledger load-ledger household` | Named ledgers live under `~/Documents/Ledgers/<name>.bfy` (configurable). |
 | Accounts & categories | `account add`, `category add`, `list accounts`, `list categories` | Add/edit commands launch wizards with validation and confirmation steps. |
 | Transactions | `transaction add`, `transaction edit`, `transaction show`, `transaction remove`, `transaction complete` | When an ID is omitted, you are shown a selection list. |
 | Recurring schedules | `transaction recurring list`, `transaction recurring edit`, `transaction recurring pause`, `transaction recurring resume`, `transaction recurring skip`, `transaction recurring sync` | `transaction recurring list overdue` filters to overdue items. |
@@ -55,7 +55,7 @@ experience accessible on any terminal.
 ## Backups & Persistence
 
 - **Ledger backups**: created automatically before every save at
-  `~/.budget_core/backups/<slug>/<slug>_YYYYMMDD_HHMM[_note].json`.
+  `~/Documents/Ledger/<slug>-backups/<slug>_YYYYMMDD_HHMM[_note].bbfy` (default root configurable).
 - **Config backups**: snapshot CLI preferences with `config backup [note]`
   and enumerate them via `config backups` (files live under
   `~/.budget_core/config/backups/`).

@@ -3,7 +3,7 @@ use budget_core::ledger::{
 };
 use bufy_core::storage::LedgerStorage;
 use bufy_domain::BudgetPeriod as CategoryBudgetPeriod;
-use bufy_storage_json::JsonLedgerStorage as JsonStorage;
+use bufy_storage_json::{JsonLedgerStorage as JsonStorage, StoragePaths};
 use chrono::NaiveDate;
 use std::fs;
 use std::path::Path;
@@ -33,8 +33,11 @@ fn tmp_path_for(path: &Path) -> std::path::PathBuf {
 }
 
 fn storage_with_retention(base: &Path, retention: usize) -> JsonStorage {
-    JsonStorage::with_retention(base.join("ledgers"), base.join("backups"), retention)
-        .expect("create json storage backend")
+    let paths = StoragePaths {
+        ledger_root: base.join("ledgers"),
+        backup_root: base.join("backups"),
+    };
+    JsonStorage::with_retention(paths, retention).expect("create json storage backend")
 }
 
 #[test]

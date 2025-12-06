@@ -20,7 +20,7 @@ use bufy_domain::{
     category::{Category, CategoryKind},
     transaction::Transaction,
 };
-use bufy_storage_json::JsonLedgerStorage as JsonStorage;
+use bufy_storage_json::{JsonLedgerStorage as JsonStorage, StoragePaths};
 use chrono::NaiveDate;
 use crossterm::event::KeyCode;
 use dialoguer::theme::ColorfulTheme;
@@ -29,9 +29,13 @@ use std::sync::{Mutex, MutexGuard};
 use tempfile::TempDir;
 
 fn build_context(temp: &TempDir) -> ShellContext {
-    let storage =
-        JsonStorage::with_retention(temp.path().join("ledgers"), temp.path().join("backups"), 3)
-            .unwrap();
+    let storage = {
+        let paths = StoragePaths {
+            ledger_root: temp.path().join("ledgers"),
+            backup_root: temp.path().join("backups"),
+        };
+        JsonStorage::with_retention(paths, 3).unwrap()
+    };
     let manager = Arc::new(RwLock::new(LedgerManager::new(Box::new(storage.clone()))));
     let config_manager = Arc::new(RwLock::new(
         ConfigManager::with_base_dir(temp.path().to_path_buf()).unwrap(),

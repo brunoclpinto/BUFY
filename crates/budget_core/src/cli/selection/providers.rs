@@ -246,7 +246,7 @@ fn simulation_item(sim: &Simulation) -> SelectionItem<String> {
 }
 
 fn backup_label(name: &str) -> String {
-    let trimmed = name.trim_end_matches(".json");
+    let trimmed = trim_backup_extension(name);
     let segments: Vec<&str> = trimmed.split('_').collect();
     if segments.len() < 3 {
         return name.to_string();
@@ -267,4 +267,14 @@ fn backup_label(name: &str) -> String {
         }
     }
     name.to_string()
+}
+
+fn trim_backup_extension(name: &str) -> &str {
+    if let Some(stripped) = name.strip_suffix(".bbfy") {
+        stripped
+    } else if let Some(stripped) = name.strip_suffix(".json") {
+        stripped
+    } else {
+        name
+    }
 }

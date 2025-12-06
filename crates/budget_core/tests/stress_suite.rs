@@ -4,7 +4,7 @@ use budget_core::ledger::{
     LedgerExt, TimeInterval, TimeUnit, Transaction,
 };
 use bufy_core::storage::LedgerStorage;
-use bufy_storage_json::JsonLedgerStorage as JsonStorage;
+use bufy_storage_json::{JsonLedgerStorage as JsonStorage, StoragePaths};
 use chrono::{Duration, NaiveDate};
 use tempfile::tempdir;
 
@@ -79,9 +79,13 @@ fn seed_ledger() -> Ledger {
 #[test]
 fn stress_repeated_save_load_and_forecast_cycles() {
     let tmp = tempdir().unwrap();
-    let store =
-        JsonStorage::with_retention(tmp.path().join("ledgers"), tmp.path().join("backups"), 3)
-            .unwrap();
+    let store = {
+        let paths = StoragePaths {
+            ledger_root: tmp.path().join("ledgers"),
+            backup_root: tmp.path().join("backups"),
+        };
+        JsonStorage::with_retention(paths, 3).unwrap()
+    };
     let mut ledger = seed_ledger();
 
     // Simulation with an additional expense to exercise overlay calculations.

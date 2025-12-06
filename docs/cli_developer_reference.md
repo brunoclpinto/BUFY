@@ -75,12 +75,13 @@ return `None`, ensuring callers decide whether to abort or continue.
 
 ## Persistence Specification
 
-- **Ledger files**: `~/.budget_core/<name>.json` using schema version
+- **Ledger files**: `~/Documents/Ledgers/<name>.bfy` by default (`Config::default_ledger_root` controls the base) using schema version
   `CURRENT_SCHEMA_VERSION` (`v4`). The ledger struct persists accounts,
   categories, transactions, simulations, config, and metadata.
-- **Ledger backups**: `~/.budget_core/backups/<slug>/<slug>_YYYYMMDD_HHMM[_note].json`
-  created before each save; retention is configurable when constructing the
-  storage backend (currently `JsonLedgerStorage`).
+- **Ledger backups**: `~/Documents/Ledger/<slug>-backups/<slug>_YYYYMMDD_HHMM[_note].bbfy`
+  (configurable via `Config::default_backup_root`) created before each save;
+  retention is configurable when constructing the storage backend (currently
+  `JsonLedgerStorage`).
 - **Config backups**: `~/.budget_core/config/backups/config_<timestamp>.json`
   with metadata `{ schema_version: CONFIG_BACKUP_SCHEMA_VERSION, created_at,
   note, config { ... } }`.

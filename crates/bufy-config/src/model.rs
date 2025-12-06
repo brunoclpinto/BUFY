@@ -1,5 +1,5 @@
 use serde::{de::Deserializer, Deserialize, Serialize};
-use std::fmt;
+use std::{fmt, path::PathBuf};
 
 /// Stores user-configurable CLI preferences and metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,6 +20,14 @@ pub struct Config {
     pub default_budget_period: String,
     #[serde(default)]
     pub default_currency_precision: Option<u8>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Optional custom root directory for ledgers. Defaults to `~/Documents/Ledgers`.
+    pub default_ledger_root: Option<PathBuf>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Optional custom root directory for backups. Defaults to `~/Documents/Ledger`.
+    pub default_backup_root: Option<PathBuf>,
 }
 
 impl Default for Config {
@@ -34,6 +42,8 @@ impl Default for Config {
             audio_feedback: false,
             default_budget_period: Self::default_budget_period_value(),
             default_currency_precision: None,
+            default_ledger_root: None,
+            default_backup_root: None,
         }
     }
 }
@@ -45,6 +55,30 @@ impl Config {
 
     pub fn default_ui_color_enabled() -> bool {
         true
+    }
+
+    pub fn resolve_default_ledger_root(&self) -> PathBuf {
+        if let Some(path) = &self.default_ledger_root {
+            return path.clone();
+        }
+
+        let base = dirs::document_dir()
+            .or_else(dirs::home_dir)
+            .unwrap_or_else(|| PathBuf::from("."));
+
+        base.join("Ledgers")
+    }
+
+    pub fn resolve_default_backup_root(&self) -> PathBuf {
+        if let Some(path) = &self.default_backup_root {
+            return path.clone();
+        }
+
+        let base = dirs::document_dir()
+            .or_else(dirs::home_dir)
+            .unwrap_or_else(|| PathBuf::from("."));
+
+        base.join("Ledger")
     }
 }
 

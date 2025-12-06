@@ -35,7 +35,7 @@ Version 2.0 completes the modular refactor, cleanly separating the CLI, service 
 - **Simulations** – name-addressable overlays stage hypothetical changes without touching the authoritative ledger.
 - **Recurrence & forecasting** – recurring transactions, automatic schedule regeneration, and future projections with variance-aware summaries.
 - **Localization & accessibility** – locale-sensitive formatting, plain mode, screen-reader/high-contrast switches, and optional audio feedback cues.
-- **Managed persistence** – deterministic JSON serialization under `~/.budget_core`, schema migrations, rotating backups, and recovery tooling.
+- **Managed persistence** – ledger files use `.bfy` under `~/Documents/Ledgers` (by default) with rolling `.bbfy` backups in `~/Documents/Ledger/<slug>-backups`; both roots remain configurable alongside schema migrations and recovery tooling.
 
 ### Documentation
 
@@ -86,8 +86,8 @@ transaction edit
 
 | Area | Commands | Notes |
 | --- | --- | --- |
-| Ledger lifecycle | `ledger new`, `ledger load [path]`, `ledger save [path]`, `ledger load-ledger <name>`, `ledger save-ledger [name]` | Named saves use the managed store; path-based commands operate on arbitrary JSON files. |
-| Persistence tooling | `backup-ledger [name]`, `list-backups [name]`, `restore-ledger <idx|pattern> [name]` | Snapshots live under `~/.budget_core/backups/<slug>/<slug>_YYYYMMDD_HHMM[_note].json`. |
+| Ledger lifecycle | `ledger new`, `ledger load [path]`, `ledger save [path]`, `ledger load-ledger <name>`, `ledger save-ledger [name]` | Named saves use `.bfy` files in `~/Documents/Ledgers` (configurable); path-based commands operate on arbitrary JSON files. |
+| Persistence tooling | `backup-ledger [name]`, `list-backups [name]`, `restore-ledger <idx|pattern> [name]` | Snapshots live under `~/Documents/Ledger/<slug>-backups/<slug>_YYYYMMDD_HHMM[_note].bbfy` (root configurable). |
 | Config management | `config show`, `config set <locale|currency|theme|last_opened_ledger> <value>`, `config audio-feedback <on|off>`, `config backup [note]`, `config backups`, `config restore [name]` | Preferences live in `~/.budget_core/config/config.json` with backups under `config/backups/`. |
 | Data entry | `transaction add/edit/remove/show/complete`, `account add/edit/list`, `category add/edit/list`, `list [accounts|categories|transactions]` | List commands now render consistent tables respecting locale/currency. |
 | Recurrence | `recurring list/edit/clear/pause/resume/skip/sync`, `complete <idx>` | Schedules track start/end dates, exceptions, and automatically materialize overdue instances. |

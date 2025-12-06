@@ -230,13 +230,16 @@ struct LoadEffects {
 mod tests {
     use super::*;
     use crate::ledger::BudgetPeriod;
-    use bufy_storage_json::JsonLedgerStorage as JsonStorage;
+    use bufy_storage_json::{JsonLedgerStorage as JsonStorage, StoragePaths};
     use std::fs;
     use tempfile::tempdir;
 
     fn temp_storage(temp: &tempfile::TempDir) -> JsonStorage {
-        JsonStorage::with_retention(temp.path().join("ledgers"), temp.path().join("backups"), 3)
-            .expect("create json ledger storage")
+        let paths = StoragePaths {
+            ledger_root: temp.path().join("ledgers"),
+            backup_root: temp.path().join("backups"),
+        };
+        JsonStorage::with_retention(paths, 3).expect("create json ledger storage")
     }
 
     #[test]

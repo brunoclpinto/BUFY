@@ -22,7 +22,6 @@ use crate::{
         LedgerService, RecurrenceService, ServiceError, SimulationService, SummaryService,
         TransactionService,
     },
-    core::utils::PathResolver,
     ledger::{
         account::AccountKind, category::CategoryKind, Account, BudgetPeriod, BudgetScope,
         BudgetStatus, BudgetSummary, Category, DateWindow, ForecastReport, Ledger, LedgerExt,
@@ -35,7 +34,9 @@ use bufy_core::{storage::LedgerStorage, Clock};
 use bufy_domain::currency::{
     format_currency_value, format_currency_value_with_precision, format_date,
 };
-use bufy_storage_json::{load_ledger_from_path, JsonLedgerStorage as JsonStorage, LedgerMetadata};
+use bufy_storage_json::{
+    load_ledger_from_path, JsonLedgerStorage as JsonStorage, LedgerMetadata, StoragePaths,
+};
 
 use bufy_domain::BudgetPeriod as CategoryBudgetPeriod;
 
@@ -158,17 +159,18 @@ impl ShellContext {
         let mut registry = CommandRegistry::new();
         commands::register_all(&mut registry);
 
-        let base_dir = PathResolver::base_dir();
-        let storage = JsonStorage::new(
-            PathResolver::ledger_dir_in(&base_dir),
-            PathResolver::backup_dir_in(&base_dir),
-        )
-        .map_err(BudgetError::from)
-        .map_err(CliError::from)?;
-        let manager = Arc::new(RwLock::new(LedgerManager::new(Box::new(storage.clone()))));
-        let clock: Arc<dyn Clock> = Arc::new(SystemClock::default());
         let config_manager_raw = config::default_manager().map_err(CliError::from)?;
         let config = config_manager_raw.load().map_err(CliError::from)?;
+
+        let storage_paths = StoragePaths {
+            ledger_root: config.resolve_default_ledger_root(),
+            backup_root: config.resolve_default_backup_root(),
+        };
+        let storage = JsonStorage::new(storage_paths)
+            .map_err(BudgetError::from)
+            .map_err(CliError::from)?;
+        let manager = Arc::new(RwLock::new(LedgerManager::new(Box::new(storage.clone()))));
+        let clock: Arc<dyn Clock> = Arc::new(SystemClock::default());
         cli_io::apply_config(&config);
         let config = Arc::new(RwLock::new(config));
         let formatters = CliFormatters::new(config.clone());
@@ -3473,7 +3475,7 @@ fn split_period_flag(args: &[&str]) -> (Vec<String>, Option<String>) {
 }
 
 fn format_backup_label(file_name: &str) -> String {
-    let trimmed = file_name.trim_end_matches(".json");
+    let trimmed = trim_backup_extension(file_name);
     let segments: Vec<&str> = trimmed.split('_').collect();
     if segments.len() < 3 {
         return file_name.to_string();
@@ -3500,6 +3502,16 @@ fn format_backup_label(file_name: &str) -> String {
         )
     } else {
         file_name.to_string()
+    }
+}
+
+fn trim_backup_extension(name: &str) -> &str {
+    if let Some(stripped) = name.strip_suffix(".bbfy") {
+        stripped
+    } else if let Some(stripped) = name.strip_suffix(".json") {
+        stripped
+    } else {
+        name
     }
 }
 
@@ -3963,12 +3975,13 @@ mod tests {
     #[test]
     fn ledger_backup_selection_paths() {
         let temp = tempdir().unwrap();
-        let storage = JsonStorage::with_retention(
-            temp.path().join("ledgers"),
-            temp.path().join("backups"),
-            5,
-        )
-        .unwrap();
+        let storage = {
+            let paths = StoragePaths {
+                ledger_root: temp.path().join("ledgers"),
+                backup_root: temp.path().join("backups"),
+            };
+            JsonStorage::with_retention(paths, 5).unwrap()
+        };
         let mut context = ShellContext::new(CliMode::Script).unwrap();
         context.storage = storage.clone();
         context.ledger_manager = Arc::new(RwLock::new(LedgerManager::new(Box::new(storage))));
